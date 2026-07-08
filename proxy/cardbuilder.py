@@ -33,7 +33,7 @@ class CardBuilder:
     resulting warnings."""
 
     def __init__(self, sanitizer: MacroSanitizer | None = None) -> None:
-        self._sanitizer = sanitizer or MacroSanitizer()
+        self._sanitizer = sanitizer or MacroSanitizer(user_names=settings.user_names)
 
     def build(
         self,
@@ -52,13 +52,16 @@ class CardBuilder:
                     warnings.append(w)
             return cleaned
 
-        description = sanitize(_pick(profile.description, capture.personality if capture else ""))
-        scenario = sanitize(_pick(profile.scenario, capture.scenario if capture else ""))
-        mes_example = sanitize(_pick(profile.mes_example, capture.mes_example if capture else ""))
+        def desub(text: str) -> str:
+            return self._sanitizer.reverse_names(text)
+
+        description = sanitize(_pick(profile.description, desub(capture.personality) if capture else ""))
+        scenario = sanitize(_pick(profile.scenario, desub(capture.scenario) if capture else ""))
+        mes_example = sanitize(_pick(profile.mes_example, desub(capture.mes_example) if capture else ""))
         creator_notes = sanitize(profile.creator_notes)
 
-        first_mes = sanitize(greetings[0]) if greetings else ""
-        alternate_greetings = [sanitize(g) for g in greetings[1:]]
+        first_mes = sanitize(desub(greetings[0])) if greetings else ""
+        alternate_greetings = [sanitize(desub(g)) for g in greetings[1:]]
 
         name = profile.name or (capture.name if capture else "") or "Unknown"
 

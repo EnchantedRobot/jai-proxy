@@ -105,7 +105,13 @@ class CaptureRecord(BaseModel):
     mes_example: str = ""
     raw_system_prompt: str = ""
     lore_entries: list[LoreEntry] = Field(default_factory=list)
+    greetings: list[str] = Field(default_factory=list)
     updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class CaptureGreetingsRequest(BaseModel):
+    name: str
+    greetings_html: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +137,7 @@ class BuildRequest(BaseModel):
     avatar_url: str | None = None
     avatar_b64: str | None = None
     lorebooks: list[BuildLorebook] = Field(default_factory=list)
+    output_name: str | None = None
 
 
 class BuildResponse(BaseModel):

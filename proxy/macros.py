@@ -48,10 +48,26 @@ def _unknown_macros(text: str) -> list[str]:
     return sorted(found)
 
 
+def reverse_persona_names(text: str, names: list[str]) -> str:
+    """Substitutes literal persona-name strings (e.g. "USER") back to
+    {{user}}. Hidden-card captures render the persona name as typed literal
+    text rather than a macro, so this repairs the definition/greeting text
+    to the macro form ST expects. Word-boundary, case-sensitive, longest
+    name first so a shorter name can't half-eat a longer one."""
+    if not text or not names:
+        return text
+    for name in sorted({n for n in names if n}, key=len, reverse=True):
+        text = re.sub(rf"\b{re.escape(name)}\b", "{{user}}", text)
+    return text
+
+
 class MacroSanitizer:
     """Repairs broken-bracket JanitorAI macros and folds JanitorAI's pronoun
     macros down to {{user}}/{{char}}, which are the only two SillyTavern
     resolves. Pure function -- no state, no I/O."""
+
+    def __init__(self, user_names: list[str] | None = None) -> None:
+        self._user_names = user_names or []
 
     def sanitize(self, text: str | None) -> tuple[str, list[str]]:
         if not text:
@@ -60,3 +76,6 @@ class MacroSanitizer:
         repaired = _repair_macros(text)
         folded = _fold_pronouns(repaired)
         return folded, _unknown_macros(folded)
+
+    def reverse_names(self, text: str) -> str:
+        return reverse_persona_names(text, self._user_names)

@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     captures_dir: Path = Path("./cards/.captures")
     request_timeout: float = 120.0
     allowed_origins: list[str] = ["*"]
+    user_names: list[str] = ["USER"]
 
 
 settings = Settings()

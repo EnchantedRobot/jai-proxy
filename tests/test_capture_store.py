@@ -134,3 +134,95 @@ def test_normalize_lowercases_and_trims():
     assert normalize("  Aubrey Evans  ") == "aubrey evans"
     assert normalize("") == ""
     assert normalize(None) == ""
+
+
+# ---------------------------------------------------------------------------
+# M7: record_greetings(), and its interplay with record(), and status().
+# ---------------------------------------------------------------------------
+
+
+def test_record_greetings_creates_a_record_when_none_exists(tmp_path):
+    store = CaptureStore(captures_dir=tmp_path)
+
+    count = store.record_greetings("Ari", ["<p>Hi there</p>", "<p>Second greeting</p>"])
+
+    assert count == 2
+    record = store.get("Ari")
+    assert record is not None
+    assert record.greetings == ["<p>Hi there</p>", "<p>Second greeting</p>"]
+
+
+def test_record_greetings_drops_blank_entries(tmp_path):
+    store = CaptureStore(captures_dir=tmp_path)
+
+    count = store.record_greetings("Ari", ["<p>Hi</p>", "", "   "])
+
+    assert count == 1
+    assert store.get("Ari").greetings == ["<p>Hi</p>"]
+
+
+def test_record_greetings_with_empty_name_is_a_noop(tmp_path):
+    store = CaptureStore(captures_dir=tmp_path)
+
+    count = store.record_greetings("", ["<p>Hi</p>"])
+
+    assert count == 0
+    assert store.get("") is None
+
+
+def test_record_after_record_greetings_preserves_greetings(tmp_path):
+    store = CaptureStore(captures_dir=tmp_path)
+    store.record_greetings("Ari", ["<p>Hi</p>"])
+
+    store.record(_load("system_prompt_hidden_ari.txt"))
+
+    record = store.get("Ari")
+    assert record.greetings == ["<p>Hi</p>"]
+    assert "Location: USA" in record.personality
+
+
+def test_record_greetings_after_record_preserves_definition(tmp_path):
+    store = CaptureStore(captures_dir=tmp_path)
+    store.record(_load("system_prompt_hidden_ari.txt"))
+
+    store.record_greetings("Ari", ["<p>Hi</p>"])
+
+    record = store.get("Ari")
+    assert record.greetings == ["<p>Hi</p>"]
+    assert "Location: USA" in record.personality
+
+
+def test_status_reflects_all_four_combinations(tmp_path):
+    store = CaptureStore(captures_dir=tmp_path)
+
+    assert store.status("Nobody") == {"system": False, "greetings": False}
+
+    store.record_greetings("Greet Only", ["<p>Hi</p>"])
+    assert store.status("Greet Only") == {"system": False, "greetings": True}
+
+    store.record(_load("system_prompt_hidden_ari.txt"))
+    assert store.status("Ari") == {"system": True, "greetings": False}
+
+    store.record_greetings("Ari", ["<p>Hi</p>"])
+    assert store.status("Ari") == {"system": True, "greetings": True}
+
+
+def test_clear_removes_all_capture_files_and_in_memory_records(tmp_path):
+    store = CaptureStore(captures_dir=tmp_path)
+    store.record(_load("system_prompt_hidden_ari.txt"))
+    store.record_greetings("Ari", ["<p>Hi</p>"])
+
+    assert any(tmp_path.iterdir())
+
+    removed = store.clear()
+
+    assert removed > 0
+    assert list(tmp_path.iterdir()) == []
+    assert store.get("Ari") is None
+    assert store.count == 0
+    assert store.status("Ari") == {"system": False, "greetings": False}
+
+
+def test_clear_on_empty_store_removes_nothing(tmp_path):
+    store = CaptureStore(captures_dir=tmp_path)
+    assert store.clear() == 0

@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 import uvicorn
@@ -13,7 +14,7 @@ from proxy.config import settings
 from proxy.html_parser import GreetingConverter, ProfileParser
 from proxy.lorebook import LorebookMapper
 from proxy.mlx_client import MLXClient, MLXError
-from proxy.models import BuildRequest, BuildResponse
+from proxy.models import BuildRequest, BuildResponse, CaptureGreetingsRequest
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("jai_proxy.server")
@@ -28,13 +29,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class HealthCheckFilter(logging.Filter):
+class QuietAccessFilter(logging.Filter):
+    """Drop uvicorn access-log lines for successful (2xx) requests.
+
+    Errors and redirects still print; only routine 200/204/etc noise is
+    suppressed. record.args is (client_addr, method, path, http_version,
+    status_code) per uvicorn's access logger call.
+    """
+
     def filter(self, record: logging.LogRecord) -> bool:
-        # Check if "/health" exists anywhere in the log message
-        return "/health" not in record.getMessage()
+        try:
+            status_code = record.args[-1]  # type: ignore[index]
+            return not (200 <= int(status_code) < 300)
+        except (TypeError, IndexError, ValueError):
+            return True
 
 
-logging.getLogger("uvicorn.access").addFilter(HealthCheckFilter())
+logging.getLogger("uvicorn.access").addFilter(QuietAccessFilter())
 
 capture_store = CaptureStore()
 mlx_client = MLXClient()
@@ -44,6 +55,10 @@ card_builder = CardBuilder()
 png_writer = PngWriter()
 avatar_fetcher = AvatarFetcher()
 lorebook_mapper = LorebookMapper()
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _first_system_message(messages: list[dict[str, Any]]) -> str:
@@ -88,15 +103,49 @@ async def chat_completions(request: Request) -> Any:
         return JSONResponse({"error": str(exc)}, status_code=502)
 
 
+@app.post("/capture-greetings")
+async def capture_greetings(req: CaptureGreetingsRequest) -> dict[str, Any]:
+    count = capture_store.record_greetings(req.name, req.greetings_html)
+    return {"ok": True, "name": req.name, "count": count}
+
+
+@app.get("/capture-status")
+async def capture_status(name: str) -> dict[str, Any]:
+    return {"name": name, **capture_store.status(name)}
+
+
+@app.post("/clear-captures")
+async def clear_captures() -> dict[str, Any]:
+    removed = capture_store.clear()
+    return {"ok": True, "removed": removed}
+
+
 @app.post("/build")
 async def build(req: BuildRequest) -> BuildResponse:
     profile = profile_parser.parse(req.profile_html or "")
     if not profile.name or profile.name == "Unknown":
         profile.name = req.character.name
 
-    greetings = [greeting_converter.convert(html) for html in req.greetings_html]
-
     capture = capture_store.get(normalize(req.character.name))
+
+    greetings_html = req.greetings_html or (capture.greetings if capture else [])
+    greetings = [greeting_converter.convert(html) for html in greetings_html]
+
+    hidden = "Character Definition is hidden" in (req.profile_html or "")
+    has_system = capture is not None and bool(
+        capture.personality or capture.scenario or capture.mes_example
+    )
+    has_greetings = bool(greetings_html)
+    if hidden and not (has_system and has_greetings):
+        missing = []
+        if not has_system:
+            missing.append("system definition (send a chat message)")
+        if not has_greetings:
+            missing.append("greetings (click Export greetings in the chat)")
+        return BuildResponse(
+            ok=False,
+            warnings=[f"hidden card not exportable — missing: {', '.join(missing)}"],
+        )
 
     raw_scripts = [lb.raw for lb in req.lorebooks]
     book, lore_warnings = lorebook_mapper.map(raw_scripts, character_name=req.character.name)
@@ -106,8 +155,24 @@ async def build(req: BuildRequest) -> BuildResponse:
     card, warnings = card_builder.build(profile, greetings, capture=capture, book=book)
     warnings = lore_warnings + warnings
 
+    # The name typed into the export prompt becomes the card's real name;
+    # the page-scraped name (often a scenario blurb, not an actual
+    # character name -- see "She needs your help") is preserved as
+    # metadata instead of being embedded as `data.name`.
+    page_name = profile.name
+    if req.output_name and req.output_name.strip():
+        card.name = req.output_name.strip()
+
+    card.character_version = req.character.url or "jai-proxy"
     card.extensions = {
-        "jai": {"source_url": req.character.url, "character_id": req.character.id}
+        "jai": {
+            "source_url": req.character.url,
+            "id": req.character.id,
+            "sourceKind": "janitor_core",
+            "creatorName": card.creator,
+            "pageName": page_name,
+            "linkedAt": _utc_now_iso(),
+        }
     }
 
     avatar_bytes = await avatar_fetcher.fetch(req.avatar_url, req.avatar_b64)

@@ -8,6 +8,7 @@ from PIL import Image
 
 from proxy.cardbuilder import CardBuilder, PngWriter, _safe_filename
 from proxy.html_parser import GreetingConverter, ProfileParser
+from proxy.macros import MacroSanitizer
 from proxy.models import CaptureRecord, CharacterBook, LoreEntry, ProfileFields
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -184,3 +185,61 @@ def test_png_writer_creates_output_dir_if_missing(tmp_path):
     path = PngWriter(output_dir=out_dir).write(card, _png_bytes())
     assert path.exists()
     assert path.parent == out_dir
+
+
+# ---------------------------------------------------------------------------
+# M7: persona-name reverse-substitution -- applied to capture-sourced
+# definition fields and to all greetings, NOT to profile-DOM fields.
+# ---------------------------------------------------------------------------
+
+
+def test_reverse_sub_applied_to_capture_definition_not_profile_dom():
+    profile = ProfileFields(name="Ari", description="", scenario="visible USER text", mes_example="")
+    capture = CaptureRecord(
+        name="Ari",
+        personality="Ari looked at USER",
+        scenario="hidden scenario about USER",
+        mes_example="USER: hello",
+    )
+    card, _ = CardBuilder(sanitizer=MacroSanitizer(user_names=["USER"])).build(
+        profile, greetings=[], capture=capture, book=None
+    )
+
+    assert card.description == "Ari looked at {{user}}"
+    assert card.mes_example == "{{user}}: hello"
+    # profile.scenario is non-empty (visible DOM value) so it wins outright
+    # and must NOT be reverse-substituted.
+    assert card.scenario == "visible USER text"
+
+
+def test_reverse_sub_applied_to_all_greetings():
+    profile = ProfileFields(name="Ari")
+    card, _ = CardBuilder(sanitizer=MacroSanitizer(user_names=["USER"])).build(
+        profile, greetings=["Hi USER", "Bye USER"], capture=None, book=None
+    )
+
+    assert card.first_mes == "Hi {{user}}"
+    assert card.alternate_greetings == ["Bye {{user}}"]
+
+
+def test_hidden_style_build_produces_greetings_and_no_literal_persona_name():
+    profile = ProfileFields(name="Ari", description="", scenario="", mes_example="")
+    capture = CaptureRecord(
+        name="Ari",
+        personality="Ari's persona mentions USER often",
+        scenario="USER and Ari's scenario",
+        mes_example="USER: hi\nAri: hello",
+    )
+    card, warnings = CardBuilder(sanitizer=MacroSanitizer(user_names=["USER"])).build(
+        profile,
+        greetings=["Hello USER, welcome", "Second greeting for USER"],
+        capture=capture,
+        book=None,
+    )
+
+    assert card.first_mes == "Hello {{user}}, welcome"
+    assert card.alternate_greetings == ["Second greeting for {{user}}"]
+    for field in (card.description, card.scenario, card.mes_example, card.first_mes, *card.alternate_greetings):
+        assert "USER" not in field
+    assert "no description/scenario/example dialogs found" not in warnings
+    assert "no first_mes / greetings found" not in warnings

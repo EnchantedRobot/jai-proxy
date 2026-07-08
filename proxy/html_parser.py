@@ -304,12 +304,31 @@ def _accordion_panel_by_title(soup: BeautifulSoup, title_prefix: str) -> Tag | N
     return soup.find(id=panel_id) if panel_id else None
 
 
+# JanitorAI's frontend appends a creator-credit footer -- e.g.
+# "created by dezea 2026© on janitorai.com" -- as the LAST <p> inside a
+# definition panel's markdown container. It's rendered page chrome, not part
+# of the character definition: it never appears in the model's token stream,
+# and only SOME creators' cards render it at all. Drop it before serializing
+# so it doesn't leak into scenario/description.
+_CREDIT_FOOTER_RE = re.compile(r"^created by .+ on janitorai\.com\.?$", re.IGNORECASE)
+
+
+def _strip_credit_footer(root: Tag) -> None:
+    paras = root.find_all("p")
+    if not paras:
+        return
+    text = re.sub(r"\s+", " ", paras[-1].get_text()).strip()
+    if _CREDIT_FOOTER_RE.match(text):
+        paras[-1].decompose()
+
+
 def definition_section(soup: BeautifulSoup, title_prefix: str) -> str:
     panel = _accordion_panel_by_title(soup, title_prefix)
     if not panel:
         return ""
     md = panel.select_one(".characterInfoMarkdownContainer")
     root = md or panel
+    _strip_credit_footer(root)
     return serialize_md(root)
 
 

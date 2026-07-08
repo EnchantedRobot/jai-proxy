@@ -14,7 +14,7 @@ uv run python -m proxy.server        # serves http://127.0.0.1:8000
 MLX must already be running separately with an OpenAI-compatible endpoint at
 `http://127.0.0.1:8011/v1` with `Llama-3.2-3B-Instruct-4bit` loaded.
 
-Install `userscript/janitorai-export.user.js` in Tampermonkey. In JanitorAI's
+Install `userscript/jai-proxy-bridge.user.js` in Tampermonkey. In JanitorAI's
 proxy/config settings, set the endpoint to
 `http://127.0.0.1:8000/v1/chat/completions` (any model name — the server
 overrides it). A pill in the bottom-right corner shows 🟢/🔴 for server

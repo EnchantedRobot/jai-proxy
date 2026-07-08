@@ -173,8 +173,14 @@ def test_build_exports_public_card_png(tmp_path):
     decoded = json.loads(base64.b64decode(reopened.text["ccv3"]))
     assert decoded["data"]["name"] == "Akane Kujo"
     assert decoded["data"]["creator"] == "dezea"
-    assert decoded["data"]["extensions"]["jai"]["character_id"] == "abc123"
-    assert decoded["data"]["extensions"]["jai"]["source_url"] == "https://janitorai.com/characters/abc123"
+    assert decoded["data"]["character_version"] == "https://janitorai.com/characters/abc123"
+    jai_ext = decoded["data"]["extensions"]["jai"]
+    assert jai_ext["id"] == "abc123"
+    assert jai_ext["source_url"] == "https://janitorai.com/characters/abc123"
+    assert jai_ext["sourceKind"] == "janitor_core"
+    assert jai_ext["creatorName"] == "dezea"
+    assert jai_ext["pageName"] == "Akane Kujo"
+    assert "linkedAt" in jai_ext
 
 
 def test_build_falls_back_to_character_name_without_profile_html(tmp_path):
@@ -194,6 +200,53 @@ def test_build_falls_back_to_character_name_without_profile_html(tmp_path):
     reopened = Image.open(path)
     decoded = json.loads(base64.b64decode(reopened.text["chara"]))
     assert decoded["data"]["name"] == "No Profile Card"
+    assert decoded["data"]["character_version"] == "jai-proxy"
+
+
+def test_build_uses_output_name_override_as_card_name_and_filename(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+
+    resp = client.post(
+        "/build",
+        json={
+            "character": {"name": "Original Card Name"},
+            "output_name": "My Custom Save Name",
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+
+    path = Path(body["path"])
+    assert path.name == "My_Custom_Save_Name.png"
+
+    reopened = Image.open(path)
+    decoded = json.loads(base64.b64decode(reopened.text["chara"]))
+    assert decoded["data"]["name"] == "My Custom Save Name"
+    # The page-scraped name is preserved as metadata, not embedded as data.name.
+    assert decoded["data"]["extensions"]["jai"]["pageName"] == "Original Card Name"
+
+
+def test_build_blank_output_name_falls_back_to_page_name(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+
+    resp = client.post(
+        "/build",
+        json={
+            "character": {"name": "Blank Override Card"},
+            "output_name": "   ",
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    path = Path(body["path"])
+    assert path.name == "Blank_Override_Card.png"
+
+    reopened = Image.open(path)
+    decoded = json.loads(base64.b64decode(reopened.text["chara"]))
+    assert decoded["data"]["name"] == "Blank Override Card"
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +287,7 @@ def test_build_merges_captured_hidden_definition_when_profile_is_empty(tmp_path)
     assert decoded["data"]["name"] == "Aubrey Evans"
     assert "Her nickname is Ace" in decoded["data"]["description"]
     assert decoded["data"]["scenario"].startswith("setting: {The Regional Championship")
-    assert decoded["data"]["mes_example"].startswith("USER: *As her coach")
+    assert decoded["data"]["mes_example"].startswith("{{user}}: *As her coach")
 
 
 def test_build_prefers_visible_dom_over_capture_when_both_present(tmp_path):
@@ -323,6 +376,150 @@ def test_build_surfaces_lorebook_mapping_warnings(tmp_path):
     body = resp.json()
     assert any("Broken" in w for w in body["warnings"])
     assert body["fields_present"]["character_book"] is False
+
+
+# ---------------------------------------------------------------------------
+# /capture-greetings + /capture-status + hidden-card export gate (M7)
+# ---------------------------------------------------------------------------
+
+
+def test_capture_greetings_then_status_reflects_it(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+
+    resp = client.post(
+        "/capture-greetings",
+        json={"name": "Ari", "greetings_html": ["<p>Hi there</p>", "<p>Second</p>"]},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "name": "Ari", "count": 2}
+
+    status = client.get("/capture-status", params={"name": "Ari"}).json()
+    assert status == {"name": "Ari", "system": False, "greetings": True}
+
+
+def test_capture_status_unknown_name_is_all_false(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+
+    status = client.get("/capture-status", params={"name": "Nobody"}).json()
+    assert status == {"name": "Nobody", "system": False, "greetings": False}
+
+
+def test_clear_captures_wipes_state_but_leaves_pngs(tmp_path):
+    captures_dir = tmp_path / "captures"
+    output_dir = tmp_path / "cards"
+    server_module.capture_store = server_module.CaptureStore(captures_dir=captures_dir)
+    server_module.png_writer = server_module.PngWriter(output_dir=output_dir)
+    server_module.mlx_client = FakeMLXClient()
+    server_module.avatar_fetcher = FakeAvatarFetcher()
+    client = TestClient(server_module.app)
+
+    client.post(
+        "/capture-greetings",
+        json={"name": "Ari", "greetings_html": ["<p>Hi there</p>"]},
+    )
+    resp = client.post(
+        "/build",
+        json={"character": {"name": "Ari"}, "avatar_url": "http://example.com/a.png"},
+    )
+    assert resp.json()["ok"] is True
+    assert any(output_dir.glob("*.png"))
+
+    clear_resp = client.post("/clear-captures")
+    assert clear_resp.status_code == 200
+    body = clear_resp.json()
+    assert body["ok"] is True
+    assert body["removed"] > 0
+
+    status = client.get("/capture-status", params={"name": "Ari"}).json()
+    assert status == {"name": "Ari", "system": False, "greetings": False}
+    assert any(output_dir.glob("*.png"))
+
+
+_HIDDEN_PROFILE_HTML = "<div>Character Definition is hidden, Total 4486 tokens</div>"
+
+
+def test_build_on_hidden_profile_with_no_capture_fails_with_warning(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+
+    resp = client.post(
+        "/build",
+        json={"character": {"name": "Ari"}, "profile_html": _HIDDEN_PROFILE_HTML},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert "system definition" in body["warnings"][0]
+    assert "greetings" in body["warnings"][0]
+
+
+def test_build_on_hidden_profile_with_partial_capture_fails_with_warning(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    raw_prompt = (FIXTURES / "system_prompt_hidden_ari.txt").read_text(encoding="utf-8")
+
+    client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "x",
+            "stream": False,
+            "messages": [{"role": "system", "content": raw_prompt}, {"role": "user", "content": "hi"}],
+        },
+    )
+
+    resp = client.post(
+        "/build",
+        json={"character": {"name": "Ari"}, "profile_html": _HIDDEN_PROFILE_HTML},
+    )
+
+    body = resp.json()
+    assert body["ok"] is False
+    assert "greetings" in body["warnings"][0]
+    assert "system definition" not in body["warnings"][0]
+
+
+def test_build_on_hidden_profile_with_both_captures_succeeds(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    raw_prompt = (FIXTURES / "system_prompt_hidden_ari.txt").read_text(encoding="utf-8")
+
+    client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "x",
+            "stream": False,
+            "messages": [{"role": "system", "content": raw_prompt}, {"role": "user", "content": "hi"}],
+        },
+    )
+    client.post(
+        "/capture-greetings",
+        json={"name": "Ari", "greetings_html": ["<p>Hello there, USER</p>"]},
+    )
+
+    resp = client.post(
+        "/build",
+        json={"character": {"name": "Ari"}, "profile_html": _HIDDEN_PROFILE_HTML},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    path = Path(body["path"])
+    assert path.exists()
+
+    decoded = json.loads(base64.b64decode(Image.open(path).text["ccv3"]))
+    assert decoded["data"]["first_mes"] == "Hello there, {{user}}"
+
+
+def test_build_on_open_card_profile_still_exports_with_no_capture(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    profile_html = (FIXTURES / "profile_akane_kujo.html").read_text(encoding="utf-8")
+
+    resp = client.post(
+        "/build",
+        json={"character": {"name": "Akane Kujo"}, "profile_html": profile_html},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
 
 
 def test_build_maps_greetings_html_to_first_mes(tmp_path):

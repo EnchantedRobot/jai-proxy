@@ -73,6 +73,52 @@ def test_akane_kujo_scenario_and_empty_example_dialogs():
     assert fields.mes_example == ""
 
 
+def test_janitorai_credit_footer_stripped_from_definition_fields():
+    # JanitorAI renders a "created by <creator> <year>© on janitorai.com"
+    # footer as the last paragraph of the scenario AND personality panels.
+    # It's page chrome (absent from the token stream, creator-dependent) and
+    # must not leak into scenario/description.
+    fields = ProfileParser().parse(_load("profile_akane_kujo.html"))
+
+    assert "on janitorai.com" not in fields.scenario
+    assert "created by dezea" not in fields.scenario
+    # Footer used to trail the pronoun-awareness line; that line is now last.
+    assert fields.scenario.rstrip().endswith("they/them/theirs.")
+
+    assert "on janitorai.com" not in fields.description
+    assert "created by dezea" not in fields.description
+
+
+def _synthetic_panel(inner_html: str) -> BeautifulSoup:
+    return BeautifulSoup(
+        '<button aria-controls="panel-info-0">Scenario (5 tokens)</button>'
+        '<div id="panel-info-0">'
+        f'<div class="characterInfoMarkdownContainer">{inner_html}</div>'
+        "</div>",
+        "html.parser",
+    )
+
+
+def test_credit_footer_stripped_but_real_body_kept():
+    soup = _synthetic_panel(
+        "<p>Real scenario body.</p>"
+        "<p>created by SomeOne 2026© on janitorai.com</p>"
+    )
+    md = definition_section(soup, "scenario")
+    assert "Real scenario body." in md
+    assert "on janitorai.com" not in md
+
+
+def test_credit_footer_strip_leaves_ordinary_final_paragraph():
+    # Only the exact footer shape is stripped; a creator's real closing line
+    # (even one that merely mentions "created by ...") must survive.
+    soup = _synthetic_panel(
+        "<p>She was a rival created by the same scheduling.</p>"
+    )
+    md = definition_section(soup, "scenario")
+    assert "rival created by the same scheduling" in md
+
+
 def test_akane_kujo_creator_notes_has_no_leaked_page_chrome():
     fields = ProfileParser().parse(_load("profile_akane_kujo.html"))
 

@@ -1,4 +1,4 @@
-from proxy.macros import MacroSanitizer
+from proxy.macros import MacroSanitizer, reverse_persona_names
 
 
 def test_empty_and_none_are_untouched():
@@ -71,3 +71,49 @@ def test_unknown_macros_deduped_and_sorted():
     s = MacroSanitizer()
     _, warnings = s.sanitize("{{zeta}} {{alpha}} {{zeta}}")
     assert warnings == ["alpha", "zeta"]
+
+
+# ---------------------------------------------------------------------------
+# reverse_persona_names -- M7: reverse-substitute a captured persona name
+# (e.g. "USER") back to {{user}}.
+# ---------------------------------------------------------------------------
+
+
+def test_reverse_persona_names_replaces_bare_name():
+    assert reverse_persona_names("Ari looked at USER.", ["USER"]) == "Ari looked at {{user}}."
+
+
+def test_reverse_persona_names_handles_possessive():
+    assert reverse_persona_names("USER's trust matters.", ["USER"]) == "{{user}}'s trust matters."
+
+
+def test_reverse_persona_names_is_word_boundary_safe():
+    text = "USERNAME and SUPERUSER should stay untouched, but USER should not."
+    result = reverse_persona_names(text, ["USER"])
+    assert "USERNAME" in result
+    assert "SUPERUSER" in result
+    assert result.endswith("but {{user}} should not.")
+
+
+def test_reverse_persona_names_leaves_char_macro_untouched():
+    assert reverse_persona_names("{{char}} greeted USER", ["USER"]) == "{{char}} greeted {{user}}"
+
+
+def test_reverse_persona_names_longest_name_first():
+    text = "Ari and Ari Vale both appear"
+    result = reverse_persona_names(text, ["Ari", "Ari Vale"])
+    assert result == "{{user}} and {{user}} both appear"
+
+
+def test_reverse_persona_names_empty_names_is_noop():
+    text = "USER stays USER"
+    assert reverse_persona_names(text, []) == text
+
+
+def test_reverse_persona_names_empty_text_is_noop():
+    assert reverse_persona_names("", ["USER"]) == ""
+
+
+def test_macro_sanitizer_reverse_names_delegates():
+    s = MacroSanitizer(user_names=["USER"])
+    assert s.reverse_names("Hello USER") == "Hello {{user}}"

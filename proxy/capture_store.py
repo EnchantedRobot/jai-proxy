@@ -69,6 +69,9 @@ class CaptureStore:
             return
 
         existing = self._records.get(key)
+        # greetings deliberately stays whatever the previous record had --
+        # the explicit /capture-greetings flow may have already populated
+        # them, and a later system-prompt capture must not wipe that out.
         # lore_entries deliberately stays whatever the previous record had
         # (empty, today) rather than trying to mine lore out of raw prompt
         # text. Real evidence (system_prompt_open_akane_kujo.txt lines
@@ -87,12 +90,37 @@ class CaptureStore:
             mes_example=parsed.mes_example,
             raw_system_prompt=system_prompt,
             lore_entries=existing.lore_entries if existing else [],
+            greetings=existing.greetings if existing else [],
         )
         self._records[key] = record
         self._persist(key, record)
 
     def get(self, name: str) -> CaptureRecord | None:
         return self._records.get(normalize(name))
+
+    def record_greetings(self, name: str, greetings_html: list[str]) -> int:
+        key = normalize(name)
+        if not key:
+            logger.warning("record_greetings: empty name, dropping %d greeting(s)", len(greetings_html))
+            return 0
+
+        cleaned = [h for h in greetings_html if h and h.strip()]
+        existing = self._records.get(key)
+        if existing:
+            record = existing.model_copy(
+                update={"greetings": cleaned, "updated_at": datetime.now(timezone.utc)}
+            )
+        else:
+            record = CaptureRecord(name=name, greetings=cleaned)
+        self._records[key] = record
+        self._persist(key, record)
+        return len(cleaned)
+
+    def status(self, name: str) -> dict[str, bool]:
+        rec = self.get(name)
+        system = rec is not None and bool(rec.personality or rec.scenario or rec.mes_example)
+        greetings = rec is not None and bool(rec.greetings)
+        return {"system": system, "greetings": greetings}
 
     def _write_raw(self, n: int, system_prompt: str) -> Path:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -112,6 +140,20 @@ class CaptureStore:
                 logger.exception("failed to load capture record from %s", path)
                 continue
             self._records[normalize(record.name)] = record
+
+    def clear(self) -> int:
+        """Wipe all captured state: in-memory records/raw prompts and every
+        file under captures_dir (.txt raw prompts + .json records). PNGs
+        live under output_dir, a sibling directory, so they're untouched.
+        """
+        removed = 0
+        for path in self._captures_dir.glob("*"):
+            if path.is_file():
+                path.unlink()
+                removed += 1
+        self._records.clear()
+        self._raw_prompts.clear()
+        return removed
 
     @property
     def count(self) -> int:
