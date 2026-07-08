@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         jai-proxy bridge
 // @namespace    https://github.com/EnchantedRobot/jai-proxy
-// @version      0.3.0
+// @version      0.3.1
 // @description  Thin bridge: relays JanitorAI chat completions through a local jai-proxy server (which forwards to local MLX), shows a connection pill, and exports the current profile as a V3 card PNG. Card assembly lives server-side.
 // @match        https://janitorai.com/*
 // @match        https://www.janitorai.com/*
@@ -506,27 +506,42 @@
       const original = el.textContent;
       el.textContent = "⏳ exporting…";
       el.disabled = true;
+      let holdMs = 2500;
       try {
         const payload = await Collector.collect();
         const result = await ServerClient.build(payload);
         if (result.ok) {
-          el.textContent = "✅ saved";
-          log("exported card ->", result.path, result.warnings);
-          if (result.warnings && result.warnings.length) {
-            warn("export warnings:", result.warnings);
+          const warnings = result.warnings || [];
+          log("exported card ->", result.path, warnings);
+          if (warnings.length) {
+            const n = warnings.length;
+            const first =
+              warnings[0].length > 60 ? warnings[0].slice(0, 57) + "…" : warnings[0];
+            el.textContent = `⚠️ saved — ${n} warning${n === 1 ? "" : "s"}: ${first}`;
+            el.title = warnings.join("\n");
+            holdMs = 8000;
+            warn("export warnings:", warnings);
+          } else {
+            el.textContent = "✅ saved";
+            el.title = result.path || "";
           }
         } else {
           el.textContent = "⚠️ failed";
+          el.title = JSON.stringify(result);
+          holdMs = 8000;
           warn("export failed", result);
         }
       } catch (err) {
         el.textContent = "⚠️ failed";
+        el.title = String(err);
+        holdMs = 8000;
         warn("export failed", err);
       } finally {
         setTimeout(() => {
           el.textContent = original;
+          el.title = "";
           el.disabled = false;
-        }, 2500);
+        }, holdMs);
       }
     },
 
