@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         jai-proxy bridge
 // @namespace    https://github.com/EnchantedRobot/jai-proxy
-// @version      0.2.0
+// @version      0.3.0
 // @description  Thin bridge: relays JanitorAI chat completions through a local jai-proxy server (which forwards to local MLX), shows a connection pill, and exports the current profile as a V3 card PNG. Card assembly lives server-side.
 // @match        https://janitorai.com/*
 // @match        https://www.janitorai.com/*
@@ -205,13 +205,226 @@
   };
 
   // ---------------------------------------------------------------------------
+  // Greeting carousel walker — ported from janitorai-export.user.js's
+  // extractInitialMessages (~L470). Opens the "Initial Messages" (or, for a
+  // single greeting, "First Message") accordion, reads the "N / M" counter,
+  // and walks Next capturing each message body's RAW HTML. Unlike the
+  // reference script (which converts to markdown in-page via
+  // richToGreeting), this sends raw HTML and lets the server's
+  // GreetingConverter.convert() do the HTML→markdown conversion — same
+  // division of labor as everything else in this thin bridge.
+  // ---------------------------------------------------------------------------
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  async function waitFor(predicate, timeoutMs = 4000, stepMs = 100) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const v = predicate();
+      if (v) return v;
+      if (Date.now() > deadline) return v;
+      await sleep(stepMs);
+    }
+  }
+
+  function initialMessagesBtn() {
+    // Multiple greetings → "Initial Messages" (carousel + counter). Exactly
+    // one greeting → "First Message" (singular, no carousel).
+    return [
+      ...document.querySelectorAll("button[aria-controls^='panel-info-']"),
+    ].find((b) => {
+      const t = b.textContent.trim().toLowerCase();
+      return t.startsWith("initial messages") || t.startsWith("first message");
+    });
+  }
+
+  function currentMessageBodyEl(panel) {
+    return panel.querySelector(".characterInfoMarkdownContainer");
+  }
+
+  function parseCounter(panel) {
+    const m = panel.textContent.match(/(\d+)\s*\/\s*(\d+)/);
+    return m ? { cur: +m[1], total: +m[2] } : null;
+  }
+
+  function textLength(html) {
+    const d = document.createElement("div");
+    d.innerHTML = html;
+    return (d.textContent || "").trim().length;
+  }
+
+  async function walkGreetings() {
+    const btn = initialMessagesBtn();
+    if (!btn) {
+      warn('no "Initial Messages"/"First Message" accordion — greetings_html will be empty');
+      return [];
+    }
+    if (btn.getAttribute("aria-expanded") === "false") btn.click();
+    const panel = document.getElementById(btn.getAttribute("aria-controls"));
+    if (!panel) {
+      warn("Initial Messages panel not found");
+      return [];
+    }
+    await waitFor(() => currentMessageBodyEl(panel));
+
+    const counter = parseCounter(panel);
+    const total = counter ? counter.total : 1;
+    log(`initial messages: ${total} total`);
+
+    const bodies = [];
+    for (let i = 0; i < total && i < 40; i++) {
+      await waitFor(() => currentMessageBodyEl(panel));
+      const el = currentMessageBodyEl(panel);
+      const html = el ? el.innerHTML : "";
+      bodies.push(html);
+      if (i >= total - 1) break;
+
+      const next = [...panel.querySelectorAll("button")].find(
+        (b) =>
+          /next message/i.test(b.getAttribute("aria-label") || "") && !b.disabled
+      );
+      if (!next) {
+        warn("no enabled Next-message button — stopping early");
+        break;
+      }
+      next.click();
+      await waitFor(() => {
+        const cur = currentMessageBodyEl(panel);
+        return cur ? cur.innerHTML !== html : false;
+      });
+    }
+
+    // Drop blank / "create your own" stub greetings (JanitorAI's last slot
+    // is often an empty "make your own scenario" card). Judge by rendered
+    // TEXT length, not raw HTML length — mirrors the reference script's
+    // MIN=10 threshold, applied post-conversion there but pre-conversion
+    // here since the server does the HTML→markdown step.
+    const MIN = 10;
+    return bodies.filter((html) => textLength(html) >= MIN);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lorebook mining — ported from janitorai-export.user.js's jaiPageScrape
+  // (~L557) + fetchScriptsViaPage (~L615). JanitorAI calls attached
+  // lorebooks "scripts"; a character page renders ScriptCards for each. Two
+  // obstacles, both solved by running in PAGE context (see comments there):
+  //   1. ScriptCards are React-routed <div>s with no <a href> carrying the
+  //      id — it only lives in the card's React fiber props.
+  //   2. Reading page-side fiber objects from the userscript sandbox trips
+  //      Firefox Xray, so a <script> tag is injected to run in page
+  //      context, and results cross back via a one-shot CustomEvent
+  //      (primitives only — hence JSON-stringifying the result).
+  // Confirmed live (console-export-2026-6-22_22-15-50.log): the real
+  // endpoint is /hampter/script/<id> (singular) — /hampter/scripts/<id> and
+  // /hampter/lorebooks/<id> both 404.
+  // ---------------------------------------------------------------------------
+
+  // This function's source is stringified and injected into the page — it
+  // must be fully self-contained (no closure over userscript sandbox scope).
+  function jaiLorebookPageScrape(eventName) {
+    var UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+    var ids = new Set();
+    document.querySelectorAll('a[href*="/scripts/"]').forEach(function (a) {
+      var m = (a.getAttribute("href") || "").match(UUID);
+      if (m) ids.add(m[0]);
+    });
+    function fiberKey(el) {
+      return Object.keys(el).find(function (k) {
+        return k.indexOf("__reactFiber$") === 0 || k.indexOf("__reactInternalInstance$") === 0;
+      });
+    }
+    var cards = document.querySelectorAll(
+      '[class*="scriptsSection"] *, [class*="ScriptCard"], [class*="scriptCard"]'
+    );
+    cards.forEach(function (el) {
+      var k = fiberKey(el);
+      if (!k) return;
+      var f = el[k];
+      var depth = 0;
+      while (f && depth < 40) {
+        var p = f.memoizedProps || f.pendingProps;
+        if (p) {
+          for (var key in p) {
+            var v = p[key];
+            if (typeof v === "string") {
+              var mm = v.match(UUID);
+              if (mm) ids.add(mm[0]);
+            } else if (v && typeof v === "object" && typeof v.id === "string" && UUID.test(v.id)) {
+              ids.add(v.id);
+            }
+          }
+        }
+        f = f.return;
+        depth++;
+      }
+    });
+    var arr = Array.from(ids);
+    Promise.all(
+      arr.map(function (id) {
+        return fetch("/hampter/script/" + id, { credentials: "include" })
+          .then(function (r) {
+            return r.ok ? r.json() : null;
+          })
+          .then(function (j) {
+            return j ? { id: id, raw: j } : null;
+          })
+          .catch(function () {
+            return null;
+          });
+      })
+    ).then(function (list) {
+      var ok = list.filter(Boolean);
+      window.dispatchEvent(new CustomEvent(eventName, { detail: JSON.stringify(ok) }));
+    });
+  }
+
+  // Inject jaiLorebookPageScrape into page context and await its
+  // JSON-string result: [{id, raw}, ...] — matches ServerClient.build()'s
+  // `lorebooks` contract directly, no reshaping needed.
+  function fetchLorebooksViaPage(timeoutMs = 15000) {
+    return new Promise((resolve) => {
+      const evt = "jai-lb-" + Math.random().toString(36).slice(2);
+      let done = false;
+      const finish = (val) => {
+        if (done) return;
+        done = true;
+        resolve(val);
+      };
+      window.addEventListener(
+        evt,
+        (e) => {
+          try {
+            finish(JSON.parse(e.detail));
+          } catch (err) {
+            warn("could not parse lorebook scrape result:", err);
+            finish([]);
+          }
+        },
+        { once: true }
+      );
+      const s = document.createElement("script");
+      s.textContent = `(${jaiLorebookPageScrape.toString()})(${JSON.stringify(evt)});`;
+      (document.head || document.documentElement).appendChild(s);
+      s.remove();
+      setTimeout(() => finish([]), timeoutMs);
+    });
+  }
+
+  async function mineLorebooks() {
+    try {
+      const lorebooks = await fetchLorebooksViaPage();
+      log("lorebooks found on page:", lorebooks.length);
+      return lorebooks;
+    } catch (err) {
+      warn("lorebook scrape failed:", err);
+      return [];
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Collector — gathers the raw material for POST /build. Everything else
   // (HTML→md, macro repair, V3 JSON, PNG chunks) happens server-side; this
-  // just hands over outerHTML + the avatar URL. walkGreetings() /
-  // mineLorebookIds() / fetchScripts() (carousel walking, fiber mining,
-  // cookie'd /hampter fetches) are a later milestone — greetings_html is
-  // empty for now, so exported cards get description/scenario/examples/
-  // avatar but no first_mes yet.
+  // just hands over outerHTML, walked greeting HTML, mined lorebook JSON,
+  // and the avatar URL.
   // ---------------------------------------------------------------------------
   const Collector = {
     characterName() {
@@ -240,7 +453,11 @@
       return null;
     },
 
-    collect() {
+    async collect() {
+      const [greetings_html, lorebooks] = await Promise.all([
+        walkGreetings(),
+        mineLorebooks(),
+      ]);
       return {
         character: {
           name: this.characterName(),
@@ -248,8 +465,9 @@
           url: window.location.href,
         },
         profile_html: this.profileHtml(),
-        greetings_html: [],
+        greetings_html,
         avatar_url: this.avatarUrl(),
+        lorebooks,
       };
     },
   };
@@ -289,7 +507,7 @@
       el.textContent = "⏳ exporting…";
       el.disabled = true;
       try {
-        const payload = Collector.collect();
+        const payload = await Collector.collect();
         const result = await ServerClient.build(payload);
         if (result.ok) {
           el.textContent = "✅ saved";

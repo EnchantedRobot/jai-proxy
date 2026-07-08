@@ -11,6 +11,7 @@ from proxy.capture_store import CaptureStore, normalize
 from proxy.cardbuilder import CardBuilder, PngWriter
 from proxy.config import settings
 from proxy.html_parser import GreetingConverter, ProfileParser
+from proxy.lorebook import LorebookMapper
 from proxy.mlx_client import MLXClient, MLXError
 from proxy.models import BuildRequest, BuildResponse
 
@@ -27,6 +28,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+class HealthCheckFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Check if "/health" exists anywhere in the log message
+        return "/health" not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(HealthCheckFilter())
+
 capture_store = CaptureStore()
 mlx_client = MLXClient()
 profile_parser = ProfileParser()
@@ -34,6 +43,7 @@ greeting_converter = GreetingConverter()
 card_builder = CardBuilder()
 png_writer = PngWriter()
 avatar_fetcher = AvatarFetcher()
+lorebook_mapper = LorebookMapper()
 
 
 def _first_system_message(messages: list[dict[str, Any]]) -> str:
@@ -42,6 +52,7 @@ def _first_system_message(messages: list[dict[str, Any]]) -> str:
             content = message.get("content", "")
             return content if isinstance(content, str) else str(content)
     return ""
+    
 
 
 @app.get("/health")
@@ -86,7 +97,14 @@ async def build(req: BuildRequest) -> BuildResponse:
     greetings = [greeting_converter.convert(html) for html in req.greetings_html]
 
     capture = capture_store.get(normalize(req.character.name))
-    card, warnings = card_builder.build(profile, greetings, capture=capture, book=None)
+
+    raw_scripts = [lb.raw for lb in req.lorebooks]
+    book, lore_warnings = lorebook_mapper.map(raw_scripts, character_name=req.character.name)
+    if capture is not None:
+        book = lorebook_mapper.merge(book, capture.lore_entries)
+
+    card, warnings = card_builder.build(profile, greetings, capture=capture, book=book)
+    warnings = lore_warnings + warnings
 
     card.extensions = {
         "jai": {"source_url": req.character.url, "character_id": req.character.id}

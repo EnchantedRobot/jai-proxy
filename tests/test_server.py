@@ -267,6 +267,64 @@ def test_build_prefers_visible_dom_over_capture_when_both_present(tmp_path):
     assert "Full Name: Lyra Amarok" not in decoded["data"]["description"]
 
 
+# ---------------------------------------------------------------------------
+# /build -- lorebook mapping + hidden-def lore merge wiring (M5)
+# ---------------------------------------------------------------------------
+
+
+def test_build_populates_character_book_from_lorebooks_payload(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    raw_script = json.loads((FIXTURES / "hampter_script_kamii_university.json").read_text(encoding="utf-8"))
+
+    resp = client.post(
+        "/build",
+        json={
+            "character": {"name": "Akane Kujo"},
+            "lorebooks": [{"id": raw_script["id"], "raw": raw_script}],
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["fields_present"]["character_book"] is True
+
+    decoded = json.loads(base64.b64decode(Image.open(Path(body["path"])).text["ccv3"]))
+    book = decoded["data"]["character_book"]
+    assert book["name"] == "Kamii University: A Living Campus"
+    assert len(book["entries"]) == 20
+    assert book["entries"][0]["content"].startswith("Kamii University: The Living Campus")
+
+
+def test_build_with_no_lorebooks_has_no_character_book(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+
+    resp = client.post("/build", json={"character": {"name": "No Lore"}})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["fields_present"]["character_book"] is False
+
+
+def test_build_surfaces_lorebook_mapping_warnings(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+
+    resp = client.post(
+        "/build",
+        json={
+            "character": {"name": "Broken Script Owner"},
+            "lorebooks": [
+                {"id": "broken", "raw": {"type": "lorebook", "id": "broken", "title": "Broken", "script": "not json"}}
+            ],
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert any("Broken" in w for w in body["warnings"])
+    assert body["fields_present"]["character_book"] is False
+
+
 def test_build_maps_greetings_html_to_first_mes(tmp_path):
     client = make_client(FakeMLXClient(), tmp_path)
 

@@ -32,13 +32,35 @@ class ChatCompletionRequest(BaseModel):
 
 
 class LoreEntry(BaseModel):
+    """A single V3 character_book entry. Field set mirrors what JanitorAI's
+    janitorai-export userscript's mapLoreEntry produces -- JanitorAI-only
+    fields (priority, activationMode, keyMatchPriority, category, tags, the
+    original JAI entry id) are stashed under extensions.jai so nothing is
+    lost, everything else sits at V3's expected top level."""
+
+    id: int = 0
     keys: list[str] = Field(default_factory=list)
+    secondary_keys: list[str] = Field(default_factory=list)
+    comment: str = ""
     content: str = ""
+    constant: bool = False
+    selective: bool = False
+    insertion_order: int = 100
+    enabled: bool = True
+    position: str = "before_char"
+    use_regex: bool = False
+    name: str = ""
+    case_sensitive: bool = False
     extensions: dict[str, Any] = Field(default_factory=dict)
 
 
 class CharacterBook(BaseModel):
     name: str = ""
+    description: str = ""
+    scan_depth: int | None = None
+    token_budget: int | None = None
+    recursive_scanning: bool = False
+    extensions: dict[str, Any] = Field(default_factory=dict)
     entries: list[LoreEntry] = Field(default_factory=list)
 
 
