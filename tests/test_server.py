@@ -1,7 +1,15 @@
+import base64
+import io
+import json
+from pathlib import Path
+
 from fastapi.testclient import TestClient
+from PIL import Image
 
 import proxy.server as server_module
 from proxy.config import settings
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class FakeMLXClient:
@@ -27,9 +35,21 @@ class FakeMLXClient:
         yield b"data: [DONE]\n\n"
 
 
+class FakeAvatarFetcher:
+    def __init__(self, png_bytes: bytes | None = None):
+        buf = io.BytesIO()
+        Image.new("RGBA", (8, 8), (9, 9, 9, 255)).save(buf, "PNG")
+        self._bytes = png_bytes or buf.getvalue()
+
+    async def fetch(self, url, avatar_b64=None):
+        return self._bytes
+
+
 def make_client(fake: FakeMLXClient, tmp_path=None) -> TestClient:
     server_module.mlx_client = fake
     server_module.capture_store = server_module.CaptureStore(captures_dir=tmp_path)
+    server_module.png_writer = server_module.PngWriter(output_dir=tmp_path)
+    server_module.avatar_fetcher = FakeAvatarFetcher()
     return TestClient(server_module.app)
 
 
@@ -114,3 +134,81 @@ def test_chat_completions_capture_error_does_not_block_forward(monkeypatch, tmp_
 
     assert resp.status_code == 200
     assert resp.json()["choices"][0]["message"]["content"] == "fake reply"
+
+
+# ---------------------------------------------------------------------------
+# /build -- public card export end-to-end (M3)
+# ---------------------------------------------------------------------------
+
+
+def test_build_exports_public_card_png(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    profile_html = (FIXTURES / "profile_akane_kujo.html").read_text(encoding="utf-8")
+
+    resp = client.post(
+        "/build",
+        json={
+            "character": {
+                "name": "Akane Kujo",
+                "id": "abc123",
+                "url": "https://janitorai.com/characters/abc123",
+            },
+            "profile_html": profile_html,
+            "greetings_html": [],
+            "avatar_url": "https://ella.janitorai.com/bot-avatars/example.webp",
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["fields_present"]["description"] is True
+    assert body["fields_present"]["scenario"] is True
+
+    path = Path(body["path"])
+    assert path.exists()
+    assert path.parent == tmp_path
+
+    reopened = Image.open(path)
+    decoded = json.loads(base64.b64decode(reopened.text["ccv3"]))
+    assert decoded["data"]["name"] == "Akane Kujo"
+    assert decoded["data"]["creator"] == "dezea"
+    assert decoded["data"]["extensions"]["jai"]["character_id"] == "abc123"
+    assert decoded["data"]["extensions"]["jai"]["source_url"] == "https://janitorai.com/characters/abc123"
+
+
+def test_build_falls_back_to_character_name_without_profile_html(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+
+    resp = client.post(
+        "/build",
+        json={"character": {"name": "No Profile Card"}},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert "no first_mes / greetings found" in body["warnings"]
+
+    path = Path(body["path"])
+    reopened = Image.open(path)
+    decoded = json.loads(base64.b64decode(reopened.text["chara"]))
+    assert decoded["data"]["name"] == "No Profile Card"
+
+
+def test_build_maps_greetings_html_to_first_mes(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+
+    resp = client.post(
+        "/build",
+        json={
+            "character": {"name": "Greeter"},
+            "greetings_html": ["<p>Hello <strong>there</strong></p>", "<p>Second</p>"],
+        },
+    )
+
+    assert resp.status_code == 200
+    path = Path(resp.json()["path"])
+    decoded = json.loads(base64.b64decode(Image.open(path).text["ccv3"]))
+    assert decoded["data"]["first_mes"] == "Hello **there**"
+    assert decoded["data"]["alternate_greetings"] == ["Second"]

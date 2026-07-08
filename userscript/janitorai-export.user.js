@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         jai-proxy bridge
 // @namespace    https://github.com/mjnitz02/jai-proxy
-// @version      0.1.0
-// @description  Thin bridge: relays JanitorAI chat completions through a local jai-proxy server (which forwards to local MLX) and shows a connection pill. Card export lives server-side.
+// @version      0.2.0
+// @description  Thin bridge: relays JanitorAI chat completions through a local jai-proxy server (which forwards to local MLX), shows a connection pill, and exports the current profile as a V3 card PNG. Card assembly lives server-side.
 // @match        https://janitorai.com/*
 // @match        https://www.janitorai.com/*
 // @run-at       document-start
@@ -69,6 +69,16 @@
     async models() {
       const { text } = await this._request({ path: "/v1/models" });
       return text;
+    },
+
+    async build(payload) {
+      const { text } = await this._request({
+        method: "POST",
+        path: "/build",
+        body: payload,
+        timeout: 60000,
+      });
+      return JSON.parse(text);
     },
   };
 
@@ -195,6 +205,124 @@
   };
 
   // ---------------------------------------------------------------------------
+  // Collector — gathers the raw material for POST /build. Everything else
+  // (HTML→md, macro repair, V3 JSON, PNG chunks) happens server-side; this
+  // just hands over outerHTML + the avatar URL. walkGreetings() /
+  // mineLorebookIds() / fetchScripts() (carousel walking, fiber mining,
+  // cookie'd /hampter fetches) are a later milestone — greetings_html is
+  // empty for now, so exported cards get description/scenario/examples/
+  // avatar but no first_mes yet.
+  // ---------------------------------------------------------------------------
+  const Collector = {
+    characterName() {
+      const parts = (document.title || "").split("|");
+      const name = (parts[parts.length - 1] || "").trim();
+      return name || "Unknown";
+    },
+
+    characterId() {
+      const m = window.location.pathname.match(/characters?\/([\w-]+)/i);
+      return m ? m[1] : null;
+    },
+
+    profileHtml() {
+      const root = document.querySelector("main") || document.body;
+      return root ? root.outerHTML : "";
+    },
+
+    avatarUrl() {
+      const img = document.querySelector("img.avatar-image");
+      if (img && img.src) return img.src;
+      const og = document.querySelector('meta[property="og:image:secure_url"]');
+      if (og && og.content) return og.content;
+      const tw = document.querySelector('meta[name="twitter:image"]');
+      if (tw && tw.content) return tw.content;
+      return null;
+    },
+
+    collect() {
+      return {
+        character: {
+          name: this.characterName(),
+          id: this.characterId(),
+          url: window.location.href,
+        },
+        profile_html: this.profileHtml(),
+        greetings_html: [],
+        avatar_url: this.avatarUrl(),
+      };
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // ExportButton — collects + POSTs /build, toasts the result path/warnings.
+  // ---------------------------------------------------------------------------
+  const ExportButton = {
+    _el: null,
+
+    mount() {
+      if (this._el) return;
+      const el = document.createElement("button");
+      el.id = "jai-proxy-export";
+      el.textContent = "⬇ Export card";
+      Object.assign(el.style, {
+        position: "fixed",
+        bottom: "44px",
+        right: "12px",
+        zIndex: 999999,
+        padding: "6px 12px",
+        borderRadius: "6px",
+        fontFamily: "monospace",
+        fontSize: "12px",
+        background: "#2d6cdf",
+        color: "#fff",
+        border: "1px solid #1d4ea0",
+        cursor: "pointer",
+      });
+      el.addEventListener("click", () => this._export(el));
+      document.documentElement.appendChild(el);
+      this._el = el;
+    },
+
+    async _export(el) {
+      const original = el.textContent;
+      el.textContent = "⏳ exporting…";
+      el.disabled = true;
+      try {
+        const payload = Collector.collect();
+        const result = await ServerClient.build(payload);
+        if (result.ok) {
+          el.textContent = "✅ saved";
+          log("exported card ->", result.path, result.warnings);
+          if (result.warnings && result.warnings.length) {
+            warn("export warnings:", result.warnings);
+          }
+        } else {
+          el.textContent = "⚠️ failed";
+          warn("export failed", result);
+        }
+      } catch (err) {
+        el.textContent = "⚠️ failed";
+        warn("export failed", err);
+      } finally {
+        setTimeout(() => {
+          el.textContent = original;
+          el.disabled = false;
+        }, 2500);
+      }
+    },
+
+    keepAlive() {
+      new MutationObserver(() => {
+        if (!document.getElementById("jai-proxy-export")) {
+          this._el = null;
+          this.mount();
+        }
+      }).observe(document.documentElement, { childList: true, subtree: true });
+    },
+  };
+
+  // ---------------------------------------------------------------------------
   // StatusPill — small fixed-position indicator, polls /health.
   // ---------------------------------------------------------------------------
   const StatusPill = {
@@ -254,6 +382,8 @@
   function boot() {
     StatusPill.mount();
     StatusPill.keepAlive();
+    ExportButton.mount();
+    ExportButton.keepAlive();
   }
 
   if (document.readyState === "loading") {
