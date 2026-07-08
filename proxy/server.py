@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from proxy.avatar import AvatarFetcher
-from proxy.capture_store import CaptureStore
+from proxy.capture_store import CaptureStore, normalize
 from proxy.cardbuilder import CardBuilder, PngWriter
 from proxy.config import settings
 from proxy.html_parser import GreetingConverter, ProfileParser
@@ -85,8 +85,8 @@ async def build(req: BuildRequest) -> BuildResponse:
 
     greetings = [greeting_converter.convert(html) for html in req.greetings_html]
 
-    # Hidden-definition merge (CaptureStore.get) is M4; public build only for now.
-    card, warnings = card_builder.build(profile, greetings, capture=None, book=None)
+    capture = capture_store.get(normalize(req.character.name))
+    card, warnings = card_builder.build(profile, greetings, capture=capture, book=None)
 
     card.extensions = {
         "jai": {"source_url": req.character.url, "character_id": req.character.id}

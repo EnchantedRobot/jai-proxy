@@ -196,6 +196,77 @@ def test_build_falls_back_to_character_name_without_profile_html(tmp_path):
     assert decoded["data"]["name"] == "No Profile Card"
 
 
+# ---------------------------------------------------------------------------
+# /build -- hidden-card merge end-to-end (M4)
+# ---------------------------------------------------------------------------
+
+
+def test_build_merges_captured_hidden_definition_when_profile_is_empty(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    raw_prompt = (FIXTURES / "system_prompt_hidden_aubrey_evans.txt").read_text(encoding="utf-8")
+
+    capture_resp = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "x",
+            "stream": False,
+            "messages": [
+                {"role": "system", "content": raw_prompt},
+                {"role": "user", "content": "hi"},
+            ],
+        },
+    )
+    assert capture_resp.status_code == 200
+
+    build_resp = client.post(
+        "/build",
+        json={"character": {"name": "Aubrey Evans"}},
+    )
+
+    assert build_resp.status_code == 200
+    body = build_resp.json()
+    assert body["ok"] is True
+    assert body["fields_present"]["description"] is True
+    assert body["fields_present"]["scenario"] is True
+    assert body["fields_present"]["mes_example"] is True
+
+    decoded = json.loads(base64.b64decode(Image.open(Path(body["path"])).text["ccv3"]))
+    assert decoded["data"]["name"] == "Aubrey Evans"
+    assert "Her nickname is Ace" in decoded["data"]["description"]
+    assert decoded["data"]["scenario"].startswith("setting: {The Regional Championship")
+    assert decoded["data"]["mes_example"].startswith("USER: *As her coach")
+
+
+def test_build_prefers_visible_dom_over_capture_when_both_present(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    raw_prompt = (FIXTURES / "system_prompt_hidden_lyra.txt").read_text(encoding="utf-8")
+    profile_html = (FIXTURES / "profile_akane_kujo.html").read_text(encoding="utf-8")
+
+    client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "x",
+            "stream": False,
+            "messages": [
+                {"role": "system", "content": raw_prompt},
+                {"role": "user", "content": "hi"},
+            ],
+        },
+    )
+
+    build_resp = client.post(
+        "/build",
+        json={"character": {"name": "Lyra"}, "profile_html": profile_html},
+    )
+
+    body = build_resp.json()
+    decoded = json.loads(base64.b64decode(Image.open(Path(body["path"])).text["ccv3"]))
+    # profile_akane_kujo.html's own visible description wins even though the
+    # request was for character "Lyra" (name mismatch is irrelevant here --
+    # this only proves visible-DOM precedence, not name resolution).
+    assert "Full Name: Lyra Amarok" not in decoded["data"]["description"]
+
+
 def test_build_maps_greetings_html_to_first_mes(tmp_path):
     client = make_client(FakeMLXClient(), tmp_path)
 
