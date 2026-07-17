@@ -116,7 +116,10 @@ class CaptureRecord(BaseModel):
 
 
 class BuildCharacter(BaseModel):
-    name: str
+    # The userscript no longer sends a name -- the server derives the real
+    # character name from character_json (chat_name). `name` is kept only as an
+    # optional fallback for the degenerate name-only build (no character_json).
+    name: str = ""
     id: str | None = None
     url: str | None = None
 
@@ -134,7 +137,6 @@ class BuildRequest(BaseModel):
     avatar_url: str | None = None
     avatar_b64: str | None = None
     lorebooks: list[BuildLorebook] = Field(default_factory=list)
-    output_name: str | None = None
 
 
 class BuildResponse(BaseModel):
@@ -156,7 +158,6 @@ class SaucepanBuildRequest(BaseModel):
     character: dict[str, Any] = Field(default_factory=dict)
     avatar_url: str | None = None
     avatar_b64: str | None = None
-    output_name: str | None = None
 
 
 # ---------------------------------------------------------------------------

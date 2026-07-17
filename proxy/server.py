@@ -140,7 +140,6 @@ async def _assemble_and_write(
     book: CharacterBook | None,
     avatar_url: str | None,
     avatar_b64: str | None,
-    output_name: str | None,
     card_id: str | None,
     character_version: str,
     extensions: dict[str, Any],
@@ -156,10 +155,6 @@ async def _assemble_and_write(
         profile, greetings, capture=capture, book=book, avatar_url=avatar_url
     )
     all_warnings = (warnings or []) + build_warnings
-
-    # An explicit output_name from the export prompt overrides the card name.
-    if output_name and output_name.strip():
-        card.name = output_name.strip()
 
     card.character_version = character_version or "jai-proxy"
     card.extensions = extensions
@@ -243,7 +238,6 @@ async def build(req: BuildRequest) -> BuildResponse:
         book=book,
         avatar_url=avatar_url,
         avatar_b64=req.avatar_b64,
-        output_name=req.output_name,
         card_id=card_id,
         character_version=req.character.url or "jai-proxy",
         extensions=extensions,
@@ -291,7 +285,6 @@ async def build_saucepan(req: SaucepanBuildRequest) -> BuildResponse:
         book=book,
         avatar_url=avatar_url,
         avatar_b64=req.avatar_b64,
-        output_name=req.output_name,
         card_id=card_id or None,
         character_version=source_url or "jai-proxy",
         extensions=extensions,

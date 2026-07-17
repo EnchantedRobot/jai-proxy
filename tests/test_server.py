@@ -357,49 +357,34 @@ def test_build_falls_back_to_character_name_without_character_json(tmp_path):
     assert data["character_version"] == "jai-proxy"
 
 
-def test_build_uses_output_name_override_as_card_name_and_filename(tmp_path):
+def test_build_names_card_from_chat_name_not_title_blurb(tmp_path):
+    # The userscript sends no name anymore -- the server names the card (and its
+    # file) from chat_name (the real character name), never from the JSON `name`
+    # field (the card-title blurb), which is preserved only as metadata.
     client = make_client(FakeMLXClient(), tmp_path)
 
     resp = client.post(
         "/build",
         json={
-            "character": {"name": "Chatname", "id": "deadbeef-1234-5678-9abc-def012345678"},
+            "character": {"id": "deadbeef-1234-5678-9abc-def012345678"},
             "character_json": {
                 "chat_name": "Chatname",
                 "name": "Scenario Hook Blurb",
                 "creator_name": "somecreator",
             },
-            "output_name": "My Custom Save Name",
         },
     )
 
     assert resp.status_code == 200
     path = Path(resp.json()["path"])
-    # output_name drives the filename stem; creator folders it; id suffixes it.
+    # chat_name drives the filename stem; creator folders it; id suffixes it.
     assert path.parent.name == "somecreator"
-    assert path.name == "My_Custom_Save_Name_deadbeef.png"
+    assert path.name == "Chatname_deadbeef.png"
 
     data = _decode(path)
-    assert data["name"] == "My Custom Save Name"
+    assert data["name"] == "Chatname"
     # The title blurb is preserved as metadata, not embedded as data.name.
     assert data["extensions"]["jai"]["pageName"] == "Scenario Hook Blurb"
-
-
-def test_build_blank_output_name_falls_back_to_chat_name(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
-
-    resp = client.post(
-        "/build",
-        json={
-            "character": {"name": "Chatname"},
-            "character_json": {"chat_name": "Real Name"},
-            "output_name": "   ",
-        },
-    )
-
-    path = Path(resp.json()["path"])
-    assert path.name == "Real_Name.png"
-    assert _decode(path)["name"] == "Real Name"
 
 
 # ---------------------------------------------------------------------------

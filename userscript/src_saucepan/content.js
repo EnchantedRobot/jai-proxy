@@ -1,19 +1,3 @@
-// ==UserScript==
-// @name         Saucepan → Character Card (jai-proxy)
-// @namespace    https://github.com/mjnitz02/jai-proxy
-// @version      0.7.0
-// @description  Thin fetcher. Pulls an open saucepan.ai companion's raw JSON (definition + companion + lorebooks) and POSTs it to the local jai-proxy server, which does all deobfuscation, mapping, and Character Card V3 PNG building.
-// @match        https://saucepan.ai/*
-// @run-at       document-idle
-// @grant        GM_xmlhttpRequest
-// @connect      saucepan.ai
-// @connect      127.0.0.1
-// @connect      localhost
-// ==/UserScript==
-
-(function () {
-  "use strict";
-
   // ---------------------------------------------------------------------------
   // This used to be a 1200-line DOM scraper that also deobfuscated saucepan's
   // fragment format and hand-rolled PNG tEXt-chunk embedding in JS. All of that
@@ -234,4 +218,3 @@
 
   if (document.body) addButton();
   new MutationObserver(addButton).observe(document.documentElement, { childList: true, subtree: true });
-})();
