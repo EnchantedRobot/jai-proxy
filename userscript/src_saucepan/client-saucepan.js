@@ -102,19 +102,47 @@
 
     // The full raw export for a companion id: {id, definition, companion,
     // lorebooks}. Exactly the shape POST /build-saucepan expects.
-    async fetchExport(id) {
+    //
+    // onProgress(p) is called as fetching advances, so the overlay can show a
+    // live count instead of a static "Fetching…". It fires with one of:
+    //   {phase:"definition"} | {phase:"companion"} | {phase:"lore", done, total}
+    // Chapters are still fetched one at a time (a steady serial trickle, the
+    // same request pattern the page itself makes) rather than in a burst, to
+    // stay well under any saucepan rate limit — the count just makes the wait
+    // legible, it isn't a speed-up.
+    async fetchExport(id, onProgress) {
+      const report = typeof onProgress === "function" ? onProgress : () => {};
       const out = { id };
+
+      report({ phase: "definition" });
       out.definition = await apiGet(`/api/v1/companion/definition?companion_id=${id}`);
+
+      report({ phase: "companion" });
       out.companion = await this.fetchCompanion(id);
 
-      out.lorebooks = [];
+      // Read every lorebook's chapter LIST first (one cheap call each). These
+      // carry the chapter counts, so summing them gives a real denominator for
+      // the progress count before any chapter body is fetched.
+      const books = [];
+      let total = 0;
       for (const lid of this.lorebookIds()) {
         const list = await apiGet(`/api/v2/lorebooks/${lid}/chapters`);
+        const chapters = (list && list.chapters) || [];
+        books.push({ id: lid, list, chapters });
+        total += chapters.length;
+      }
+
+      // Now fetch the chapter bodies, reporting "done / total" as each lands.
+      out.lorebooks = [];
+      let done = 0;
+      for (const book of books) {
         const chapters = [];
-        for (const c of (list && list.chapters) || []) {
-          chapters.push(await apiGet(`/api/v2/lorebooks/${lid}/chapters/${c.index}`));
+        for (const c of book.chapters) {
+          chapters.push(await apiGet(`/api/v2/lorebooks/${book.id}/chapters/${c.index}`));
+          done += 1;
+          report({ phase: "lore", done, total });
         }
-        out.lorebooks.push({ id: lid, list, chapters });
+        out.lorebooks.push({ id: book.id, list: book.list, chapters });
       }
       log(`fetched export for ${id} — lorebooks: ${out.lorebooks.length}`);
       return out;

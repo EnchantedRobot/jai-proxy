@@ -18,7 +18,15 @@
         return;
       }
 
-      const export_ = await SaucepanClient.fetchExport(id);
+      const export_ = await SaucepanClient.fetchExport(id, (p) => {
+        if (p.phase === "lore") {
+          ExportStatus.show(`Fetching lore ${p.done} / ${p.total}…`);
+        } else if (p.phase === "companion") {
+          ExportStatus.show("Fetching companion…");
+        } else {
+          ExportStatus.show("Fetching…");
+        }
+      });
 
       ExportStatus.show("Building on server…");
       const res = await ServerClient.build({ character: export_ });
