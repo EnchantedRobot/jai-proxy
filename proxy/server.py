@@ -165,11 +165,12 @@ async def build(req: BuildRequest) -> BuildResponse:
     if req.output_name and req.output_name.strip():
         card.name = req.output_name.strip()
 
+    card_id = req.character.id or character.get("id")
     card.character_version = req.character.url or "jai-proxy"
     card.extensions = {
         "jai": {
             "source_url": req.character.url,
-            "id": req.character.id or character.get("id"),
+            "id": card_id,
             "sourceKind": "janitor_core",
             "creatorName": card.creator,
             "pageName": page_name,
@@ -179,7 +180,7 @@ async def build(req: BuildRequest) -> BuildResponse:
 
     avatar_url = req.avatar_url or janitor_mapper.avatar_url(character)
     avatar_bytes = await avatar_fetcher.fetch(avatar_url, req.avatar_b64)
-    path = png_writer.write(card, avatar_bytes)
+    path = png_writer.write(card, avatar_bytes, card_id=card_id)
 
     fields_present = {
         "description": bool(card.description),
