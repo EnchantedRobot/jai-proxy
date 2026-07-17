@@ -7,14 +7,14 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from proxy import janitor_mapper
 from proxy.avatar import AvatarFetcher
-from proxy.capture_store import CaptureStore, normalize
+from proxy.capture_store import CaptureStore
 from proxy.cardbuilder import CardBuilder, PngWriter
 from proxy.config import settings
-from proxy.html_parser import GreetingConverter, ProfileParser
 from proxy.lorebook import LorebookMapper
 from proxy.mlx_client import MLXClient, MLXError
-from proxy.models import BuildRequest, BuildResponse, CaptureGreetingsRequest
+from proxy.models import BuildRequest, BuildResponse
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("jai_proxy.server")
@@ -49,8 +49,6 @@ logging.getLogger("uvicorn.access").addFilter(QuietAccessFilter())
 
 capture_store = CaptureStore()
 mlx_client = MLXClient()
-profile_parser = ProfileParser()
-greeting_converter = GreetingConverter()
 card_builder = CardBuilder()
 png_writer = PngWriter()
 avatar_fetcher = AvatarFetcher()
@@ -61,13 +59,13 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
-def _first_system_message(messages: list[dict[str, Any]]) -> str:
+def _first_message_of_role(messages: list[dict[str, Any]], role: str) -> str:
     for message in messages:
-        if message.get("role") == "system":
+        if message.get("role") == role:
             content = message.get("content", "")
             return content if isinstance(content, str) else str(content)
     return ""
-    
+
 
 
 @app.get("/health")
@@ -88,7 +86,11 @@ async def chat_completions(request: Request) -> Any:
     body = await request.json()
 
     try:
-        capture_store.record(_first_system_message(body.get("messages", [])))
+        messages = body.get("messages", [])
+        capture_store.record(
+            _first_message_of_role(messages, "system"),
+            primary_greeting=_first_message_of_role(messages, "assistant"),
+        )
     except Exception:
         logger.exception("capture failed; continuing to forward")
 
@@ -101,12 +103,6 @@ async def chat_completions(request: Request) -> Any:
         return JSONResponse(completion)
     except MLXError as exc:
         return JSONResponse({"error": str(exc)}, status_code=502)
-
-
-@app.post("/capture-greetings")
-async def capture_greetings(req: CaptureGreetingsRequest) -> dict[str, Any]:
-    count = capture_store.record_greetings(req.name, req.greetings_html)
-    return {"ok": True, "name": req.name, "count": count}
 
 
 @app.get("/capture-status")
@@ -122,44 +118,50 @@ async def clear_captures() -> dict[str, Any]:
 
 @app.post("/build")
 async def build(req: BuildRequest) -> BuildResponse:
-    profile = profile_parser.parse(req.profile_html or "")
-    if not profile.name or profile.name == "Unknown":
+    character = req.character_json or {}
+    profile = janitor_mapper.to_profile_fields(character)
+    if not profile.name:
         profile.name = req.character.name
 
-    capture = capture_store.get(normalize(req.character.name))
+    hidden = janitor_mapper.is_hidden(character)
+    capture = capture_store.get(profile.name)
+    json_greetings = janitor_mapper.greetings(character)
 
-    greetings_html = req.greetings_html or (capture.greetings if capture else [])
-    greetings = [greeting_converter.convert(html) for html in greetings_html]
-
-    hidden = "Character Definition is hidden" in (req.profile_html or "")
-    has_system = capture is not None and bool(
-        capture.personality or capture.scenario or capture.mes_example
-    )
-    has_greetings = bool(greetings_html)
-    if hidden and not (has_system and has_greetings):
-        missing = []
-        if not has_system:
-            missing.append("system definition (send a chat message)")
-        if not has_greetings:
-            missing.append("greetings (click Export greetings in the chat)")
-        return BuildResponse(
-            ok=False,
-            warnings=[f"hidden card not exportable — missing: {', '.join(missing)}"],
+    if hidden:
+        # A hidden card's definition and its primary greeting both ride in on
+        # the chat relay capture; the JSON supplies only the alternates.
+        captured = capture.greetings if capture else []
+        has_system = capture is not None and bool(
+            capture.personality or capture.scenario or capture.mes_example
         )
+        has_primary = bool(captured)
+        if not (has_system and has_primary):
+            return BuildResponse(
+                ok=False,
+                warnings=[
+                    "hidden card not exportable — send a chat message in this "
+                    "character's chat first so the proxy can capture its hidden "
+                    "definition and primary greeting"
+                ],
+            )
+        primary = captured[0]
+        greetings = [primary] + [g for g in json_greetings if g != primary]
+    else:
+        greetings = json_greetings
 
     raw_scripts = [lb.raw for lb in req.lorebooks]
-    book, lore_warnings = lorebook_mapper.map(raw_scripts, character_name=req.character.name)
+    book, lore_warnings = lorebook_mapper.map(raw_scripts, character_name=profile.name)
     if capture is not None:
         book = lorebook_mapper.merge(book, capture.lore_entries)
 
     card, warnings = card_builder.build(profile, greetings, capture=capture, book=book)
     warnings = lore_warnings + warnings
 
-    # The name typed into the export prompt becomes the card's real name;
-    # the page-scraped name (often a scenario blurb, not an actual
-    # character name -- see "She needs your help") is preserved as
-    # metadata instead of being embedded as `data.name`.
-    page_name = profile.name
+    # data.name is the real character name (chat_name); the JSON `name` field
+    # is the card-title blurb (often a scenario hook, not an actual character
+    # name -- see "She needs your help"), preserved as metadata instead. An
+    # explicit output_name from the export prompt overrides the card name.
+    page_name = (character.get("name") or "").strip()
     if req.output_name and req.output_name.strip():
         card.name = req.output_name.strip()
 
@@ -167,7 +169,7 @@ async def build(req: BuildRequest) -> BuildResponse:
     card.extensions = {
         "jai": {
             "source_url": req.character.url,
-            "id": req.character.id,
+            "id": req.character.id or character.get("id"),
             "sourceKind": "janitor_core",
             "creatorName": card.creator,
             "pageName": page_name,
@@ -175,7 +177,8 @@ async def build(req: BuildRequest) -> BuildResponse:
         }
     }
 
-    avatar_bytes = await avatar_fetcher.fetch(req.avatar_url, req.avatar_b64)
+    avatar_url = req.avatar_url or janitor_mapper.avatar_url(character)
+    avatar_bytes = await avatar_fetcher.fetch(avatar_url, req.avatar_b64)
     path = png_writer.write(card, avatar_bytes)
 
     fields_present = {

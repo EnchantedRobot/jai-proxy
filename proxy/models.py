@@ -79,7 +79,8 @@ class ParsedDefinition(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Parsed visible profile (from DOM HTML)
+# Visible profile fields (mapped from the JanitorAI character JSON by
+# janitor_mapper; consumed by CardBuilder).
 # ---------------------------------------------------------------------------
 
 
@@ -109,11 +110,6 @@ class CaptureRecord(BaseModel):
     updated_at: datetime = Field(default_factory=_utcnow)
 
 
-class CaptureGreetingsRequest(BaseModel):
-    name: str
-    greetings_html: list[str] = Field(default_factory=list)
-
-
 # ---------------------------------------------------------------------------
 # /build
 # ---------------------------------------------------------------------------
@@ -132,8 +128,9 @@ class BuildLorebook(BaseModel):
 
 class BuildRequest(BaseModel):
     character: BuildCharacter
-    profile_html: str | None = None
-    greetings_html: list[str] = Field(default_factory=list)
+    # The raw JanitorAI /hampter/characters/<id> JSON. None only for the
+    # degenerate "name-only" build (no definition to map).
+    character_json: dict[str, Any] | None = None
     avatar_url: str | None = None
     avatar_b64: str | None = None
     lorebooks: list[BuildLorebook] = Field(default_factory=list)

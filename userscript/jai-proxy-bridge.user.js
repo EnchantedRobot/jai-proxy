@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         jai-proxy bridge
 // @namespace    https://github.com/EnchantedRobot/jai-proxy
-// @version      0.5.3
-// @description  Thin bridge: relays JanitorAI chat completions through a local jai-proxy server (which forwards to local MLX), shows a connection pill, and exports the current profile as a V3 card PNG. Card assembly lives server-side.
+// @version      0.7.0
+// @description  Thin bridge: relays JanitorAI chat completions through a local jai-proxy server (which forwards to local MLX), shows a connection pill, and exports a character as a V3 card PNG via JanitorAI's clean JSON API (no DOM scraping). Card assembly lives server-side.
 // @match        https://janitorai.com/*
 // @match        https://www.janitorai.com/*
 // @run-at       document-start
@@ -14,9 +14,38 @@
 // @connect      janitorai.com
 // @connect      ella.janitorai.com
 // ==/UserScript==
+//
+// SOURCE LAYOUT — this file is COMPILED. Do not edit jai-proxy-bridge.user.js by
+// hand; edit userscript/src/*.js and run `make compile` (see
+// scripts/compile_userscript.py). The modules are concatenated, in order, inside
+// a single IIFE beneath this banner.
 
 (function () {
   "use strict";
+
+  // ---------------------------------------------------------------------------
+  // User config — hand-edited, not persisted. Controls which cards the BULK
+  // "download all open cards" run (creator /profiles/ page) exports. The single
+  // ⬇ Export button is NEVER filtered; this only narrows a bulk sweep.
+  //
+  // Matching is case-insensitive and ignores a tag's leading emoji / "#" prefix,
+  // so "female" matches JanitorAI's "👩‍🦰 Female". Both a card's official tags
+  // and its free-form custom_tags are checked. Tag names are matched WHOLE (after
+  // the emoji prefix): "futa" does NOT match "futanari" — list every variant you
+  // want to catch.
+  //
+  // A card is exported when it has at least one `include` tag (or `include` is
+  // empty = no include filter) AND none of the `exclude` tags. The filter runs on
+  // the cheap list rows, so excluded cards are skipped before any per-card fetch.
+  //
+  //   include: []                      → download every open card
+  //   include: ["female"]              → only cards tagged Female
+  //   exclude: ["futa", "futanari"]    → drop either tag
+  // ---------------------------------------------------------------------------
+  const BULK_TAG_FILTER = {
+    include: [],
+    exclude: ["futa", "futanari"],
+  };
 
   // The one config knob. Change if the server runs elsewhere.
   const SERVER = "http://127.0.0.1:8000";
@@ -81,16 +110,6 @@
       return JSON.parse(text);
     },
 
-    async captureGreetings(payload) {
-      const { text } = await this._request({
-        method: "POST",
-        path: "/capture-greetings",
-        body: payload,
-        timeout: 15000,
-      });
-      return JSON.parse(text);
-    },
-
     async captureStatus(name) {
       const { text } = await this._request({
         path: "/capture-status?name=" + encodeURIComponent(name),
@@ -109,10 +128,875 @@
   };
 
   // ---------------------------------------------------------------------------
+  // JanitorClient — reads a character (and its lorebooks) straight from
+  // JanitorAI's own JSON API, replacing all DOM scraping.
+  //
+  //   GET /hampter/characters/<id>  → full card JSON (open cards carry the
+  //                                   definition; hidden cards omit it)
+  //   GET /hampter/script/<id>      → a public lorebook's entries
+  //
+  // Both need `Authorization: Bearer <supabase-JWT>` (cookies alone 401) and
+  // must run IN THE PAGE: Cloudflare gates on the browser's TLS fingerprint +
+  // cf_clearance cookie, and the token lives in the page's cookies/localStorage.
+  // So a self-contained fetch is injected as a <script> (page context) and its
+  // result crosses back via a one-shot CustomEvent (a JSON string — primitives
+  // only, to sidestep Firefox Xray). Same mechanism the old lorebook scrape
+  // used. findToken() is ported from ~/workspaces/JAR/src/autotrigger.js.
+  // ---------------------------------------------------------------------------
+
+  // Stringified + injected into the page — must be fully self-contained (no
+  // closure over the userscript sandbox scope).
+  function jaiAuthedFetchPage(eventName, url) {
+    function findToken() {
+      var b64 = function (s) {
+        try { return atob(s); } catch (e) { /* */ }
+        try { return atob(s.replace(/-/g, "+").replace(/_/g, "/")); } catch (e) { /* */ }
+        return null;
+      };
+      var extract = function (rawIn) {
+        var raw = rawIn;
+        if (!raw) return null;
+        try { raw = decodeURIComponent(raw); } catch (e) { /* */ }
+        if (raw.indexOf("base64-") === 0) raw = raw.slice(7);
+        if (raw.indexOf("eyJ") === 0 && raw.split(".").length === 3) return raw;
+        var candidates = [b64(raw), raw];
+        for (var ci = 0; ci < candidates.length; ci += 1) {
+          var s = candidates[ci];
+          if (!s) continue;
+          var mm = s.match(/"access_token":"(eyJ[^"]+)"/);
+          if (mm) return mm[1];
+          try {
+            var o = JSON.parse(s);
+            var c = o && (o.access_token || o.accessToken || o.token
+              || (o.currentSession && o.currentSession.access_token));
+            if (typeof c === "string" && c.indexOf("eyJ") === 0) return c;
+          } catch (e) { /* */ }
+        }
+        return null;
+      };
+      // Supabase chunks the auth cookie across sb-<ref>-auth-token(.0/.1/…);
+      // reassemble each base's chunks in index order before extracting.
+      try {
+        var parts = {};
+        var cookies = (document.cookie || "").split("; ");
+        for (var i = 0; i < cookies.length; i += 1) {
+          var c = cookies[i];
+          var eq = c.indexOf("=");
+          if (eq < 0) continue;
+          var mm = c.slice(0, eq).match(/^(sb-.*-auth-token)(?:\.(\d+))?$/);
+          if (!mm) continue;
+          var base = mm[1];
+          var idx = mm[2] ? parseInt(mm[2], 10) : 0;
+          (parts[base] = parts[base] || {})[idx] = c.slice(eq + 1);
+        }
+        for (var b in parts) {
+          var idxs = Object.keys(parts[b]).map(Number).sort(function (x, y) { return x - y; });
+          var joined = "";
+          for (var j = 0; j < idxs.length; j += 1) joined += parts[b][idxs[j]];
+          var t = extract(joined);
+          if (t) return t;
+        }
+      } catch (e) { /* */ }
+      try {
+        for (var k = 0; k < localStorage.length; k += 1) {
+          var lt = extract(localStorage.getItem(localStorage.key(k)));
+          if (lt) return lt;
+        }
+      } catch (e) { /* */ }
+      return null;
+    }
+
+    var token = findToken();
+    var headers = { accept: "application/json, text/plain, */*" };
+    if (token) headers.authorization = "Bearer " + token;
+    fetch(url, { credentials: "include", headers: headers })
+      .then(function (r) {
+        return r.text().then(function (body) {
+          window.dispatchEvent(new CustomEvent(eventName, {
+            detail: JSON.stringify({ status: r.status, body: body }),
+          }));
+        });
+      })
+      .catch(function (err) {
+        window.dispatchEvent(new CustomEvent(eventName, {
+          detail: JSON.stringify({ status: 0, body: String(err) }),
+        }));
+      });
+  }
+
+  // Inject jaiAuthedFetchPage for one URL, resolve with the response body text
+  // (rejects on non-2xx or timeout).
+  function pageAuthedFetch(url, timeoutMs = 20000) {
+    return new Promise((resolve, reject) => {
+      const evt = "jai-af-" + Math.random().toString(36).slice(2);
+      let done = false;
+      let timer = null;
+      const finish = (fn) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        fn();
+      };
+      timer = setTimeout(() => finish(() => reject(new Error("timeout"))), timeoutMs);
+      window.addEventListener(
+        evt,
+        (e) => {
+          let res;
+          try {
+            res = JSON.parse(e.detail);
+          } catch (err) {
+            finish(() => reject(err));
+            return;
+          }
+          if (res.status >= 200 && res.status < 300) {
+            finish(() => resolve(res.body));
+          } else {
+            finish(() => reject(new Error(`HTTP ${res.status}: ${(res.body || "").slice(0, 200)}`)));
+          }
+        },
+        { once: true }
+      );
+      const s = document.createElement("script");
+      s.textContent = `(${jaiAuthedFetchPage.toString()})(${JSON.stringify(evt)}, ${JSON.stringify(url)});`;
+      (document.head || document.documentElement).appendChild(s);
+      s.remove();
+    });
+  }
+
+  const JanitorClient = {
+    async fetchCharacter(id) {
+      const body = await pageAuthedFetch(`https://janitorai.com/hampter/characters/${id}`);
+      return JSON.parse(body);
+    },
+
+    async fetchScript(id) {
+      const body = await pageAuthedFetch(`https://janitorai.com/hampter/script/${id}`);
+      return JSON.parse(body);
+    },
+
+    // One page of a creator's catalogue, keyed on the creator UUID. Rows carry
+    // `showdefinition` (open/hidden) + `name` (the title blurb — `chat_name` is
+    // null here, it only appears on the per-card fetch) and the envelope carries
+    // `page` / `size` / `total` for pagination. Bracketed `user_id[]` is sent
+    // literally, exactly as the site does.
+    async listCharacters(creatorId, page = 1) {
+      const url =
+        `https://janitorai.com/hampter/characters?page=${page}` +
+        `&language=en&sort=latest&user_id[]=${encodeURIComponent(creatorId)}`;
+      const body = await pageAuthedFetch(url);
+      return JSON.parse(body);
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Overlay widgets — a single fixed-position container (#jai-proxy-root) holds
+  // the export button and the status pill. All styling lives in one injected
+  // <style> instead of per-element inline styles.
+  // ---------------------------------------------------------------------------
+  const OVERLAY_STYLE = `
+    #jai-proxy-root {
+      position: fixed; bottom: 12px; right: 12px; z-index: 999999;
+      display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+      font-family: monospace; font-size: 12px; pointer-events: none;
+    }
+    #jai-proxy-export {
+      pointer-events: auto; padding: 6px 12px; border-radius: 6px; color: #fff;
+      background: #2d6cdf; border: 1px solid #1d4ea0; cursor: pointer;
+    }
+    #jai-proxy-pill {
+      display: flex; align-items: center; gap: 8px; padding: 4px 10px;
+      border-radius: 999px; background: #222; color: #fff; border: 1px solid #444;
+      opacity: 0.9;
+    }
+    #jai-proxy-pill .jai-clear {
+      pointer-events: auto; cursor: pointer; color: #ff9d9d; font-weight: bold;
+      letter-spacing: 0.5px; border-left: 1px solid #555; padding-left: 8px;
+    }
+    #jai-proxy-pill .jai-clear:hover { color: #ff6b6b; }
+    #jai-proxy-bulk {
+      pointer-events: auto; display: none; flex-direction: column; gap: 6px;
+      background: #222; color: #fff; border: 1px solid #444; border-radius: 8px;
+      padding: 8px 10px; width: 300px; opacity: 0.96;
+    }
+    #jai-proxy-bulk .jai-bulk-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    #jai-proxy-bulk .jai-bulk-title { font-weight: bold; }
+    #jai-proxy-bulk-btn {
+      pointer-events: auto; padding: 5px 10px; border-radius: 6px; color: #fff;
+      background: #2d6cdf; border: 1px solid #1d4ea0; cursor: pointer; font: inherit;
+    }
+    #jai-proxy-bulk-btn:disabled { opacity: 0.6; cursor: default; }
+    #jai-proxy-bulk .jai-bulk-status { opacity: 0.85; word-break: break-word; }
+    #jai-proxy-bulk .jai-bulk-list {
+      display: flex; flex-direction: column; gap: 2px;
+      max-height: 260px; overflow-y: auto; margin-top: 2px;
+    }
+    #jai-proxy-bulk .jai-bulk-row { display: flex; align-items: baseline; gap: 6px; }
+    #jai-proxy-bulk .jai-bulk-icon { flex: 0 0 1.2em; text-align: center; }
+    #jai-proxy-bulk .jai-bulk-name {
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+  `;
+
+  // ---------------------------------------------------------------------------
+  // ExportButton — one action now (the greeting-capture button is gone; hidden
+  // greetings ride in on the chat relay). The scheduler drives its ready
+  // colour via setReady(); green = the card in view can be exported right now
+  // (open card, or hidden card whose captures are present).
+  // ---------------------------------------------------------------------------
+  const ExportButton = {
+    _el: null,
+
+    setReady(green) {
+      if (!this._el || this._el.disabled) return;
+      this._el.style.background = green ? "#2e9e4f" : "#2d6cdf";
+      this._el.style.borderColor = green ? "#22803c" : "#1d4ea0";
+    },
+
+    onClick() {
+      return exportCard(this._el);
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Pill — status indicator + inline CLEAR affordance. CLEAR wipes the
+  // server-side capture cache AND resets the plugin's remembered state (last
+  // card name / id / hidden flag). Exported PNGs are untouched. flash() shows
+  // transient feedback the scheduler's setStatus() won't overwrite until the
+  // hold expires.
+  // ---------------------------------------------------------------------------
+  const Pill = {
+    _el: null,
+    _statusEl: null,
+    _holdUntil: 0,
+
+    setStatus(text) {
+      if (!this._statusEl || Date.now() < this._holdUntil) return;
+      this._statusEl.textContent = text;
+    },
+
+    flash(text, ms) {
+      if (!this._statusEl) return;
+      this._statusEl.textContent = text;
+      this._holdUntil = Date.now() + ms;
+    },
+
+    async clear() {
+      if (
+        !window.confirm(
+          "Clear jai-proxy capture cache (captured hidden definitions + greetings) " +
+            "and reset the plugin's remembered card state? Exported PNGs are not affected."
+        )
+      ) {
+        return;
+      }
+      resetPluginState();
+      this.flash("⏳ clearing…", 4000);
+      try {
+        const result = await ServerClient.clearCaptures();
+        log("cleared captures ->", result.removed, "+ plugin state");
+        this.flash(`✅ cleared ${result.removed}`, 3000);
+      } catch (err) {
+        warn("clear failed", err);
+        this.flash("⚠️ clear failed", 6000);
+      }
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Overlay — builds and keeps alive the single container. The watchdog
+  // observes only <html>'s direct children (childList, NO subtree), so it does
+  // not fire on every streamed chat token; it wakes only if our root detaches.
+  // ---------------------------------------------------------------------------
+  const Overlay = {
+    _root: null,
+
+    mount() {
+      if (this._root && this._root.isConnected) return;
+
+      if (!document.getElementById("jai-proxy-style")) {
+        const style = document.createElement("style");
+        style.id = "jai-proxy-style";
+        style.textContent = OVERLAY_STYLE;
+        (document.head || document.documentElement).appendChild(style);
+      }
+
+      const root = document.createElement("div");
+      root.id = "jai-proxy-root";
+
+      const btn = document.createElement("button");
+      btn.id = "jai-proxy-export";
+      btn.textContent = "⬇ Export card";
+      btn.addEventListener("click", () => ExportButton.onClick());
+
+      const pill = document.createElement("div");
+      pill.id = "jai-proxy-pill";
+      const status = document.createElement("span");
+      status.textContent = "⚪ jai-proxy";
+      const clear = document.createElement("span");
+      clear.className = "jai-clear";
+      clear.textContent = "CLEAR";
+      clear.title = "Clear server capture cache + reset remembered card state";
+      clear.addEventListener("click", () => Pill.clear());
+      pill.append(status, clear);
+
+      root.append(BulkPanel.build(), btn, pill);
+      document.documentElement.appendChild(root);
+
+      ExportButton._el = btn;
+      Pill._el = pill;
+      Pill._statusEl = status;
+      this._root = root;
+    },
+
+    keepAlive() {
+      let scheduled = false;
+      new MutationObserver(() => {
+        if (scheduled || (this._root && this._root.isConnected)) return;
+        scheduled = true;
+        requestAnimationFrame(() => {
+          scheduled = false;
+          this.mount();
+        });
+      }).observe(document.documentElement, { childList: true });
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Character state — resolved from JanitorAI's JSON, not the DOM.
+  //
+  // A character page's URL carries the character UUID; the chat page's does
+  // not. So on a character page we fetch the JSON once (cached per id) and
+  // persist name / id / hidden (GM_setValue); the chat page — where the hidden
+  // capture actually happens — reads those back. `showdefinition:false` is the
+  // open/hidden flag. Reset by the pill's CLEAR affordance.
+  // ---------------------------------------------------------------------------
+  const KEY_NAME = "jai_last_char_name";
+  const KEY_ID = "jai_last_char_id";
+  const KEY_HIDDEN = "jai_last_card_hidden";
+
+  const AVATAR_BASE = "https://ella.janitorai.com/bot-avatars/";
+  const CHAR_BASE = "https://janitorai.com/characters/";
+
+  function resetPluginState() {
+    GM_setValue(KEY_NAME, "");
+    GM_setValue(KEY_ID, "");
+    GM_setValue(KEY_HIDDEN, false);
+  }
+
+  // The character UUID from a /characters/<uuid>_<slug> path. Scoped to
+  // /characters/ so a chat page's own id (a different UUID) can't be mistaken
+  // for a character id.
+  function currentCharacterId() {
+    const m = location.pathname.match(/\/characters?\/([0-9a-f-]{36})/i);
+    return m ? m[1].toLowerCase() : null;
+  }
+
+  function isChatView() {
+    return !!document.querySelector("[class*='_messageBody_']");
+  }
+
+  function chatCharacterName() {
+    const el = document.querySelector("[class*='_nameText_']");
+    return el ? el.textContent.trim() : "";
+  }
+
+  const CharacterState = {
+    _id: null,
+    _json: null,
+    _fetching: false,
+
+    // On a character page, fetch + cache the JSON once and persist the derived
+    // name / id / hidden flag. No-op on chat / browse pages (no id in URL).
+    async refresh() {
+      const id = currentCharacterId();
+      if (!id || id === this._id || this._fetching) return;
+      this._fetching = true;
+      try {
+        const json = await JanitorClient.fetchCharacter(id);
+        this._id = id;
+        this._json = json;
+        GM_setValue(KEY_NAME, (json.chat_name || json.name || "").trim());
+        GM_setValue(KEY_ID, id);
+        GM_setValue(KEY_HIDDEN, json.showdefinition === false);
+      } catch (err) {
+        warn("character fetch failed", err);
+      } finally {
+        this._fetching = false;
+      }
+    },
+
+    cachedJson(id) {
+      return this._id === id ? this._json : null;
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Scheduler — one poll drives the pill + button. Paused while the tab is
+  // hidden; backs off to 15s while the server is unreachable. A single
+  // self-scheduling timer runs at a time; returning to the tab wakes it.
+  // ---------------------------------------------------------------------------
+  let serverDown = false;
+  let pollTimer = null;
+
+  async function tick() {
+    await CharacterState.refresh();
+
+    // The bulk "download all open cards" panel lives on creator profile pages
+    // only; show/hide it as the SPA navigates.
+    BulkPanel.toggle(!!currentCreatorId());
+
+    const onChar = !!currentCharacterId();
+    const onChat = isChatView();
+    const id = currentCharacterId() || GM_getValue(KEY_ID, "");
+    const name = GM_getValue(KEY_NAME, "") || (onChat ? chatCharacterName() : "");
+    const hidden = GM_getValue(KEY_HIDDEN, false);
+
+    try {
+      let ready = false;
+      let statusText;
+      if ((!onChar && !onChat) || !name) {
+        await ServerClient.health();
+        statusText = "🟢 jai-proxy";
+      } else if (!hidden) {
+        // Open card: the JSON carries everything; nothing to capture.
+        await ServerClient.health();
+        statusText = `🟢 ${name} · open ✓`;
+        ready = !!id;
+      } else {
+        // Hidden card: the definition + primary greeting come from the chat
+        // relay capture, so surface whether the server has them yet.
+        const status = await ServerClient.captureStatus(name);
+        statusText = `🟢 ${name} · Sys ${status.system ? "✓" : "✗"} · Greet ${status.greetings ? "✓" : "✗"}`;
+        ready = !!id && status.system && status.greetings;
+      }
+      serverDown = false;
+      Pill.setStatus(statusText);
+      ExportButton.setReady(ready);
+    } catch {
+      serverDown = true;
+      Pill.setStatus("🔴 jai-proxy (server down)");
+      ExportButton.setReady(false);
+    }
+  }
+
+  function scheduleTick(delay) {
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(runLoop, delay);
+  }
+
+  async function runLoop() {
+    if (!document.hidden) {
+      try {
+        await tick();
+      } catch (err) {
+        warn("tick failed", err);
+      }
+    }
+    scheduleTick(serverDown ? 15000 : 5000);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Export — the whole card export is now: fetch the character JSON, fetch its
+  // public lorebooks, POST /build. No DOM scraping, no greeting carousel walk.
+  // Hidden cards work the same way: their definition + primary greeting are
+  // already captured server-side from the chat relay, and the server merges
+  // them with the JSON's alternate greetings / metadata.
+  // ---------------------------------------------------------------------------
+  async function fetchPublicLorebooks(character) {
+    const scripts = Array.isArray(character.scripts) ? character.scripts : [];
+    const ids = scripts
+      .filter((s) => s && s.type === "lorebook" && s.is_public && s.id)
+      .map((s) => s.id);
+    if (!ids.length) return [];
+    const results = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          return { id, raw: await JanitorClient.fetchScript(id) };
+        } catch (err) {
+          warn("lorebook fetch failed", id, err);
+          return null;
+        }
+      })
+    );
+    const ok = results.filter(Boolean);
+    log(`lorebooks: ${ok.length}/${ids.length} public fetched`);
+    return ok;
+  }
+
+  // Resolve a character JSON, preferring the scheduler's per-page cache so a
+  // freshly-viewed character page isn't refetched.
+  async function resolveCharacter(id) {
+    return CharacterState.cachedJson(id) || (await JanitorClient.fetchCharacter(id));
+  }
+
+  // The reusable core of a card export: resolve the character JSON (unless one
+  // is supplied), fetch its public lorebooks, POST /build. Shared by the single
+  // Export-card button and the bulk "download all open cards" panel. Returns
+  // the server result plus the resolved character + its default (chat_)name.
+  //   opts.character  — a pre-fetched JSON, to avoid a second round-trip
+  //   opts.outputName — overrides the saved card name (defaults to chat_name)
+  //   opts.url        — source URL recorded on the card (defaults to the id URL)
+  async function buildCardById(id, opts = {}) {
+    const character = opts.character || (await resolveCharacter(id));
+    const defaultName =
+      (character.chat_name || character.name || "").trim() || "Unknown";
+    const lorebooks = await fetchPublicLorebooks(character);
+    const payload = {
+      character: { name: defaultName, id, url: opts.url || CHAR_BASE + id },
+      character_json: character,
+      avatar_url: character.avatar ? AVATAR_BASE + character.avatar : null,
+      lorebooks,
+      output_name: (opts.outputName || "").trim() || defaultName,
+    };
+    const result = await ServerClient.build(payload);
+    return { result, character, defaultName };
+  }
+
+  async function exportCard(el) {
+    const original = el.textContent;
+    el.textContent = "⏳ exporting…";
+    el.disabled = true;
+    let holdMs = 2500;
+    try {
+      const id = currentCharacterId() || GM_getValue(KEY_ID, "");
+      if (!id) {
+        el.textContent = "⚠️ open a character page first";
+        holdMs = 5000;
+        return;
+      }
+
+      const character = await resolveCharacter(id);
+      const defaultName =
+        (character.chat_name || character.name || "").trim() || "Unknown";
+
+      // Prefilled with the real character name (chat_name) so the box is never
+      // blank; whatever the user leaves becomes data.name server-side.
+      const typed = window.prompt("Save card as:", defaultName);
+      if (typed === null) {
+        el.textContent = original;
+        el.disabled = false;
+        return;
+      }
+
+      const { result } = await buildCardById(id, {
+        character,
+        outputName: typed,
+        url: location.href,
+      });
+      const warnings = result.warnings || [];
+      if (result.ok) {
+        log("exported card ->", result.path, warnings);
+        if (warnings.length) {
+          const n = warnings.length;
+          const first =
+            warnings[0].length > 60 ? warnings[0].slice(0, 57) + "…" : warnings[0];
+          el.textContent = `⚠️ saved — ${n} warning${n === 1 ? "" : "s"}: ${first}`;
+          el.title = warnings.join("\n");
+          holdMs = 8000;
+          warn("export warnings:", warnings);
+        } else {
+          el.textContent = "✅ saved";
+          el.title = result.path || "";
+        }
+      } else {
+        el.textContent = `⚠️ ${warnings[0] || "failed"}`;
+        el.title = JSON.stringify(result);
+        holdMs = 8000;
+        warn("export failed", result);
+      }
+    } catch (err) {
+      el.textContent = "⚠️ failed";
+      el.title = String(err);
+      holdMs = 8000;
+      warn("export failed", err);
+    } finally {
+      setTimeout(() => {
+        el.textContent = original;
+        el.title = "";
+        el.disabled = false;
+      }, holdMs);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bulk export — on a creator's /profiles/<uuid>_… page, enumerate the whole
+  // catalogue and export every OPEN card, reusing the per-card buildCardById
+  // path. Hidden cards are listed but skipped; auto-capturing hidden
+  // definitions in bulk (create a chat + send a message per card) is deferred.
+  //
+  // IMPORTANT: the creator/list endpoint reports every row as is_public:true /
+  // showdefinition:false as CONSTANT PLACEHOLDERS (verified across ~6 creators)
+  // — it cannot tell open from hidden. Only the per-card /hampter/characters/<id>
+  // response carries the real `showdefinition`. So we enumerate ids from the
+  // list, then fetch each card to classify + export. Userscript-only; every
+  // open card still goes through the same server /build as the single button.
+  // ---------------------------------------------------------------------------
+  const LIST_PAGE_DELAY_MS = 600;    // between list-endpoint pages
+  const CARD_BUILD_DELAY_MS = 1500;  // after exporting an open card (writes a PNG)
+  const CARD_SKIP_DELAY_MS = 400;    // after skipping a hidden card (just a GET)
+  const MAX_LIST_PAGES = 100;        // safety valve
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // ---------------------------------------------------------------------------
+  // Tag filter (BULK_TAG_FILTER, from config.js) — applied to the cheap list
+  // rows so filtered-out cards never trigger a per-card fetch.
+  // ---------------------------------------------------------------------------
+
+  // Normalize a tag for comparison: drop a leading emoji / "#" / punctuation run
+  // (JanitorAI prefixes official tags with an emoji) then lower-case. Mirrors the
+  // server's clean_tag so "👩‍🦰 Female" and "female" compare equal.
+  function normTag(t) {
+    return String(t == null ? "" : t)
+      .replace(/^[^\p{L}\p{N}]+/u, "")
+      .trim()
+      .toLowerCase();
+  }
+
+  const _INCLUDE = (BULK_TAG_FILTER.include || []).map(normTag).filter(Boolean);
+  const _EXCLUDE = (BULK_TAG_FILTER.exclude || []).map(normTag).filter(Boolean);
+
+  // Every tag on a list row, normalized: official `tags[].name` + `custom_tags`.
+  function rowTagSet(row) {
+    const out = new Set();
+    for (const t of row.tags || []) {
+      if (t && t.name) out.add(normTag(t.name));
+    }
+    for (const c of row.custom_tags || []) out.add(normTag(c));
+    out.delete("");
+    return out;
+  }
+
+  // A card passes when it carries at least one include tag (or include is empty)
+  // AND none of the exclude tags.
+  function passesTagFilter(row) {
+    const tset = rowTagSet(row);
+    if (_INCLUDE.length && !_INCLUDE.some((t) => tset.has(t))) return false;
+    if (_EXCLUDE.some((t) => tset.has(t))) return false;
+    return true;
+  }
+
+  // Human-readable one-liner for the active filter, or "" when none is set.
+  function filterSummary() {
+    const parts = [];
+    if (_INCLUDE.length) parts.push(`only ${_INCLUDE.join(", ")}`);
+    if (_EXCLUDE.length) parts.push(`no ${_EXCLUDE.join(", ")}`);
+    return parts.join(" · ");
+  }
+
+  // Creator UUID from a /profiles/<uuid>_<slug> path — the leading 36-char UUID
+  // the list endpoint keys on via user_id[]=. Mirrors currentCharacterId().
+  function currentCreatorId() {
+    const m = location.pathname.match(/\/profiles\/([0-9a-f-]{36})/i);
+    return m ? m[1].toLowerCase() : null;
+  }
+
+  // Every card id + display name in a creator's catalogue that passes the tag
+  // filter. `chat_name` is null in list rows, so the label is the `name` blurb;
+  // the real name is resolved per-card at build time. Pagination keys on the
+  // full scanned count vs the envelope's `total` (not the kept count, which the
+  // filter shrinks). Returns { rows, scanned, skipped }.
+  async function enumerateCards(creatorId, onProgress) {
+    const rows = [];
+    let scanned = 0;
+    let skipped = 0;
+    for (let page = 1; page <= MAX_LIST_PAGES; page += 1) {
+      const res = await JanitorClient.listCharacters(creatorId, page);
+      const data = Array.isArray(res.data) ? res.data : [];
+      for (const c of data) {
+        if (!c || !c.id) continue;
+        scanned += 1;
+        if (!passesTagFilter(c)) {
+          skipped += 1;
+          continue;
+        }
+        rows.push({ id: c.id, name: (c.name || "").trim() || c.id });
+      }
+      const total = Number(res.total) || scanned;
+      if (onProgress) onProgress(scanned, total, rows.length);
+      if (!data.length || scanned >= total) break;
+      await sleep(LIST_PAGE_DELAY_MS);
+    }
+    return { rows, scanned, skipped };
+  }
+
+  // ---------------------------------------------------------------------------
+  // BulkPanel — the profile-page widget: a Download button, a status line, and
+  // a scrollable list of rows whose leading icon tracks each card's fate
+  // (⏳ pending/working · ✓ saved · ✗ hidden-skipped · ⚠ failed).
+  // ---------------------------------------------------------------------------
+  const BulkPanel = {
+    _el: null,
+    _btn: null,
+    _status: null,
+    _list: null,
+    _rows: new Map(),
+    _running: false,
+
+    build() {
+      const el = document.createElement("div");
+      el.id = "jai-proxy-bulk";
+
+      const head = document.createElement("div");
+      head.className = "jai-bulk-head";
+      const title = document.createElement("span");
+      title.className = "jai-bulk-title";
+      title.textContent = "⬇ All open cards";
+      const btn = document.createElement("button");
+      btn.id = "jai-proxy-bulk-btn";
+      btn.textContent = "Download";
+      btn.addEventListener("click", () => this.run());
+      head.append(title, btn);
+
+      const status = document.createElement("div");
+      status.className = "jai-bulk-status";
+      const fs = filterSummary();
+      status.textContent = fs ? `filter: ${fs} — click Download` : "creator profile — click Download";
+
+      const list = document.createElement("div");
+      list.className = "jai-bulk-list";
+
+      el.append(head, status, list);
+      this._el = el;
+      this._btn = btn;
+      this._status = status;
+      this._list = list;
+      return el;
+    },
+
+    toggle(show) {
+      if (this._el) this._el.style.display = show ? "flex" : "none";
+    },
+
+    _setStatus(text) {
+      if (this._status) this._status.textContent = text;
+    },
+
+    _renderRows(rows) {
+      this._list.innerHTML = "";
+      this._rows.clear();
+      for (const r of rows) {
+        const row = document.createElement("div");
+        row.className = "jai-bulk-row";
+        const icon = document.createElement("span");
+        icon.className = "jai-bulk-icon";
+        icon.textContent = "⏳";
+        const name = document.createElement("span");
+        name.className = "jai-bulk-name";
+        name.textContent = r.name;
+        row.title = "pending";
+        row.append(icon, name);
+        this._list.append(row);
+        this._rows.set(r.id, { icon, row });
+      }
+    },
+
+    _setRow(id, iconText, title) {
+      const entry = this._rows.get(id);
+      if (!entry) return;
+      entry.icon.textContent = iconText;
+      if (title) entry.row.title = title;
+    },
+
+    async run() {
+      if (this._running) return;
+      const creatorId = currentCreatorId();
+      if (!creatorId) {
+        this._setStatus("⚠️ open a creator's profile page first");
+        return;
+      }
+      this._running = true;
+      this._btn.disabled = true;
+      try {
+        this._setStatus("⏳ listing cards…");
+        const { rows, scanned, skipped } = await enumerateCards(creatorId, (n, total) =>
+          this._setStatus(`⏳ listing cards… ${n}/${total}`)
+        );
+        if (!scanned) {
+          this._setStatus("no cards found for this creator");
+          return;
+        }
+        if (!rows.length) {
+          this._setStatus(`no cards matched the tag filter (scanned ${scanned})`);
+          return;
+        }
+        this._renderRows(rows);
+
+        // The listing can't tell open from hidden, so every kept card is fetched
+        // individually — warn before a long one-at-a-time run.
+        const filterNote = skipped ? `\n\n${skipped} card(s) excluded by the tag filter.` : "";
+        if (
+          !window.confirm(
+            `Check ${rows.length} card(s) for open definitions and download each ` +
+              "open one?\n\nThe listing can't tell open from hidden, so each card " +
+              "is fetched one at a time. Hidden cards are skipped." +
+              filterNote
+          )
+        ) {
+          this._setStatus(`${rows.length} cards — cancelled`);
+          return;
+        }
+
+        let done = 0;
+        let failed = 0;
+        let hidden = 0;
+        for (let i = 0; i < rows.length; i += 1) {
+          const r = rows[i];
+          this._setStatus(`(${i + 1}/${rows.length}) ✓${done} ✗${hidden} ⚠${failed} — ${r.name}`);
+          let built = false;
+          try {
+            this._setRow(r.id, "⏳", "checking…");
+            const character = await resolveCharacter(r.id);
+            if (character.showdefinition === false) {
+              hidden += 1;
+              this._setRow(r.id, "✗", "hidden — skipped (needs a chat capture)");
+            } else {
+              this._setRow(r.id, "⏳", "exporting…");
+              const { result } = await buildCardById(r.id, { character });
+              const warnings = (result && result.warnings) || [];
+              if (result && result.ok) {
+                done += 1;
+                built = true;
+                this._setRow(
+                  r.id,
+                  "✓",
+                  warnings.length ? `saved — ${warnings.length} warning(s)` : (result.path || "saved")
+                );
+              } else {
+                failed += 1;
+                this._setRow(r.id, "⚠", warnings[0] || "build failed");
+                warn("bulk build failed", r.id, result);
+              }
+            }
+          } catch (err) {
+            failed += 1;
+            this._setRow(r.id, "⚠", String(err));
+            warn("bulk card error", r.id, err);
+          }
+          if (i < rows.length - 1) {
+            await sleep(built ? CARD_BUILD_DELAY_MS : CARD_SKIP_DELAY_MS);
+          }
+        }
+        const filtered = skipped ? ` · ⊘ ${skipped} filtered` : "";
+        this._setStatus(`done · ✓ ${done} saved · ✗ ${hidden} hidden · ⚠ ${failed} failed${filtered}`);
+      } catch (err) {
+        warn("bulk run failed", err);
+        this._setStatus("⚠️ " + String(err));
+      } finally {
+        this._running = false;
+        this._btn.disabled = false;
+      }
+    },
+  };
+
+  // ---------------------------------------------------------------------------
   // FetchHook — patch window.fetch and XMLHttpRequest at document-start so
-  // JanitorAI's chat-completion request is intercepted before its app code
-  // ever runs. Everything that doesn't look like a chat-completion request
-  // passes through untouched.
+  // JanitorAI's chat-completion request is intercepted before its app code ever
+  // runs, relayed through the local server (which forwards to MLX AND captures
+  // the hidden definition + primary greeting). Everything that doesn't look
+  // like a chat-completion / models probe passes through untouched.
   // ---------------------------------------------------------------------------
   function looksLikeChatCompletion(url, bodyText) {
     if (url && url.includes("chat/completions")) return true;
@@ -231,635 +1115,17 @@
   };
 
   // ---------------------------------------------------------------------------
-  // Greeting carousel walker — ported from janitorai-export.user.js's
-  // extractInitialMessages (~L470). Opens the "Initial Messages" (or, for a
-  // single greeting, "First Message") accordion, reads the "N / M" counter,
-  // and walks Next capturing each message body's RAW HTML. Unlike the
-  // reference script (which converts to markdown in-page via
-  // richToGreeting), this sends raw HTML and lets the server's
-  // GreetingConverter.convert() do the HTML→markdown conversion — same
-  // division of labor as everything else in this thin bridge.
-  // ---------------------------------------------------------------------------
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-  async function waitFor(predicate, timeoutMs = 4000, stepMs = 100) {
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-      const v = predicate();
-      if (v) return v;
-      if (Date.now() > deadline) return v;
-      await sleep(stepMs);
-    }
-  }
-
-  function initialMessagesBtn() {
-    // Multiple greetings → "Initial Messages" (carousel + counter). Exactly
-    // one greeting → "First Message" (singular, no carousel).
-    return [
-      ...document.querySelectorAll("button[aria-controls^='panel-info-']"),
-    ].find((b) => {
-      const t = b.textContent.trim().toLowerCase();
-      return t.startsWith("initial messages") || t.startsWith("first message");
-    });
-  }
-
-  function currentMessageBodyEl(panel) {
-    return panel.querySelector(".characterInfoMarkdownContainer");
-  }
-
-  function parseCounter(panel) {
-    const m = panel.textContent.match(/(\d+)\s*\/\s*(\d+)/);
-    return m ? { cur: +m[1], total: +m[2] } : null;
-  }
-
-  function textLength(html) {
-    const d = document.createElement("div");
-    d.innerHTML = html;
-    return (d.textContent || "").trim().length;
-  }
-
-  async function walkGreetings() {
-    const btn = initialMessagesBtn();
-    if (!btn) {
-      warn('no "Initial Messages"/"First Message" accordion — greetings_html will be empty');
-      return [];
-    }
-    if (btn.getAttribute("aria-expanded") === "false") btn.click();
-    const panel = document.getElementById(btn.getAttribute("aria-controls"));
-    if (!panel) {
-      warn("Initial Messages panel not found");
-      return [];
-    }
-    await waitFor(() => currentMessageBodyEl(panel));
-
-    const counter = parseCounter(panel);
-    const total = counter ? counter.total : 1;
-    log(`initial messages: ${total} total`);
-
-    const bodies = [];
-    for (let i = 0; i < total && i < 40; i++) {
-      await waitFor(() => currentMessageBodyEl(panel));
-      const el = currentMessageBodyEl(panel);
-      const html = el ? el.innerHTML : "";
-      bodies.push(html);
-      if (i >= total - 1) break;
-
-      const next = [...panel.querySelectorAll("button")].find(
-        (b) =>
-          /next message/i.test(b.getAttribute("aria-label") || "") && !b.disabled
-      );
-      if (!next) {
-        warn("no enabled Next-message button — stopping early");
-        break;
-      }
-      next.click();
-      await waitFor(() => {
-        const cur = currentMessageBodyEl(panel);
-        return cur ? cur.innerHTML !== html : false;
-      });
-    }
-
-    // Drop blank / "create your own" stub greetings (JanitorAI's last slot
-    // is often an empty "make your own scenario" card). Judge by rendered
-    // TEXT length, not raw HTML length — mirrors the reference script's
-    // MIN=10 threshold, applied post-conversion there but pre-conversion
-    // here since the server does the HTML→markdown step.
-    const MIN = 10;
-    return bodies.filter((html) => textLength(html) >= MIN);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Lorebook mining — ported from janitorai-export.user.js's jaiPageScrape
-  // (~L557) + fetchScriptsViaPage (~L615). JanitorAI calls attached
-  // lorebooks "scripts"; a character page renders ScriptCards for each. Two
-  // obstacles, both solved by running in PAGE context (see comments there):
-  //   1. ScriptCards are React-routed <div>s with no <a href> carrying the
-  //      id — it only lives in the card's React fiber props.
-  //   2. Reading page-side fiber objects from the userscript sandbox trips
-  //      Firefox Xray, so a <script> tag is injected to run in page
-  //      context, and results cross back via a one-shot CustomEvent
-  //      (primitives only — hence JSON-stringifying the result).
-  // Confirmed live (console-export-2026-6-22_22-15-50.log): the real
-  // endpoint is /hampter/script/<id> (singular) — /hampter/scripts/<id> and
-  // /hampter/lorebooks/<id> both 404.
-  // ---------------------------------------------------------------------------
-
-  // This function's source is stringified and injected into the page — it
-  // must be fully self-contained (no closure over userscript sandbox scope).
-  function jaiLorebookPageScrape(eventName) {
-    var UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-    var ids = new Set();
-    document.querySelectorAll('a[href*="/scripts/"]').forEach(function (a) {
-      var m = (a.getAttribute("href") || "").match(UUID);
-      if (m) ids.add(m[0]);
-    });
-    function fiberKey(el) {
-      return Object.keys(el).find(function (k) {
-        return k.indexOf("__reactFiber$") === 0 || k.indexOf("__reactInternalInstance$") === 0;
-      });
-    }
-    var cards = document.querySelectorAll(
-      '[class*="scriptsSection"] *, [class*="ScriptCard"], [class*="scriptCard"]'
-    );
-    cards.forEach(function (el) {
-      var k = fiberKey(el);
-      if (!k) return;
-      var f = el[k];
-      var depth = 0;
-      while (f && depth < 40) {
-        var p = f.memoizedProps || f.pendingProps;
-        if (p) {
-          for (var key in p) {
-            var v = p[key];
-            if (typeof v === "string") {
-              var mm = v.match(UUID);
-              if (mm) ids.add(mm[0]);
-            } else if (v && typeof v === "object" && typeof v.id === "string" && UUID.test(v.id)) {
-              ids.add(v.id);
-            }
-          }
-        }
-        f = f.return;
-        depth++;
-      }
-    });
-    var arr = Array.from(ids);
-    Promise.all(
-      arr.map(function (id) {
-        return fetch("/hampter/script/" + id, { credentials: "include" })
-          .then(function (r) {
-            return r.ok ? r.json() : null;
-          })
-          .then(function (j) {
-            return j ? { id: id, raw: j } : null;
-          })
-          .catch(function () {
-            return null;
-          });
-      })
-    ).then(function (list) {
-      var ok = list.filter(Boolean);
-      window.dispatchEvent(new CustomEvent(eventName, { detail: JSON.stringify(ok) }));
-    });
-  }
-
-  // Inject jaiLorebookPageScrape into page context and await its
-  // JSON-string result: [{id, raw}, ...] — matches ServerClient.build()'s
-  // `lorebooks` contract directly, no reshaping needed.
-  function fetchLorebooksViaPage(timeoutMs = 15000) {
-    return new Promise((resolve) => {
-      const evt = "jai-lb-" + Math.random().toString(36).slice(2);
-      let done = false;
-      const finish = (val) => {
-        if (done) return;
-        done = true;
-        resolve(val);
-      };
-      window.addEventListener(
-        evt,
-        (e) => {
-          try {
-            finish(JSON.parse(e.detail));
-          } catch (err) {
-            warn("could not parse lorebook scrape result:", err);
-            finish([]);
-          }
-        },
-        { once: true }
-      );
-      const s = document.createElement("script");
-      s.textContent = `(${jaiLorebookPageScrape.toString()})(${JSON.stringify(evt)});`;
-      (document.head || document.documentElement).appendChild(s);
-      s.remove();
-      setTimeout(() => finish([]), timeoutMs);
-    });
-  }
-
-  async function mineLorebooks() {
-    try {
-      const lorebooks = await fetchLorebooksViaPage();
-      log("lorebooks found on page:", lorebooks.length);
-      return lorebooks;
-    } catch (err) {
-      warn("lorebook scrape failed:", err);
-      return [];
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Chat-view detection + hidden-card name persistence — M7. A hidden
-  // profile page carries no usable character name (no accordion, no title
-  // name — just the tagline); the chat page's `_nameText_` is authoritative,
-  // so it's remembered here (GM_setValue) and reused when building from the
-  // profile page.
-  // ---------------------------------------------------------------------------
-  function isChatView() {
-    return !!document.querySelector("[class*='_messageBody_']");
-  }
-
-  function chatCharacterName() {
-    const el = document.querySelector("[class*='_nameText_']");
-    return el ? el.textContent.trim() : "";
-  }
-
-  function rememberChatNameIfChatView() {
-    if (!isChatView()) return;
-    const name = chatCharacterName();
-    if (name) GM_setValue("jai_last_char_name", name);
-  }
-
-  function isHiddenProfile() {
-    return !!document.body && document.body.textContent.includes("Character Definition is hidden");
-  }
-
-  // Mirrors rememberChatNameIfChatView: the hidden/open distinction only
-  // shows up in the DOM on the profile page, but the status pill also
-  // needs it while on the chat page, so it's remembered here.
-  function rememberProfileHiddenStateIfProfileView() {
-    if (isChatView()) return;
-    GM_setValue("jai_last_card_hidden", isHiddenProfile());
-  }
-
-  // Defaults to true (assume hidden) until a profile-page visit has told
-  // us otherwise, so the status pill doesn't flash false checkmarks.
-  function effectiveIsHidden() {
-    return isChatView() ? GM_getValue("jai_last_card_hidden", true) : isHiddenProfile();
-  }
-
-  function effectiveCharacterName() {
-    if (isHiddenProfile()) return GM_getValue("jai_last_char_name", "");
-    return Collector.characterName();
-  }
-
-  function harvestChatGreetings() {
-    const bodies = document.querySelectorAll("[class*='_messageBody_']");
-    const out = [];
-    bodies.forEach((body) => {
-      const clone = body.cloneNode(true);
-      clone
-        .querySelectorAll(
-          "[class*='_messageNameContainerCopying_'], [class*='_nameContainer_'], [class*='_messageFooter_']"
-        )
-        .forEach((el) => el.remove());
-      const html = clone.innerHTML;
-      // Floor at 100 chars of rendered text to skip blank / trivial stub
-      // slots. Note this does NOT reliably exclude JanitorAI's "Custom
-      // Scenario Creator" swipe — those blocks vary wildly per card (some
-      // short, some hundreds of chars of instructions), so no length cutoff
-      // catches them cleanly. Kept a known follow-up; the human reviews the
-      // harvested greetings before/after export. Don't raise this much
-      // higher — some cards have legitimately short opening scenarios.
-      if (textLength(html) >= 100) out.push(html);
-    });
-    return out;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Collector — gathers the raw material for POST /build. Everything else
-  // (HTML→md, macro repair, V3 JSON, PNG chunks) happens server-side; this
-  // just hands over outerHTML, walked greeting HTML, mined lorebook JSON,
-  // and the avatar URL.
-  // ---------------------------------------------------------------------------
-  const Collector = {
-    characterName() {
-      const parts = (document.title || "").split("|");
-      const name = (parts[parts.length - 1] || "").trim();
-      return name || "Unknown";
-    },
-
-    characterId() {
-      const m = window.location.pathname.match(/characters?\/([\w-]+)/i);
-      return m ? m[1] : null;
-    },
-
-    profileHtml() {
-      const root = document.querySelector("main") || document.body;
-      return root ? root.outerHTML : "";
-    },
-
-    avatarUrl() {
-      const img = document.querySelector("img.avatar-image");
-      if (img && img.src) return img.src;
-      const og = document.querySelector('meta[property="og:image:secure_url"]');
-      if (og && og.content) return og.content;
-      const tw = document.querySelector('meta[name="twitter:image"]');
-      if (tw && tw.content) return tw.content;
-      return null;
-    },
-
-    async collect() {
-      const [greetings_html, lorebooks] = await Promise.all([
-        walkGreetings(),
-        mineLorebooks(),
-      ]);
-      return {
-        character: {
-          name: this.characterName(),
-          id: this.characterId(),
-          url: window.location.href,
-        },
-        profile_html: this.profileHtml(),
-        greetings_html,
-        avatar_url: this.avatarUrl(),
-        lorebooks,
-      };
-    },
-  };
-
-  // ---------------------------------------------------------------------------
-  // ExportButton — context-aware. On a chat page it harvests + posts the
-  // greeting capture; on a profile page it runs the existing Collector +
-  // /build path (with the effective name override for hidden cards).
-  // ---------------------------------------------------------------------------
-  const ExportButton = {
-    _el: null,
-    _labelInterval: null,
-
-    mount() {
-      if (this._el) return;
-      const el = document.createElement("button");
-      el.id = "jai-proxy-export";
-      Object.assign(el.style, {
-        position: "fixed",
-        bottom: "44px",
-        right: "12px",
-        zIndex: 999999,
-        padding: "6px 12px",
-        borderRadius: "6px",
-        fontFamily: "monospace",
-        fontSize: "12px",
-        background: "#2d6cdf",
-        color: "#fff",
-        border: "1px solid #1d4ea0",
-        cursor: "pointer",
-      });
-      el.addEventListener("click", () => this._export(el));
-      document.documentElement.appendChild(el);
-      this._el = el;
-      this._updateLabel();
-      if (!this._labelInterval) {
-        this._labelInterval = setInterval(() => this._updateLabel(), 2000);
-      }
-    },
-
-    _updateLabel() {
-      if (!this._el || this._el.disabled) return;
-      rememberChatNameIfChatView();
-      this._el.textContent = isChatView() ? "⬇ Export greetings" : "⬇ Export card";
-    },
-
-    _export(el) {
-      return isChatView() ? this._exportGreetings(el) : this._exportCard(el);
-    },
-
-    async _exportGreetings(el) {
-      const original = el.textContent;
-      el.textContent = "⏳ exporting…";
-      el.disabled = true;
-      let holdMs = 2500;
-      try {
-        const name = chatCharacterName();
-        const greetings_html = harvestChatGreetings();
-        if (!greetings_html.length) {
-          el.textContent = "⚠️ no greetings found";
-          holdMs = 4000;
-        } else {
-          const result = await ServerClient.captureGreetings({ name, greetings_html });
-          log("captured greetings ->", result.count);
-          el.textContent = `✅ captured ${result.count} greetings`;
-        }
-      } catch (err) {
-        el.textContent = "⚠️ failed";
-        el.title = String(err);
-        holdMs = 8000;
-        warn("greetings export failed", err);
-      } finally {
-        setTimeout(() => {
-          el.textContent = original;
-          el.title = "";
-          el.disabled = false;
-        }, holdMs);
-      }
-    },
-
-    async _exportCard(el) {
-      const original = el.textContent;
-      el.textContent = "⏳ exporting…";
-      el.disabled = true;
-      let holdMs = 2500;
-      try {
-        const payload = await Collector.collect();
-        payload.character.name = effectiveCharacterName() || payload.character.name;
-
-        // Prefilled with the detected name so the box is never blank --
-        // the server's own fallback (profile_html-parsed name) can differ
-        // from this client-side default, so we always send back exactly
-        // what's in the box rather than relying on a server-side default.
-        const typed = window.prompt("Save card as:", payload.character.name);
-        if (typed === null) {
-          el.textContent = original;
-          el.disabled = false;
-          return;
-        }
-        payload.output_name = typed.trim() || payload.character.name;
-
-        const result = await ServerClient.build(payload);
-        const warnings = result.warnings || [];
-        if (result.ok) {
-          log("exported card ->", result.path, warnings);
-          if (warnings.length) {
-            const n = warnings.length;
-            const first =
-              warnings[0].length > 60 ? warnings[0].slice(0, 57) + "…" : warnings[0];
-            el.textContent = `⚠️ saved — ${n} warning${n === 1 ? "" : "s"}: ${first}`;
-            el.title = warnings.join("\n");
-            holdMs = 8000;
-            warn("export warnings:", warnings);
-          } else {
-            el.textContent = "✅ saved";
-            el.title = result.path || "";
-          }
-        } else {
-          el.textContent = `⚠️ ${warnings[0] || "failed"}`;
-          el.title = JSON.stringify(result);
-          holdMs = 8000;
-          warn("export failed", result);
-        }
-      } catch (err) {
-        el.textContent = "⚠️ failed";
-        el.title = String(err);
-        holdMs = 8000;
-        warn("export failed", err);
-      } finally {
-        setTimeout(() => {
-          el.textContent = original;
-          el.title = "";
-          el.disabled = false;
-        }, holdMs);
-      }
-    },
-
-    keepAlive() {
-      new MutationObserver(() => {
-        if (!document.getElementById("jai-proxy-export")) {
-          this._el = null;
-          this.mount();
-        }
-      }).observe(document.documentElement, { childList: true, subtree: true });
-    },
-  };
-
-  // ---------------------------------------------------------------------------
-  // ClearCacheButton — wipes server-side .captures state (raw system-prompt
-  // .txt dumps + per-character .json CaptureRecords). Exists because hidden
-  // cards are rectified by name, and name collisions get more likely the
-  // longer captures accumulate. PNGs under output_dir are untouched.
-  // ---------------------------------------------------------------------------
-  const ClearCacheButton = {
-    _el: null,
-
-    mount() {
-      if (this._el) return;
-      const el = document.createElement("button");
-      el.id = "jai-proxy-clear-cache";
-      el.textContent = "🗑 Clear cache";
-      Object.assign(el.style, {
-        position: "fixed",
-        bottom: "76px",
-        right: "12px",
-        zIndex: 999999,
-        padding: "6px 12px",
-        borderRadius: "6px",
-        fontFamily: "monospace",
-        fontSize: "12px",
-        background: "#6b6b6b",
-        color: "#fff",
-        border: "1px solid #4a4a4a",
-        cursor: "pointer",
-      });
-      el.addEventListener("click", () => this._clear(el));
-      document.documentElement.appendChild(el);
-      this._el = el;
-    },
-
-    async _clear(el) {
-      if (!window.confirm("Clear jai-proxy capture cache (all captured system prompts + greetings)? PNGs are not affected.")) {
-        return;
-      }
-      const original = el.textContent;
-      el.textContent = "⏳ clearing…";
-      el.disabled = true;
-      let holdMs = 2000;
-      try {
-        const result = await ServerClient.clearCaptures();
-        log("cleared captures ->", result.removed);
-        el.textContent = `✅ cleared ${result.removed}`;
-      } catch (err) {
-        el.textContent = "⚠️ failed";
-        el.title = String(err);
-        holdMs = 6000;
-        warn("clear cache failed", err);
-      } finally {
-        setTimeout(() => {
-          el.textContent = original;
-          el.title = "";
-          el.disabled = false;
-        }, holdMs);
-      }
-    },
-
-    keepAlive() {
-      new MutationObserver(() => {
-        if (!document.getElementById("jai-proxy-clear-cache")) {
-          this._el = null;
-          this.mount();
-        }
-      }).observe(document.documentElement, { childList: true, subtree: true });
-    },
-  };
-
-  // ---------------------------------------------------------------------------
-  // StatusPill — small fixed-position indicator, polls /health.
-  // ---------------------------------------------------------------------------
-  const StatusPill = {
-    _el: null,
-
-    mount() {
-      if (this._el) return;
-      const el = document.createElement("div");
-      el.id = "jai-proxy-pill";
-      Object.assign(el.style, {
-        position: "fixed",
-        bottom: "12px",
-        right: "12px",
-        zIndex: 999999,
-        padding: "4px 10px",
-        borderRadius: "999px",
-        fontFamily: "monospace",
-        fontSize: "12px",
-        background: "#222",
-        color: "#fff",
-        border: "1px solid #444",
-        pointerEvents: "none",
-        opacity: "0.85",
-      });
-      el.textContent = "⚪ jai-proxy";
-      document.documentElement.appendChild(el);
-      this._el = el;
-      this._poll();
-      setInterval(() => this._poll(), 5000);
-    },
-
-    async _poll() {
-      if (!this._el) return;
-      rememberChatNameIfChatView();
-      rememberProfileHiddenStateIfProfileView();
-      const name = isChatView()
-        ? chatCharacterName()
-        : GM_getValue("jai_last_char_name", "") || Collector.characterName();
-
-      try {
-        if (!name || name === "Unknown") {
-          await ServerClient.health();
-          this._el.textContent = "🟢 jai-proxy";
-          return;
-        }
-        // Open cards carry everything the /build scrape needs directly in
-        // the DOM (no hidden-flow captures required), so show both as
-        // satisfied by default rather than checking capture state that
-        // will never be populated for them.
-        const open = !effectiveIsHidden();
-        const status = open ? null : await ServerClient.captureStatus(name);
-        const sys = open || status.system ? "✓" : "✗";
-        const greet = open || status.greetings ? "✓" : "✗";
-        this._el.textContent = `🟢 ${name} · Sys ${sys} · Greet ${greet}`;
-      } catch {
-        this._el.textContent = "🔴 jai-proxy (server down)";
-      }
-    },
-
-    keepAlive() {
-      new MutationObserver(() => {
-        if (!document.getElementById("jai-proxy-pill")) {
-          this._el = null;
-          this.mount();
-        }
-      }).observe(document.documentElement, { childList: true, subtree: true });
-    },
-  };
-
-  // ---------------------------------------------------------------------------
   // bootstrap
   // ---------------------------------------------------------------------------
   FetchHook.install();
 
   function boot() {
-    StatusPill.mount();
-    StatusPill.keepAlive();
-    ExportButton.mount();
-    ExportButton.keepAlive();
-    ClearCacheButton.mount();
-    ClearCacheButton.keepAlive();
+    Overlay.mount();
+    Overlay.keepAlive();
+    scheduleTick(0);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) scheduleTick(0);
+    });
   }
 
   if (document.readyState === "loading") {
