@@ -1,6 +1,7 @@
 .PHONY: compile test run
 
-# Concatenate userscript/src/*.js -> userscript/jai-proxy-bridge.user.js
+# Concatenate userscript/src_jai/*.js   -> userscript/jai-proxy-bridge.user.js
+# and userscript/src_saucepan/*.js       -> userscript/saucepan-proxy-bridge.user.js
 compile:
 	uv run python scripts/compile_userscript_jai.py
 	uv run python scripts/compile_userscript_saucepan.py

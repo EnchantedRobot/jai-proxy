@@ -53,15 +53,17 @@
     return { result, character };
   }
 
-  async function exportCard(el) {
-    const original = el.textContent;
-    el.textContent = "⏳ exporting…";
+  // Progress lands in the status line above the button (ExportStatus), so the
+  // button keeps its label and just disables for the duration.
+  async function exportCard() {
+    const el = ExportButton._el;
     el.disabled = true;
+    ExportStatus.show("Exporting…");
     let holdMs = 2500;
     try {
       const id = currentCharacterId() || GM_getValue(KEY_ID, "");
       if (!id) {
-        el.textContent = "⚠️ open a character page first";
+        ExportStatus.show("⚠️ Open a character page first", true);
         holdMs = 5000;
         return;
       }
@@ -74,30 +76,25 @@
         log("exported card ->", result.path, warnings);
         if (warnings.length) {
           const n = warnings.length;
-          const first =
-            warnings[0].length > 60 ? warnings[0].slice(0, 57) + "…" : warnings[0];
-          el.textContent = `⚠️ saved — ${n} warning${n === 1 ? "" : "s"}: ${first}`;
+          ExportStatus.show(`⚠️ Saved — ${n} warning${n === 1 ? "" : "s"}`, false);
           el.title = warnings.join("\n");
           holdMs = 8000;
           warn("export warnings:", warnings);
         } else {
-          el.textContent = "✅ saved";
-          el.title = result.path || "";
+          ExportStatus.show("✓ Saved");
         }
       } else {
-        el.textContent = `⚠️ ${warnings[0] || "failed"}`;
-        el.title = JSON.stringify(result);
+        ExportStatus.show(`⚠️ ${warnings[0] || "failed"}`, true);
         holdMs = 8000;
         warn("export failed", result);
       }
     } catch (err) {
-      el.textContent = "⚠️ failed";
-      el.title = String(err);
+      ExportStatus.show("⚠️ Failed", true);
       holdMs = 8000;
       warn("export failed", err);
     } finally {
       setTimeout(() => {
-        el.textContent = original;
+        ExportStatus.hide();
         el.title = "";
         el.disabled = false;
       }, holdMs);

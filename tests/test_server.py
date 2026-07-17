@@ -288,6 +288,30 @@ def test_build_saucepan_response_formatting_lands_in_scenario(tmp_path):
     assert data["name"] == "Taryn"
     # No Advanced Prompt; Response Formatting appended under a label instead.
     assert data["scenario"].startswith("--- Response Formatting Instructions ---")
+
+
+def test_build_saucepan_hidden_card_warns_but_exports_public_fields(tmp_path):
+    # A hidden companion (open_definition:false) can't yield its definition, so
+    # the build warns and falls back to the public fields rather than failing.
+    client = make_client(FakeMLXClient(), tmp_path)
+
+    resp = client.post("/build-saucepan", json={"character": _saucepan("closed_83831943")})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert any("not open" in w for w in body["warnings"])
+    # Public fields (name, blurb, greetings) survive; the hidden definition
+    # (scenario / example dialogue) does not.
+    assert body["fields_present"]["description"] is True
+    assert body["fields_present"]["first_mes"] is True
+    assert body["fields_present"]["scenario"] is False
+    assert body["fields_present"]["mes_example"] is False
+
+    data = _decode(Path(body["path"]))
+    assert data["name"] == "Maddie, Alice, Laila, Veronica, Sadie"
+    assert data["creator"] == "GreatN"
+    assert data["extensions"]["jai"]["sourceKind"] == "saucepan_core"
     assert data["mes_example"] == ""
 
 

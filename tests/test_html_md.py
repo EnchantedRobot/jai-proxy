@@ -80,9 +80,7 @@ def test_link_serialization_keeps_only_http_links():
 
 # ---------------------------------------------------------------------------
 # html_to_md -- the one HTML->markdown path left after the JSON refactor:
-# a character's `description` blurb -> creator_notes. Cross-checked against
-# reference_jai/Akane_Kujo.png, whose creator_notes starts with the same
-# authored prose.
+# a character's `description` blurb -> creator_notes.
 # ---------------------------------------------------------------------------
 
 

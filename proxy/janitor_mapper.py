@@ -48,7 +48,7 @@ def is_hidden(character: dict[str, Any]) -> bool:
 def tags(character: dict[str, Any]) -> list[str]:
     """Official emoji-prefixed `tags` first (emoji stripped), then the
     creator's `custom_tags`, deduped -- matching the real janitorai-export
-    output order (see tests/fixtures/reference_jai/Akane_Kujo.png)."""
+    output order (pinned by test_janitor_mapper.test_akane_maps_to_trusted_reference_metadata)."""
     out: list[str] = []
 
     def add(raw: str) -> None:

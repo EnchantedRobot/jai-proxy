@@ -40,31 +40,42 @@ proxy/config settings, set the endpoint to
 `http://127.0.0.1:8000/v1/chat/completions` (any model name — the server
 overrides it with the loaded MLX model).
 
-The userscript is **compiled** from small modules under `userscript/src/`. After
-editing any of them, rebuild the single-file bundle with:
+The userscript is **compiled** from small modules under `userscript/src_jai/`.
+After editing any of them, rebuild the single-file bundle with:
 
 ```bash
 make compile        # -> userscript/jai-proxy-bridge.user.js
+                    #    + userscript/saucepan-proxy-bridge.user.js
 ```
+
+(A twin **saucepan** bridge is compiled the same way from
+`userscript/src_saucepan/` — same server, same purple export button and
+connection pill. It detects hidden companions too (`🟢 saucepan · hidden ✗`,
+read from `open_definition`), but can't capture them — a hidden saucepan
+definition isn't exposed by the API — so those export only their public blurb,
+with a server warning.)
 
 ## Usage
 
-A pill in the bottom-right corner shows 🟢/🔴 for server reachability. On a
-character page it also shows the character and, for hidden cards, its capture
-state, e.g. `🟢 Ari · Sys ✓ · Greet ✗` (open cards just show `· open ✓`).
+A pill in the bottom-right corner shows 🟢/🔴 for server reachability and, on a
+card page, whether the card in view is exportable right now — **without** naming
+the character (the server pulls that cleanly from the API at build time). Open
+cards show `🟢 jai-proxy · ready ✓`; hidden cards show `· hidden ✓` once captured
+(`· hidden ✗` before). Off a card the pill is just `🟢 jai-proxy`. It carries a
+small **CLEAR** link on its right edge.
 
-Just above the pill is the **⬇ Export card** button; it turns green when the card
-in view can be exported right now. The pill carries a small **CLEAR** link on its
-right edge.
+Just above the pill is the purple **⬇ Export to card** button; it dims slightly
+when the card in view isn't exportable yet. Export progress (`Fetching…`,
+`✓ Saved`) appears in a status line just above the button.
 
 ### Public cards
 
-Open the character's page and click **⬇ Export card**. The card is read straight
-from JanitorAI's JSON API — no chat needed. You're prompted for the card name
-(`Save card as:`, prefilled with the real name (`chat_name`) but editable, since
-JanitorAI's card title is often a scenario blurb rather than the character name).
-The button reports `✅ saved` on a clean export. Alternate greetings and public
-lorebooks are fetched automatically during export; there's no separate step.
+Open the character's page and click **⬇ Export to card**. The card is read
+straight from JanitorAI's JSON API — no chat needed, and no name prompt (the
+server saves it under the real `chat_name`; JanitorAI's card title is often a
+scenario blurb rather than the character name). The status line reports
+`✓ Saved` on a clean export. Alternate greetings and public lorebooks are
+fetched automatically during export; there's no separate step.
 
 ### Hidden-definition cards
 
@@ -74,10 +85,10 @@ exist in the chat. So there's **one** extra step:
 1. **Open a chat** with the character and **send any message** (e.g. `hello`).
    As the server relays that request it captures the hidden definition from the
    system prompt *and* the primary greeting from the chat's first message in one
-   shot (pill shows `Sys ✓ · Greet ✓`).
-2. Click **⬇ Export card** (on the character page, or from the chat).
+   shot (pill shows `· hidden ✓`).
+2. Click **⬇ Export to card** (on the character page, or from the chat).
 
-If you click Export card on a hidden card before it's been captured, the build
+If you click Export to card on a hidden card before it's been captured, the build
 **hard-fails** with a message telling you to send a chat message first — it never
 writes a broken card. Everything else a hidden card needs (name, tags, creator
 notes, alternate greetings, avatar, lorebooks) still comes from the JSON.
@@ -87,15 +98,15 @@ notes, alternate greetings, avatar, lorebooks) still comes from the JSON.
 Hidden cards are matched by character name against accumulated captures, so name
 collisions get likelier as captures pile up. The pill's **CLEAR** link wipes all
 captured system prompts and greetings (`./cards/.captures/`) and also resets the
-plugin's own remembered state (last card name / id / hidden flag). Finished PNGs
-in `./cards/` are not affected.
+plugin's own remembered state (last card id / hidden flag). Finished PNGs in
+`./cards/` are not affected.
 
 ### Reading the result
 
-The Export button's text reports the outcome: `✅ saved`, or
-`⚠️ saved — N warnings: ...` if something was degraded (e.g. an unresolved macro
-or a missing field — hover the button for the full list), or `⚠️ <message>` if
-the build request itself failed (the hidden-card gate reports its reason here;
+The status line above the button reports the outcome: `✓ Saved`, or
+`⚠️ Saved — N warning(s)` if something was degraded (e.g. an unresolved macro or
+a missing field — hover the button for the full list), or `⚠️ <message>` if the
+build request itself failed (the hidden-card gate reports its reason here;
 otherwise check the server logs).
 
 ## Tests

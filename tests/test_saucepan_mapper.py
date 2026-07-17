@@ -22,6 +22,7 @@ EVE = "04a0c1ac"
 TARYN = "1155a61e"
 AKANE = "7aef6bad"
 JJ = "ff6eb375"
+CLOSED = "closed_83831943"  # hidden companion: open_definition:false
 
 
 def load(id_fragment: str) -> dict:
@@ -150,6 +151,36 @@ def test_build_scenario_advanced_leads_then_labeled_extras():
 def test_build_scenario_empty_when_only_core_and_example():
     sections = [("Companion Core", "c"), ("Example Dialogue", "e")]
     assert m._build_scenario(sections) == ""
+
+
+# ---------------------------------------------------------------------------
+# Hidden/locked companion -- open_definition:false. The definition API returns a
+# decoy error, so only the v2 public fields survive (name, blurb, greetings,
+# avatar); the definition sections (scenario/example) come back empty. This is
+# the flag the userscript pill reads to show `hidden ✗`.
+# ---------------------------------------------------------------------------
+
+
+def test_hidden_companion_is_not_open():
+    raw = load(CLOSED)
+    assert m.is_open(raw) is False
+    # the definition endpoint returned a decoy error, not real sections
+    assert list((raw.get("definition") or {}).keys()) == ["error"]
+
+
+def test_hidden_companion_falls_back_to_public_fields():
+    raw = load(CLOSED)
+    pf = m.to_profile_fields(raw)
+    assert pf.name == "Maddie, Alice, Laila, Veronica, Sadie"
+    assert pf.creator == "GreatN"
+    assert m.page_name(raw) == "Roommate Hates Your New Girlfriend"
+    # description falls back to the v2 public blurb...
+    assert pf.description.startswith("You have been living the dream")
+    # ...but the definition sections (scenario/example dialogue) are gone.
+    assert pf.scenario == ""
+    assert pf.mes_example == ""
+    # starting scenarios live in the v2 companion payload, so greetings survive.
+    assert len(m.greetings(raw)) == 9
 
 
 # ---------------------------------------------------------------------------
