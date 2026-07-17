@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     allowed_origins: list[str] = ["*"]
     user_names: list[str] = ["USER"]
 
+    # Lossily quantize card avatars with pngquant before embedding the card.
+    # Fails soft: if the binary is missing or can't shrink the image, the
+    # uncompressed PNG is written instead. Default binary is the one vendored
+    # next to this package; override with JAI_PROXY_PNGQUANT_BIN or PATH.
+    compress: bool = True
+    pngquant_bin: Path = Path(__file__).resolve().parent / "pngquant"
+
 
 settings = Settings()
 settings.output_dir.mkdir(parents=True, exist_ok=True)

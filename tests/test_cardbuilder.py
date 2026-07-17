@@ -1,12 +1,15 @@
 import base64
 import io
 import json
+import random
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
-from proxy import janitor_mapper
-from proxy.cardbuilder import CardBuilder, PngWriter, _safe_filename
+from proxy import janitor_mapper, pngtools
+from proxy.cardbuilder import CardBuilder, PngWriter, _id_fragment, _safe_filename
+from proxy.config import settings
 from proxy.macros import MacroSanitizer
 from proxy.models import CaptureRecord, CharacterBook, LoreEntry, ProfileFields
 
@@ -130,6 +133,16 @@ def test_safe_filename_strips_unsafe_characters():
     assert _safe_filename("Akane Kujo") == "Akane_Kujo"
 
 
+def test_id_fragment_takes_first_uuid_segment():
+    assert _id_fragment("bffaaf71-6c33-4e82-8cf2-3699f2ce4d92") == "bffaaf71"
+    # Non-UUID / shorter ids pass through (capped at 8 chars).
+    assert _id_fragment("abc123") == "abc123"
+    assert _id_fragment("0123456789") == "01234567"
+    # Nothing usable -> empty, so the filename degrades to just the name.
+    assert _id_fragment(None) == ""
+    assert _id_fragment("   ") == ""
+
+
 # ---------------------------------------------------------------------------
 # PngWriter -- round trip: write -> reopen -> read chunks back -> JSON equal.
 # ---------------------------------------------------------------------------
@@ -142,10 +155,11 @@ def test_png_writer_round_trips_card_json(tmp_path):
     card, _ = CardBuilder().build(profile, greetings=greetings, capture=None, book=None)
 
     writer = PngWriter(output_dir=tmp_path)
-    path = writer.write(card, _png_bytes())
+    path = writer.write(card, _png_bytes(), card_id="bffaaf71-6c33-4e82-8cf2-3699f2ce4d92")
 
-    assert path.parent == tmp_path
-    assert path.name == "Akane_Kujo.png"
+    # Foldered by creator, name suffixed with the 8-char id fragment.
+    assert path.parent == tmp_path / "dezea"
+    assert path.name == "Akane_Kujo_bffaaf71.png"
     assert path.exists()
 
     reopened = Image.open(path)
@@ -179,7 +193,81 @@ def test_png_writer_creates_output_dir_if_missing(tmp_path):
 
     path = PngWriter(output_dir=out_dir).write(card, _png_bytes())
     assert path.exists()
-    assert path.parent == out_dir
+    # No creator on the card -> foldered under "unknown_creator".
+    assert path.parent == out_dir / "unknown_creator"
+
+
+# ---------------------------------------------------------------------------
+# pngquant compression + raw tEXt (re)injection.
+# ---------------------------------------------------------------------------
+
+
+def _noisy_png(side: int = 96) -> bytes:
+    """A many-colour RGB image whose lossless PNG is meaningfully larger than a
+    256-colour quantized version -- so pngquant has something to shrink. Solid
+    fills (like _png_bytes) are already tiny and get skipped by
+    --skip-if-larger."""
+    rng = random.Random(0)
+    data = bytes(rng.randrange(256) for _ in range(side * side * 3))
+    buf = io.BytesIO()
+    Image.frombytes("RGB", (side, side), data).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_inject_text_chunks_replaces_rather_than_duplicates():
+    injected = pngtools.inject_text_chunks(_png_bytes(), {"chara": "AAA", "ccv3": "AAA"})
+    reinjected = pngtools.inject_text_chunks(injected, {"chara": "BBB", "ccv3": "BBB"})
+
+    reopened = Image.open(io.BytesIO(reinjected))
+    assert reopened.text["chara"] == "BBB"
+    assert reopened.text["ccv3"] == "BBB"
+
+
+def test_pngtools_quantize_shrinks_and_stays_valid_png():
+    original = _noisy_png()
+    out = pngtools.quantize(original, settings.pngquant_bin)
+    if out is None:
+        pytest.skip("pngquant binary not runnable on this platform")
+    assert out.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(out) < len(original)
+
+
+def test_png_writer_card_survives_quantization(tmp_path):
+    profile = ProfileFields(name="Noisy", description="d" * 50, creator="c")
+    card, _ = CardBuilder().build(profile, greetings=["g" * 200], capture=None, book=None)
+
+    path = PngWriter(output_dir=tmp_path, compress=True).write(card, _noisy_png())
+
+    reopened = Image.open(path)
+    assert reopened.format == "PNG"
+    assert reopened.text["chara"] == reopened.text["ccv3"]
+    assert json.loads(base64.b64decode(reopened.text["ccv3"])) == card.to_dict()
+
+
+def test_png_writer_compression_shrinks_output_file(tmp_path):
+    profile = ProfileFields(name="Big", creator="c")
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+    avatar = _noisy_png()
+    if pngtools.quantize(avatar, settings.pngquant_bin) is None:
+        pytest.skip("pngquant binary not runnable on this platform")
+
+    small = PngWriter(output_dir=tmp_path / "on", compress=True).write(card, avatar)
+    big = PngWriter(output_dir=tmp_path / "off", compress=False).write(card, avatar)
+    assert small.stat().st_size < big.stat().st_size
+
+
+def test_png_writer_falls_back_when_binary_missing(tmp_path):
+    profile = ProfileFields(name="Fallback", creator="c")
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+
+    # A bogus binary path with no pngquant on PATH -> compression disabled, but
+    # a valid, card-bearing PNG is still written.
+    writer = PngWriter(output_dir=tmp_path, compress=True, pngquant_bin=tmp_path / "nope")
+    path = writer.write(card, _noisy_png())
+
+    reopened = Image.open(path)
+    assert reopened.format == "PNG"
+    assert json.loads(base64.b64decode(reopened.text["chara"]))["data"]["name"] == "Fallback"
 
 
 # ---------------------------------------------------------------------------

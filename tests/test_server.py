@@ -201,7 +201,10 @@ def test_build_exports_open_card_png(tmp_path):
     assert body["fields_present"]["alternate_greetings"] is True
 
     path = Path(body["path"])
-    assert path.exists() and path.parent == tmp_path
+    # Foldered by creator, name suffixed with the card-id fragment.
+    assert path.exists()
+    assert path.parent == tmp_path / "dezea"
+    assert path.name == "Akane_Kujo_abc123.png"
 
     data = _decode(path)
     assert data["name"] == "Akane Kujo"
@@ -245,15 +248,21 @@ def test_build_uses_output_name_override_as_card_name_and_filename(tmp_path):
     resp = client.post(
         "/build",
         json={
-            "character": {"name": "Chatname"},
-            "character_json": {"chat_name": "Chatname", "name": "Scenario Hook Blurb"},
+            "character": {"name": "Chatname", "id": "deadbeef-1234-5678-9abc-def012345678"},
+            "character_json": {
+                "chat_name": "Chatname",
+                "name": "Scenario Hook Blurb",
+                "creator_name": "somecreator",
+            },
             "output_name": "My Custom Save Name",
         },
     )
 
     assert resp.status_code == 200
     path = Path(resp.json()["path"])
-    assert path.name == "My_Custom_Save_Name.png"
+    # output_name drives the filename stem; creator folders it; id suffixes it.
+    assert path.parent.name == "somecreator"
+    assert path.name == "My_Custom_Save_Name_deadbeef.png"
 
     data = _decode(path)
     assert data["name"] == "My Custom Save Name"
@@ -454,7 +463,7 @@ def test_clear_captures_wipes_state_but_leaves_pngs(tmp_path):
         json={"character": {"name": "Ari"}, "character_json": _hidden_ari_json()},
     )
     assert resp.json()["ok"] is True
-    assert any(output_dir.glob("*.png"))
+    assert any(output_dir.rglob("*.png"))
 
     body = client.post("/clear-captures").json()
     assert body["ok"] is True
@@ -462,4 +471,4 @@ def test_clear_captures_wipes_state_but_leaves_pngs(tmp_path):
 
     status = client.get("/capture-status", params={"name": "Ari"}).json()
     assert status == {"name": "Ari", "system": False, "greetings": False}
-    assert any(output_dir.glob("*.png"))
+    assert any(output_dir.rglob("*.png"))
