@@ -17,61 +17,10 @@ def parser() -> SystemPromptParser:
 
 
 # ---------------------------------------------------------------------------
-# Real captures -- public-definition cards
-# ---------------------------------------------------------------------------
-
-
-def test_kira_public_card(parser):
-    raw = _load("system_prompt_open_kira.txt")
-    parsed = parser.parse(raw)
-
-    assert parsed.name == "Kira"
-    assert parsed.personality.startswith("## Kira description")
-    assert "Tags/archetypes: edgy" in parsed.personality
-    # No <Scenario> tag and no trailing content in this capture.
-    assert parsed.scenario == ""
-    assert parsed.mes_example.startswith("Kira knocked on USER's door")
-    assert parsed.raw == raw
-
-
-def test_sabrina_hill_public_card(parser):
-    raw = _load("system_prompt_open_sabrina_hill.txt")
-    parsed = parser.parse(raw)
-
-    # Tag-derived name is best-effort -- "Sabrina's Persona" strips to
-    # "Sabrina", not the full "Sabrina Hill" from inside the body. The card
-    # JSON's chat_name (via janitor_mapper) is the source of truth for the
-    # full name; it wins over the capture at merge time (cardbuilder).
-    assert parsed.name == "Sabrina"
-    assert parsed.personality.startswith("> Basic Information:")
-    assert "Name: Sabrina Hill" in parsed.personality
-    # No <example_dialogs> tag in this capture.
-    assert parsed.mes_example == ""
-    # <Scenario> content plus genuine trailing creator content (not inside
-    # any tag) both fold into scenario.
-    assert "It is a genuinely comfortable space" in parsed.scenario
-    assert "Sex and Intimacy" in parsed.scenario
-    assert parsed.raw == raw
-
-
-def test_akane_kujo_public_card(parser):
-    raw = _load("system_prompt_open_akane_kujo.txt")
-    parsed = parser.parse(raw)
-
-    assert parsed.name == "Akane Kujo"
-    assert parsed.personality.startswith(">Character Information:")
-    assert "Name: Akane Kujo" in parsed.personality
-    # No <example_dialogs> tag in this capture (matches the DOM's "Example
-    # Dialogs (0 tokens)" accordion for this same character).
-    assert parsed.mes_example == ""
-    assert "Pronoun Awareness" in parsed.scenario
-    # Trailing creator-authored world-info block after </Scenario>.
-    assert "Kamii University" in parsed.scenario
-    assert parsed.raw == raw
-
-
-# ---------------------------------------------------------------------------
-# Real captures -- hidden-definition cards
+# Real captures -- hidden-definition cards. (The parser also tolerates the
+# open-card system-prompt format, but open cards now take their definition
+# from the JSON API, so the parser's output is only load-bearing for hidden
+# cards -- which is all these fixtures cover.)
 # ---------------------------------------------------------------------------
 
 

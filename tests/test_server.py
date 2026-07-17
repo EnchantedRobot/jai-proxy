@@ -16,6 +16,11 @@ def _character(name: str) -> dict:
     return json.loads((FIXTURES / "hampter" / f"{name}.json").read_text(encoding="utf-8"))
 
 
+def _saucepan(id_fragment: str) -> dict:
+    path = next((FIXTURES / "saucepan").glob(f"saucepan_{id_fragment}*.json"))
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def _prompt(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
 
@@ -227,6 +232,140 @@ def test_build_exports_open_card_png(tmp_path):
     assert "linkedAt" in jai
 
 
+# ---------------------------------------------------------------------------
+# /build-saucepan -- open card export end-to-end (saucepan JSON API path). Same
+# assemble/write tail as /build; differs only in the source mapper.
+# ---------------------------------------------------------------------------
+
+
+def test_build_saucepan_exports_open_card_png(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    eve = _saucepan("04a0c1ac")
+
+    resp = client.post("/build-saucepan", json={"character": eve})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["fields_present"]["description"] is True
+    assert body["fields_present"]["scenario"] is True
+    assert body["fields_present"]["first_mes"] is True
+    assert body["fields_present"]["alternate_greetings"] is True
+    assert body["fields_present"]["character_book"] is True
+
+    path = Path(body["path"])
+    # Foldered by creator handle, name suffixed with the companion-id fragment.
+    assert path.parent == tmp_path / "desslok"
+    assert path.name == "Eve_04a0c1ac.png"
+
+    data = _decode(path)
+    assert data["name"] == "Eve"
+    assert data["creator"] == "desslok"
+    assert data["first_mes"].startswith("Throughout her first week at Crestfall High")
+    assert len(data["alternate_greetings"]) == 3  # 5 scenarios, one blank dropped
+    # Advanced Prompt leads scenario, raw.
+    assert data["scenario"].startswith("{{char}} is an android")
+    assert len(data["character_book"]["entries"]) == 19  # two lorebooks merged
+    assert (
+        data["character_version"]
+        == "https://saucepan.ai/companion/04a0c1ac-187b-4aa0-8f5b-885533be748d"
+    )
+
+    jai = data["extensions"]["jai"]
+    assert jai["sourceKind"] == "saucepan_core"
+    assert jai["id"] == "04a0c1ac-187b-4aa0-8f5b-885533be748d"
+    assert jai["source_url"] == "https://saucepan.ai/companion/04a0c1ac-187b-4aa0-8f5b-885533be748d"
+    assert jai["creatorName"] == "desslok"
+    assert jai["pageName"] == "Eve | I Did Nothing Wrong"
+
+
+def test_build_saucepan_response_formatting_lands_in_scenario(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+
+    resp = client.post("/build-saucepan", json={"character": _saucepan("1155a61e")})
+
+    data = _decode(resp.json()["path"])
+    assert data["name"] == "Taryn"
+    # No Advanced Prompt; Response Formatting appended under a label instead.
+    assert data["scenario"].startswith("--- Response Formatting Instructions ---")
+
+
+def test_build_saucepan_hidden_card_warns_but_exports_public_fields(tmp_path):
+    # A hidden companion (open_definition:false) can't yield its definition, so
+    # the build warns and falls back to the public fields rather than failing.
+    client = make_client(FakeMLXClient(), tmp_path)
+
+    resp = client.post("/build-saucepan", json={"character": _saucepan("closed_83831943")})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert any("not open" in w for w in body["warnings"])
+    # Public fields (name, blurb, greetings) survive; the hidden definition
+    # (scenario / example dialogue) does not.
+    assert body["fields_present"]["description"] is True
+    assert body["fields_present"]["first_mes"] is True
+    assert body["fields_present"]["scenario"] is False
+    assert body["fields_present"]["mes_example"] is False
+
+    data = _decode(Path(body["path"]))
+    assert data["name"] == "Maddie, Alice, Laila, Veronica, Sadie"
+    assert data["creator"] == "GreatN"
+    assert data["extensions"]["jai"]["sourceKind"] == "saucepan_core"
+    assert data["mes_example"] == ""
+
+
+# ---------------------------------------------------------------------------
+# /existing -- "which of these ids are already on disk?" for bulk skip.
+# ---------------------------------------------------------------------------
+
+
+def test_existing_reports_only_ids_already_on_disk(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    akane = _character("open_akane_kujo")
+
+    # Save one card, then ask about its id plus one we never built.
+    client.post(
+        "/build",
+        json={
+            "character": {"name": "Akane Kujo", "id": "abc123"},
+            "character_json": akane,
+        },
+    )
+
+    resp = client.post("/existing", json={"ids": ["abc123", "never-built-999"]})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"existing": ["abc123"]}
+
+
+def test_existing_matches_on_id_fragment_regardless_of_name(tmp_path):
+    # The saved filename keys on the first 8 id chars, so a full UUID whose
+    # fragment matches an on-disk card is reported even though the caller has
+    # no idea what name it was saved under.
+    client = make_client(FakeMLXClient(), tmp_path)
+    client.post(
+        "/build",
+        json={
+            "character": {"name": "Whoever", "id": "deadbeef-1111-2222-3333-444455556666"},
+            "character_json": {"chat_name": "Whoever", "creator_name": "acreator"},
+        },
+    )
+
+    resp = client.post(
+        "/existing", json={"ids": ["deadbeef-1111-2222-3333-444455556666"]}
+    )
+
+    assert resp.json()["existing"] == ["deadbeef-1111-2222-3333-444455556666"]
+
+
+def test_existing_empty_request_returns_empty(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    resp = client.post("/existing", json={"ids": []})
+    assert resp.status_code == 200
+    assert resp.json() == {"existing": []}
+
+
 def test_build_falls_back_to_character_name_without_character_json(tmp_path):
     client = make_client(FakeMLXClient(), tmp_path)
 
@@ -242,49 +381,34 @@ def test_build_falls_back_to_character_name_without_character_json(tmp_path):
     assert data["character_version"] == "jai-proxy"
 
 
-def test_build_uses_output_name_override_as_card_name_and_filename(tmp_path):
+def test_build_names_card_from_chat_name_not_title_blurb(tmp_path):
+    # The userscript sends no name anymore -- the server names the card (and its
+    # file) from chat_name (the real character name), never from the JSON `name`
+    # field (the card-title blurb), which is preserved only as metadata.
     client = make_client(FakeMLXClient(), tmp_path)
 
     resp = client.post(
         "/build",
         json={
-            "character": {"name": "Chatname", "id": "deadbeef-1234-5678-9abc-def012345678"},
+            "character": {"id": "deadbeef-1234-5678-9abc-def012345678"},
             "character_json": {
                 "chat_name": "Chatname",
                 "name": "Scenario Hook Blurb",
                 "creator_name": "somecreator",
             },
-            "output_name": "My Custom Save Name",
         },
     )
 
     assert resp.status_code == 200
     path = Path(resp.json()["path"])
-    # output_name drives the filename stem; creator folders it; id suffixes it.
+    # chat_name drives the filename stem; creator folders it; id suffixes it.
     assert path.parent.name == "somecreator"
-    assert path.name == "My_Custom_Save_Name_deadbeef.png"
+    assert path.name == "Chatname_deadbeef.png"
 
     data = _decode(path)
-    assert data["name"] == "My Custom Save Name"
+    assert data["name"] == "Chatname"
     # The title blurb is preserved as metadata, not embedded as data.name.
     assert data["extensions"]["jai"]["pageName"] == "Scenario Hook Blurb"
-
-
-def test_build_blank_output_name_falls_back_to_chat_name(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
-
-    resp = client.post(
-        "/build",
-        json={
-            "character": {"name": "Chatname"},
-            "character_json": {"chat_name": "Real Name"},
-            "output_name": "   ",
-        },
-    )
-
-    path = Path(resp.json()["path"])
-    assert path.name == "Real_Name.png"
-    assert _decode(path)["name"] == "Real Name"
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +498,11 @@ def test_build_hidden_card_merges_capture_and_json(tmp_path):
     # Metadata from the JSON.
     assert data["creator"] == "somecreator"
     assert data["tags"] == ["AnyPOV", "mystery"]
-    assert data["creator_notes"] == "The creator's authored note."
+    # creator_notes leads with a markdown reference to the original avatar.
+    assert data["creator_notes"] == (
+        "![Ari](https://ella.janitorai.com/bot-avatars/ari.webp)\n\n"
+        "The creator's authored note."
+    )
     assert data["extensions"]["jai"]["pageName"] == "A Mysterious Transfer Student"
 
 

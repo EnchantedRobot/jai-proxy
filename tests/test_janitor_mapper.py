@@ -12,10 +12,10 @@ def load(name: str) -> dict:
     return json.loads((FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
 
 
-# Ground truth from probing the 8 real captured payloads (see
-# jai_proxy_janitor_api memory): the `closed_` prefix tracks LOREBOOK
-# visibility, NOT the card -- alaina/lila are actually open cards.
-OPEN = ["open_nyla", "open_io", "open_akane_kujo", "open_vaelyra", "closed_alaina", "closed_lila"]
+# Ground truth from the real captured payloads (see jai_proxy_janitor_api
+# memory). `open_lila` keeps its own lorebook closed but the card itself is
+# open (showdefinition: true); the `closed_*` cards are genuinely hidden.
+OPEN = ["open_nyla", "open_akane_kujo", "open_vaelyra", "open_lila"]
 HIDDEN = ["closed_amaya", "closed_selene"]
 
 
@@ -55,10 +55,10 @@ def test_open_card_maps_full_definition():
 
 
 def test_akane_maps_to_trusted_reference_metadata():
-    # Exact cross-check against tests/fixtures/reference_jai/Akane_Kujo.png,
-    # the real janitorai-export output for this same card: chat_name is the
-    # real name, official emoji tags come first (emoji stripped) then the
-    # creator's custom_tags.
+    # Pins the trusted mapping for this card (historically cross-checked
+    # against the real janitorai-export output): chat_name is the real name,
+    # official emoji tags come first (emoji stripped) then the creator's
+    # custom_tags.
     fields = mapper.to_profile_fields(load("open_akane_kujo"))
 
     assert fields.name == "Akane Kujo"
@@ -147,8 +147,8 @@ def test_hidden_card_greetings_are_alternates_only(name):
 
 def test_short_placeholder_greetings_are_dropped():
     # closed_amaya / closed_selene each carry a "."/"..." placeholder;
-    # closed_lila a 28-char stray. None survive the 100-char floor.
-    for name in ("closed_amaya", "closed_selene", "closed_lila"):
+    # open_lila a 28-char stray. None survive the 100-char floor.
+    for name in ("closed_amaya", "closed_selene", "open_lila"):
         greetings = mapper.greetings(load(name))
         assert greetings and all(len(g) >= 100 for g in greetings)
 

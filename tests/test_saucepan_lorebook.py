@@ -19,35 +19,11 @@ See tests/fixtures/README.md for provenance.
 import json
 from pathlib import Path
 
+# The algorithm under test now lives in proxy/ (lifted here once saucepan support
+# became real). This file stays the executable spec, pinned against real captures.
+from proxy.saucepan_fragments import _is_real, deobfuscate_fragments
+
 FIXTURES = Path(__file__).parent / "fixtures" / "saucepan"
-
-MASK32 = 0xFFFFFFFF
-FNV32_OFFSET = 2166136261
-FNV32_PRIME = 16777619
-
-
-def _rotl32(value: int, bits: int) -> int:
-    return ((value << bits) | (value >> (32 - bits))) & MASK32
-
-
-def _fragment_proof(mask: int, ordinal: int, text: str) -> int:
-    """FNV-1a variant seeded from (mask, ordinal). Mirrors the bundle's `T0t`."""
-    acc = (FNV32_OFFSET ^ _rotl32(mask, 7) ^ _rotl32(ordinal, 13)) & MASK32
-    for byte in text.encode("utf-8"):
-        acc = ((acc ^ byte) * FNV32_PRIME) & MASK32
-    return acc
-
-
-def _is_real(mask: int, fragment: dict) -> bool:
-    ordinal = fragment["key"] ^ mask
-    return _fragment_proof(mask, ordinal, fragment["text"]) == fragment["proof"]
-
-
-def deobfuscate_fragments(text_fragments: dict) -> str:
-    mask = text_fragments["mask"]
-    real = [f for f in text_fragments["fragments"] if _is_real(mask, f)]
-    real.sort(key=lambda f: f["key"] ^ mask)
-    return "".join(f["text"] for f in real)
 
 
 def _load_chapter(name: str) -> dict:

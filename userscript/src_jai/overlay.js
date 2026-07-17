@@ -1,18 +1,26 @@
   // ---------------------------------------------------------------------------
-  // Overlay widgets — a single fixed-position container (#jai-proxy-root) holds
-  // the export button and the status pill. All styling lives in one injected
-  // <style> instead of per-element inline styles.
+  // Overlay widgets — a single fixed-position container (#jai-proxy-root) holds,
+  // top to bottom: the bulk panel (profile pages only), a transient status line,
+  // the purple Export button, and the connection pill. All styling lives in one
+  // injected <style> instead of per-element inline styles.
   // ---------------------------------------------------------------------------
   const OVERLAY_STYLE = `
     #jai-proxy-root {
       position: fixed; bottom: 12px; right: 12px; z-index: 999999;
       display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
-      font-family: monospace; font-size: 12px; pointer-events: none;
+      font-family: system-ui, sans-serif; font-size: 12px; pointer-events: none;
+    }
+    #jai-proxy-status {
+      pointer-events: auto; display: none; max-width: 260px;
+      padding: 3px 8px; border-radius: 8px; color: #fff;
+      background: rgba(0,0,0,.6); word-break: break-word;
     }
     #jai-proxy-export {
-      pointer-events: auto; padding: 6px 12px; border-radius: 6px; color: #fff;
-      background: #2d6cdf; border: 1px solid #1d4ea0; cursor: pointer;
+      pointer-events: auto; padding: 10px 14px; border-radius: 10px; border: none;
+      background: #7a3db5; color: #fff; font-family: inherit; font-size: 13px;
+      font-weight: 600; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.3);
     }
+    #jai-proxy-export:disabled { cursor: default; }
     #jai-proxy-pill {
       display: flex; align-items: center; gap: 8px; padding: 4px 10px;
       border-radius: 999px; background: #222; color: #fff; border: 1px solid #444;
@@ -33,8 +41,9 @@
     }
     #jai-proxy-bulk .jai-bulk-title { font-weight: bold; }
     #jai-proxy-bulk-btn {
-      pointer-events: auto; padding: 5px 10px; border-radius: 6px; color: #fff;
-      background: #2d6cdf; border: 1px solid #1d4ea0; cursor: pointer; font: inherit;
+      pointer-events: auto; padding: 6px 12px; border-radius: 8px; color: #fff;
+      background: #7a3db5; border: none; cursor: pointer; font: inherit;
+      font-weight: 600;
     }
     #jai-proxy-bulk-btn:disabled { opacity: 0.6; cursor: default; }
     #jai-proxy-bulk .jai-bulk-status { opacity: 0.85; word-break: break-word; }
@@ -50,29 +59,48 @@
   `;
 
   // ---------------------------------------------------------------------------
-  // ExportButton — one action now (the greeting-capture button is gone; hidden
-  // greetings ride in on the chat relay). The scheduler drives its ready
-  // colour via setReady(); green = the card in view can be exported right now
-  // (open card, or hidden card whose captures are present).
+  // ExportButton — one always-purple action button (mirrors the saucepan
+  // bridge). Readiness is no longer color-coded on the button itself — the pill
+  // already spells it out (ready ✓ / hidden ✓ / hidden ✗) — so the scheduler
+  // only dims the button slightly when the card in view can't be exported yet.
   // ---------------------------------------------------------------------------
   const ExportButton = {
     _el: null,
 
-    setReady(green) {
+    setReady(ready) {
       if (!this._el || this._el.disabled) return;
-      this._el.style.background = green ? "#2e9e4f" : "#2d6cdf";
-      this._el.style.borderColor = green ? "#22803c" : "#1d4ea0";
+      this._el.style.opacity = ready ? "1" : "0.6";
     },
 
     onClick() {
-      return exportCard(this._el);
+      return exportCard();
     },
   };
 
   // ---------------------------------------------------------------------------
-  // Pill — status indicator + inline CLEAR affordance. CLEAR wipes the
-  // server-side capture cache AND resets the plugin's remembered state (last
-  // card name / id / hidden flag). Exported PNGs are untouched. flash() shows
+  // ExportStatus — the transient line that sits just above the button (like the
+  // saucepan bridge's "Fetching…" / "✓ Saved" toast). Export progress lands
+  // here now instead of hijacking the button's own label.
+  // ---------------------------------------------------------------------------
+  const ExportStatus = {
+    _el: null,
+
+    show(text, isError) {
+      if (!this._el) return;
+      this._el.textContent = text;
+      this._el.style.display = "block";
+      this._el.style.background = isError ? "rgba(150,30,30,.85)" : "rgba(0,0,0,.6)";
+    },
+
+    hide() {
+      if (this._el) this._el.style.display = "none";
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Pill — connection indicator + inline CLEAR affordance. CLEAR wipes the
+  // server-side capture cache AND resets the plugin's remembered card state
+  // (last id / hidden flag). Exported PNGs are untouched. flash() shows
   // transient feedback the scheduler's setStatus() won't overwrite until the
   // hold expires.
   // ---------------------------------------------------------------------------
@@ -135,28 +163,32 @@
       const root = document.createElement("div");
       root.id = "jai-proxy-root";
 
+      const status = document.createElement("div");
+      status.id = "jai-proxy-status";
+
       const btn = document.createElement("button");
       btn.id = "jai-proxy-export";
-      btn.textContent = "⬇ Export card";
+      btn.textContent = "⬇ Export to card";
       btn.addEventListener("click", () => ExportButton.onClick());
 
       const pill = document.createElement("div");
       pill.id = "jai-proxy-pill";
-      const status = document.createElement("span");
-      status.textContent = "⚪ jai-proxy";
+      const pillStatus = document.createElement("span");
+      pillStatus.textContent = "⚪ jai-proxy";
       const clear = document.createElement("span");
       clear.className = "jai-clear";
       clear.textContent = "CLEAR";
       clear.title = "Clear server capture cache + reset remembered card state";
       clear.addEventListener("click", () => Pill.clear());
-      pill.append(status, clear);
+      pill.append(pillStatus, clear);
 
-      root.append(BulkPanel.build(), btn, pill);
+      root.append(BulkPanel.build(), status, btn, pill);
       document.documentElement.appendChild(root);
 
       ExportButton._el = btn;
+      ExportStatus._el = status;
       Pill._el = pill;
-      Pill._statusEl = status;
+      Pill._statusEl = pillStatus;
       this._root = root;
     },
 

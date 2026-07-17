@@ -1,13 +1,8 @@
-  // The one config knob. Change if the server runs elsewhere.
-  const SERVER = "http://127.0.0.1:8000";
-
-  const TAG = "[jai-proxy]";
-  const log = (...a) => console.log(TAG, ...a);
-  const warn = (...a) => console.warn(TAG, ...a);
-
   // ---------------------------------------------------------------------------
   // ServerClient — all traffic to the local jai-proxy server goes via
   // GM_xmlhttpRequest so it's exempt from the page's CSP / mixed-content rules.
+  // `/health` drives the connection pill; `/build-saucepan` turns a raw export
+  // into a saved PNG card server-side.
   // ---------------------------------------------------------------------------
   const ServerClient = {
     _request(opts) {
@@ -25,8 +20,8 @@
               reject(new Error(`HTTP ${r.status}: ${r.responseText}`));
             }
           },
-          onerror: () => reject(new Error("network error")),
-          ontimeout: () => reject(new Error("timeout")),
+          onerror: () => reject(new Error("cannot reach jai-proxy server at " + SERVER)),
+          ontimeout: () => reject(new Error("server timeout")),
         });
       });
     },
@@ -36,43 +31,12 @@
       return JSON.parse(text);
     },
 
-    async relay(body) {
-      const { text } = await this._request({
-        method: "POST",
-        path: "/v1/chat/completions",
-        body,
-        timeout: 120000,
-      });
-      return text;
-    },
-
-    async models() {
-      const { text } = await this._request({ path: "/v1/models" });
-      return text;
-    },
-
     async build(payload) {
       const { text } = await this._request({
         method: "POST",
-        path: "/build",
+        path: "/build-saucepan",
         body: payload,
         timeout: 60000,
-      });
-      return JSON.parse(text);
-    },
-
-    async captureStatus(name) {
-      const { text } = await this._request({
-        path: "/capture-status?name=" + encodeURIComponent(name),
-      });
-      return JSON.parse(text);
-    },
-
-    async clearCaptures() {
-      const { text } = await this._request({
-        method: "POST",
-        path: "/clear-captures",
-        timeout: 15000,
       });
       return JSON.parse(text);
     },

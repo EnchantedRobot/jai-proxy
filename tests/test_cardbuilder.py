@@ -123,6 +123,33 @@ def test_character_book_attached_when_provided():
 
 
 # ---------------------------------------------------------------------------
+# creator_notes gets a leading avatar reference, echoing the JanitorAI
+# sidebar (full avatar, then text) and preserving a clean pointer to the
+# original image before the embedded avatar gets cropped/resized.
+# ---------------------------------------------------------------------------
+
+
+def test_build_prepends_avatar_reference_to_creator_notes():
+    profile = ProfileFields(name="Ari", creator_notes="Some creator notes.")
+    card, _ = CardBuilder().build(
+        profile,
+        greetings=[],
+        capture=None,
+        book=None,
+        avatar_url="https://ella.janitorai.com/bot-avatars/ari.webp",
+    )
+    assert card.creator_notes == (
+        "![Ari](https://ella.janitorai.com/bot-avatars/ari.webp)\n\nSome creator notes."
+    )
+
+
+def test_build_creator_notes_unchanged_without_avatar_url():
+    profile = ProfileFields(name="Ari", creator_notes="Some creator notes.")
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+    assert card.creator_notes == "Some creator notes."
+
+
+# ---------------------------------------------------------------------------
 # _safe_filename
 # ---------------------------------------------------------------------------
 
@@ -184,6 +211,35 @@ def test_png_writer_converts_non_png_avatar_source(tmp_path):
     reopened = Image.open(path)
     assert reopened.format == "PNG"
     assert json.loads(base64.b64decode(reopened.text["chara"]))["data"]["name"] == "Webp Test"
+
+
+def _stacked_avatar_png(panel: int = 300) -> bytes:
+    """A 3-image stack (height == 3x width) -- the shape jai-proxy detects and
+    crops down to the top panel before embedding."""
+    buf = io.BytesIO()
+    Image.new("RGBA", (panel, panel * 3), (5, 5, 5, 255)).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_png_writer_crops_detected_stack_avatar_to_top_third(tmp_path):
+    profile = ProfileFields(name="Stacked")
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+
+    path = PngWriter(output_dir=tmp_path, compress=False).write(card, _stacked_avatar_png(300))
+    with Image.open(path) as embedded:
+        assert embedded.size == (300, 300)
+
+
+def test_png_writer_downscales_oversized_avatar(tmp_path):
+    buf = io.BytesIO()
+    Image.new("RGBA", (4000, 2000), (5, 5, 5, 255)).save(buf, "PNG")
+
+    profile = ProfileFields(name="Big")
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+
+    path = PngWriter(output_dir=tmp_path, compress=False).write(card, buf.getvalue())
+    with Image.open(path) as embedded:
+        assert embedded.size == (1920, 960)
 
 
 def test_png_writer_creates_output_dir_if_missing(tmp_path):

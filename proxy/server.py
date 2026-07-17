@@ -7,14 +7,24 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from proxy import janitor_mapper
+from proxy import janitor_mapper, saucepan_mapper
 from proxy.avatar import AvatarFetcher
 from proxy.capture_store import CaptureStore
 from proxy.cardbuilder import CardBuilder, PngWriter
 from proxy.config import settings
 from proxy.lorebook import LorebookMapper
 from proxy.mlx_client import MLXClient, MLXError
-from proxy.models import BuildRequest, BuildResponse
+from proxy.models import (
+    BuildRequest,
+    BuildResponse,
+    CaptureRecord,
+    CharacterBook,
+    ExistingRequest,
+    ExistingResponse,
+    ProfileFields,
+    SaucepanBuildRequest,
+)
+from proxy.saucepan_mapper import SAUCEPAN_ORIGIN
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("jai_proxy.server")
@@ -116,6 +126,56 @@ async def clear_captures() -> dict[str, Any]:
     return {"ok": True, "removed": removed}
 
 
+@app.post("/existing")
+async def existing(req: ExistingRequest) -> ExistingResponse:
+    """Report which of the given card ids are already saved on disk, so a bulk
+    export can skip them before the slow one-at-a-time classify/build loop."""
+    return ExistingResponse(existing=sorted(png_writer.existing(req.ids)))
+
+
+async def _assemble_and_write(
+    *,
+    profile: ProfileFields,
+    greetings: list[str],
+    book: CharacterBook | None,
+    avatar_url: str | None,
+    avatar_b64: str | None,
+    card_id: str | None,
+    character_version: str,
+    extensions: dict[str, Any],
+    capture: CaptureRecord | None = None,
+    warnings: list[str] | None = None,
+) -> BuildResponse:
+    """The shared tail every source path funnels through: build the card from
+    neutral fields, stamp provenance, fetch the avatar, and write the PNG. Both
+    /build (JanitorAI) and /build-saucepan differ only in how they produce the
+    inputs (profile, greetings, book, avatar_url, extensions) -- everything from
+    here down is identical."""
+    card, build_warnings = card_builder.build(
+        profile, greetings, capture=capture, book=book, avatar_url=avatar_url
+    )
+    all_warnings = (warnings or []) + build_warnings
+
+    card.character_version = character_version or "jai-proxy"
+    card.extensions = extensions
+
+    avatar_bytes = await avatar_fetcher.fetch(avatar_url, avatar_b64)
+    path = png_writer.write(card, avatar_bytes, card_id=card_id)
+
+    fields_present = {
+        "description": bool(card.description),
+        "scenario": bool(card.scenario),
+        "mes_example": bool(card.mes_example),
+        "first_mes": bool(card.first_mes),
+        "alternate_greetings": bool(card.alternate_greetings),
+        "creator_notes": bool(card.creator_notes),
+        "tags": bool(card.tags),
+        "character_book": card.character_book is not None,
+    }
+
+    return BuildResponse(ok=True, path=str(path), warnings=all_warnings, fields_present=fields_present)
+
+
 @app.post("/build")
 async def build(req: BuildRequest) -> BuildResponse:
     character = req.character_json or {}
@@ -154,46 +214,82 @@ async def build(req: BuildRequest) -> BuildResponse:
     if capture is not None:
         book = lorebook_mapper.merge(book, capture.lore_entries)
 
-    card, warnings = card_builder.build(profile, greetings, capture=capture, book=book)
-    warnings = lore_warnings + warnings
+    avatar_url = req.avatar_url or janitor_mapper.avatar_url(character)
 
     # data.name is the real character name (chat_name); the JSON `name` field
     # is the card-title blurb (often a scenario hook, not an actual character
-    # name -- see "She needs your help"), preserved as metadata instead. An
-    # explicit output_name from the export prompt overrides the card name.
+    # name -- see "She needs your help"), preserved as metadata instead.
     page_name = (character.get("name") or "").strip()
-    if req.output_name and req.output_name.strip():
-        card.name = req.output_name.strip()
-
     card_id = req.character.id or character.get("id")
-    card.character_version = req.character.url or "jai-proxy"
-    card.extensions = {
+    extensions = {
         "jai": {
             "source_url": req.character.url,
             "id": card_id,
             "sourceKind": "janitor_core",
-            "creatorName": card.creator,
+            "creatorName": profile.creator,
             "pageName": page_name,
             "linkedAt": _utc_now_iso(),
         }
     }
 
-    avatar_url = req.avatar_url or janitor_mapper.avatar_url(character)
-    avatar_bytes = await avatar_fetcher.fetch(avatar_url, req.avatar_b64)
-    path = png_writer.write(card, avatar_bytes, card_id=card_id)
+    return await _assemble_and_write(
+        profile=profile,
+        greetings=greetings,
+        book=book,
+        avatar_url=avatar_url,
+        avatar_b64=req.avatar_b64,
+        card_id=card_id,
+        character_version=req.character.url or "jai-proxy",
+        extensions=extensions,
+        capture=capture,
+        warnings=lore_warnings,
+    )
 
-    fields_present = {
-        "description": bool(card.description),
-        "scenario": bool(card.scenario),
-        "mes_example": bool(card.mes_example),
-        "first_mes": bool(card.first_mes),
-        "alternate_greetings": bool(card.alternate_greetings),
-        "creator_notes": bool(card.creator_notes),
-        "tags": bool(card.tags),
-        "character_book": card.character_book is not None,
+
+@app.post("/build-saucepan")
+async def build_saucepan(req: SaucepanBuildRequest) -> BuildResponse:
+    """saucepan peer of /build. The userscript posts the raw
+    {id, definition, companion, lorebooks} it fetched; the server deobfuscates
+    and maps it (saucepan_mapper), then reuses the shared assemble/write tail.
+    saucepan definitions carry macros intact, so there's no hidden-capture /
+    name-reversal step -- it's a straight open-card build."""
+    raw = req.character or {}
+    profile = saucepan_mapper.to_profile_fields(raw)
+    greetings = saucepan_mapper.greetings(raw)
+    book = saucepan_mapper.character_book(raw, character_name=profile.name)
+    avatar_url = req.avatar_url or saucepan_mapper.avatar_url(raw)
+    card_id = saucepan_mapper.companion_id(raw)
+
+    warnings: list[str] = []
+    if not saucepan_mapper.is_open(raw):
+        warnings.append(
+            "saucepan definition is not open — only public fields were available; "
+            "description/scenario/example may be incomplete"
+        )
+
+    source_url = f"{SAUCEPAN_ORIGIN}/companion/{card_id}" if card_id else None
+    extensions = {
+        "jai": {
+            "source_url": source_url,
+            "id": card_id or None,
+            "sourceKind": "saucepan_core",
+            "creatorName": profile.creator,
+            "pageName": saucepan_mapper.page_name(raw),
+            "linkedAt": _utc_now_iso(),
+        }
     }
 
-    return BuildResponse(ok=True, path=str(path), warnings=warnings, fields_present=fields_present)
+    return await _assemble_and_write(
+        profile=profile,
+        greetings=greetings,
+        book=book,
+        avatar_url=avatar_url,
+        avatar_b64=req.avatar_b64,
+        card_id=card_id or None,
+        character_version=source_url or "jai-proxy",
+        extensions=extensions,
+        warnings=warnings,
+    )
 
 
 def main() -> None:

@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""Compile userscript/src/*.js into userscript/jai-proxy-bridge.user.js.
+"""Compile userscript/src_jai/*.js into userscript/jai-proxy-bridge.user.js.
 
-The bridge is authored as small modules under userscript/src/ and concatenated,
-in the order below, inside a single IIFE. `00-banner.js` is the Tampermonkey
-`==UserScript==` banner and sits ABOVE the IIFE; every other module is authored
-already indented two spaces (as it appears inside the IIFE) and is emitted
-verbatim, so template literals (e.g. the overlay CSS) are never re-indented.
+The bridge is authored as small modules under userscript/src_jai/ and
+concatenated, in the order below, inside a single IIFE. `00-banner.js` is the
+Tampermonkey `==UserScript==` banner and sits ABOVE the IIFE; every other module
+is authored already indented two spaces (as it appears inside the IIFE) and is
+emitted verbatim, so template literals (e.g. the overlay CSS) are never
+re-indented.
 
-Run via `make compile` or `python scripts/compile_userscript.py`.
+Run via `make compile` or `python scripts/compile_userscript_jai.py`.
 """
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parent.parent / "userscript" / "src"
+SRC = Path(__file__).resolve().parent.parent / "userscript" / "src_jai"
 OUT = Path(__file__).resolve().parent.parent / "userscript" / "jai-proxy-bridge.user.js"
 
 # Explicit concatenation order (NOT filename sort — the modules have logical,

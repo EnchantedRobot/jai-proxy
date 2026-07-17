@@ -116,7 +116,10 @@ class CaptureRecord(BaseModel):
 
 
 class BuildCharacter(BaseModel):
-    name: str
+    # The userscript no longer sends a name -- the server derives the real
+    # character name from character_json (chat_name). `name` is kept only as an
+    # optional fallback for the degenerate name-only build (no character_json).
+    name: str = ""
     id: str | None = None
     url: str | None = None
 
@@ -134,7 +137,6 @@ class BuildRequest(BaseModel):
     avatar_url: str | None = None
     avatar_b64: str | None = None
     lorebooks: list[BuildLorebook] = Field(default_factory=list)
-    output_name: str | None = None
 
 
 class BuildResponse(BaseModel):
@@ -142,6 +144,34 @@ class BuildResponse(BaseModel):
     path: str | None = None
     warnings: list[str] = Field(default_factory=list)
     fields_present: dict[str, bool] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# /build-saucepan -- the saucepan peer of /build. `character` is the thin JSON
+# the saucepan userscript fetched straight from saucepan's API:
+# {id, definition, companion, lorebooks}. The server does all deobfuscation and
+# mapping (see saucepan_mapper) and reuses the same CardBuilder -> PngWriter tail.
+# ---------------------------------------------------------------------------
+
+
+class SaucepanBuildRequest(BaseModel):
+    character: dict[str, Any] = Field(default_factory=dict)
+    avatar_url: str | None = None
+    avatar_b64: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# /existing -- "which of these card ids do we already have on disk?" Lets a
+# bulk export skip cards already saved before the slow per-card fetch loop.
+# ---------------------------------------------------------------------------
+
+
+class ExistingRequest(BaseModel):
+    ids: list[str] = Field(default_factory=list)
+
+
+class ExistingResponse(BaseModel):
+    existing: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

@@ -84,10 +84,10 @@ class CaptureStore:
             greetings = existing.greetings if existing else []
         # lore_entries deliberately stays whatever the previous record had
         # (empty, today) rather than trying to mine lore out of raw prompt
-        # text. Real evidence (system_prompt_open_akane_kujo.txt lines
-        # 90-105) shows JanitorAI appends an activated lore entry's content
-        # completely undelimited -- no tags, no keys, no entry boundary --
-        # indistinguishable from more scenario prose. SystemPromptParser
+        # text. Real open-card captures showed JanitorAI appends an activated
+        # lore entry's content completely undelimited -- no tags, no keys, no
+        # entry boundary -- indistinguishable from more scenario prose.
+        # SystemPromptParser
         # already folds that trailing text into `scenario` rather than
         # fabricate a structured LoreEntry with invented keys (see its
         # comment). The real, keyed source of lore is the /hampter/script

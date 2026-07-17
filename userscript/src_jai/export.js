@@ -34,87 +34,67 @@
 
   // The reusable core of a card export: resolve the character JSON (unless one
   // is supplied), fetch its public lorebooks, POST /build. Shared by the single
-  // Export-card button and the bulk "download all open cards" panel. Returns
-  // the server result plus the resolved character + its default (chat_)name.
-  //   opts.character  — a pre-fetched JSON, to avoid a second round-trip
-  //   opts.outputName — overrides the saved card name (defaults to chat_name)
-  //   opts.url        — source URL recorded on the card (defaults to the id URL)
+  // Export-card button and the bulk "download all open cards" panel. The card
+  // name is no longer sent from here — the server derives the real character
+  // name from the API JSON (chat_name), so there's nothing to guess or prompt
+  // for. Returns the server result plus the resolved character.
+  //   opts.character — a pre-fetched JSON, to avoid a second round-trip
+  //   opts.url       — source URL recorded on the card (defaults to the id URL)
   async function buildCardById(id, opts = {}) {
     const character = opts.character || (await resolveCharacter(id));
-    const defaultName =
-      (character.chat_name || character.name || "").trim() || "Unknown";
     const lorebooks = await fetchPublicLorebooks(character);
     const payload = {
-      character: { name: defaultName, id, url: opts.url || CHAR_BASE + id },
+      character: { id, url: opts.url || CHAR_BASE + id },
       character_json: character,
       avatar_url: character.avatar ? AVATAR_BASE + character.avatar : null,
       lorebooks,
-      output_name: (opts.outputName || "").trim() || defaultName,
     };
     const result = await ServerClient.build(payload);
-    return { result, character, defaultName };
+    return { result, character };
   }
 
-  async function exportCard(el) {
-    const original = el.textContent;
-    el.textContent = "⏳ exporting…";
+  // Progress lands in the status line above the button (ExportStatus), so the
+  // button keeps its label and just disables for the duration.
+  async function exportCard() {
+    const el = ExportButton._el;
     el.disabled = true;
+    ExportStatus.show("Exporting…");
     let holdMs = 2500;
     try {
       const id = currentCharacterId() || GM_getValue(KEY_ID, "");
       if (!id) {
-        el.textContent = "⚠️ open a character page first";
+        ExportStatus.show("⚠️ Open a character page first", true);
         holdMs = 5000;
         return;
       }
 
-      const character = await resolveCharacter(id);
-      const defaultName =
-        (character.chat_name || character.name || "").trim() || "Unknown";
-
-      // Prefilled with the real character name (chat_name) so the box is never
-      // blank; whatever the user leaves becomes data.name server-side.
-      const typed = window.prompt("Save card as:", defaultName);
-      if (typed === null) {
-        el.textContent = original;
-        el.disabled = false;
-        return;
-      }
-
-      const { result } = await buildCardById(id, {
-        character,
-        outputName: typed,
-        url: location.href,
-      });
+      // No name prompt: the server derives the real character name from the
+      // API JSON (chat_name) and saves the card under it.
+      const { result } = await buildCardById(id, { url: location.href });
       const warnings = result.warnings || [];
       if (result.ok) {
         log("exported card ->", result.path, warnings);
         if (warnings.length) {
           const n = warnings.length;
-          const first =
-            warnings[0].length > 60 ? warnings[0].slice(0, 57) + "…" : warnings[0];
-          el.textContent = `⚠️ saved — ${n} warning${n === 1 ? "" : "s"}: ${first}`;
+          ExportStatus.show(`⚠️ Saved — ${n} warning${n === 1 ? "" : "s"}`, false);
           el.title = warnings.join("\n");
           holdMs = 8000;
           warn("export warnings:", warnings);
         } else {
-          el.textContent = "✅ saved";
-          el.title = result.path || "";
+          ExportStatus.show("✓ Saved");
         }
       } else {
-        el.textContent = `⚠️ ${warnings[0] || "failed"}`;
-        el.title = JSON.stringify(result);
+        ExportStatus.show(`⚠️ ${warnings[0] || "failed"}`, true);
         holdMs = 8000;
         warn("export failed", result);
       }
     } catch (err) {
-      el.textContent = "⚠️ failed";
-      el.title = String(err);
+      ExportStatus.show("⚠️ Failed", true);
       holdMs = 8000;
       warn("export failed", err);
     } finally {
       setTimeout(() => {
-        el.textContent = original;
+        ExportStatus.hide();
         el.title = "";
         el.disabled = false;
       }, holdMs);

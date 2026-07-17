@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         jai-proxy bridge
 // @namespace    https://github.com/EnchantedRobot/jai-proxy
-// @version      0.7.0
+// @version      0.8.0
 // @description  Thin bridge: relays JanitorAI chat completions through a local jai-proxy server (which forwards to local MLX), shows a connection pill, and exports a character as a V3 card PNG via JanitorAI's clean JSON API (no DOM scraping). Card assembly lives server-side.
 // @match        https://janitorai.com/*
 // @match        https://www.janitorai.com/*
@@ -16,9 +16,9 @@
 // ==/UserScript==
 //
 // SOURCE LAYOUT — this file is COMPILED. Do not edit jai-proxy-bridge.user.js by
-// hand; edit userscript/src/*.js and run `make compile` (see
-// scripts/compile_userscript.py). The modules are concatenated, in order, inside
-// a single IIFE beneath this banner.
+// hand; edit userscript/src_jai/*.js and run `make compile` (see
+// scripts/compile_userscript_jai.py). The modules are concatenated, in order,
+// inside a single IIFE beneath this banner.
 
 (function () {
   "use strict";
@@ -108,6 +108,18 @@
         timeout: 60000,
       });
       return JSON.parse(text);
+    },
+
+    // Which of these card ids are already saved on disk. Lets a bulk run skip
+    // cards we already have before the slow per-card fetch loop.
+    async existing(ids) {
+      const { text } = await this._request({
+        method: "POST",
+        path: "/existing",
+        body: { ids },
+        timeout: 30000,
+      });
+      return JSON.parse(text).existing || [];
     },
 
     async captureStatus(name) {
@@ -289,20 +301,28 @@
   };
 
   // ---------------------------------------------------------------------------
-  // Overlay widgets — a single fixed-position container (#jai-proxy-root) holds
-  // the export button and the status pill. All styling lives in one injected
-  // <style> instead of per-element inline styles.
+  // Overlay widgets — a single fixed-position container (#jai-proxy-root) holds,
+  // top to bottom: the bulk panel (profile pages only), a transient status line,
+  // the purple Export button, and the connection pill. All styling lives in one
+  // injected <style> instead of per-element inline styles.
   // ---------------------------------------------------------------------------
   const OVERLAY_STYLE = `
     #jai-proxy-root {
       position: fixed; bottom: 12px; right: 12px; z-index: 999999;
       display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
-      font-family: monospace; font-size: 12px; pointer-events: none;
+      font-family: system-ui, sans-serif; font-size: 12px; pointer-events: none;
+    }
+    #jai-proxy-status {
+      pointer-events: auto; display: none; max-width: 260px;
+      padding: 3px 8px; border-radius: 8px; color: #fff;
+      background: rgba(0,0,0,.6); word-break: break-word;
     }
     #jai-proxy-export {
-      pointer-events: auto; padding: 6px 12px; border-radius: 6px; color: #fff;
-      background: #2d6cdf; border: 1px solid #1d4ea0; cursor: pointer;
+      pointer-events: auto; padding: 10px 14px; border-radius: 10px; border: none;
+      background: #7a3db5; color: #fff; font-family: inherit; font-size: 13px;
+      font-weight: 600; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.3);
     }
+    #jai-proxy-export:disabled { cursor: default; }
     #jai-proxy-pill {
       display: flex; align-items: center; gap: 8px; padding: 4px 10px;
       border-radius: 999px; background: #222; color: #fff; border: 1px solid #444;
@@ -323,8 +343,9 @@
     }
     #jai-proxy-bulk .jai-bulk-title { font-weight: bold; }
     #jai-proxy-bulk-btn {
-      pointer-events: auto; padding: 5px 10px; border-radius: 6px; color: #fff;
-      background: #2d6cdf; border: 1px solid #1d4ea0; cursor: pointer; font: inherit;
+      pointer-events: auto; padding: 6px 12px; border-radius: 8px; color: #fff;
+      background: #7a3db5; border: none; cursor: pointer; font: inherit;
+      font-weight: 600;
     }
     #jai-proxy-bulk-btn:disabled { opacity: 0.6; cursor: default; }
     #jai-proxy-bulk .jai-bulk-status { opacity: 0.85; word-break: break-word; }
@@ -340,29 +361,48 @@
   `;
 
   // ---------------------------------------------------------------------------
-  // ExportButton — one action now (the greeting-capture button is gone; hidden
-  // greetings ride in on the chat relay). The scheduler drives its ready
-  // colour via setReady(); green = the card in view can be exported right now
-  // (open card, or hidden card whose captures are present).
+  // ExportButton — one always-purple action button (mirrors the saucepan
+  // bridge). Readiness is no longer color-coded on the button itself — the pill
+  // already spells it out (ready ✓ / hidden ✓ / hidden ✗) — so the scheduler
+  // only dims the button slightly when the card in view can't be exported yet.
   // ---------------------------------------------------------------------------
   const ExportButton = {
     _el: null,
 
-    setReady(green) {
+    setReady(ready) {
       if (!this._el || this._el.disabled) return;
-      this._el.style.background = green ? "#2e9e4f" : "#2d6cdf";
-      this._el.style.borderColor = green ? "#22803c" : "#1d4ea0";
+      this._el.style.opacity = ready ? "1" : "0.6";
     },
 
     onClick() {
-      return exportCard(this._el);
+      return exportCard();
     },
   };
 
   // ---------------------------------------------------------------------------
-  // Pill — status indicator + inline CLEAR affordance. CLEAR wipes the
-  // server-side capture cache AND resets the plugin's remembered state (last
-  // card name / id / hidden flag). Exported PNGs are untouched. flash() shows
+  // ExportStatus — the transient line that sits just above the button (like the
+  // saucepan bridge's "Fetching…" / "✓ Saved" toast). Export progress lands
+  // here now instead of hijacking the button's own label.
+  // ---------------------------------------------------------------------------
+  const ExportStatus = {
+    _el: null,
+
+    show(text, isError) {
+      if (!this._el) return;
+      this._el.textContent = text;
+      this._el.style.display = "block";
+      this._el.style.background = isError ? "rgba(150,30,30,.85)" : "rgba(0,0,0,.6)";
+    },
+
+    hide() {
+      if (this._el) this._el.style.display = "none";
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Pill — connection indicator + inline CLEAR affordance. CLEAR wipes the
+  // server-side capture cache AND resets the plugin's remembered card state
+  // (last id / hidden flag). Exported PNGs are untouched. flash() shows
   // transient feedback the scheduler's setStatus() won't overwrite until the
   // hold expires.
   // ---------------------------------------------------------------------------
@@ -425,28 +465,32 @@
       const root = document.createElement("div");
       root.id = "jai-proxy-root";
 
+      const status = document.createElement("div");
+      status.id = "jai-proxy-status";
+
       const btn = document.createElement("button");
       btn.id = "jai-proxy-export";
-      btn.textContent = "⬇ Export card";
+      btn.textContent = "⬇ Export to card";
       btn.addEventListener("click", () => ExportButton.onClick());
 
       const pill = document.createElement("div");
       pill.id = "jai-proxy-pill";
-      const status = document.createElement("span");
-      status.textContent = "⚪ jai-proxy";
+      const pillStatus = document.createElement("span");
+      pillStatus.textContent = "⚪ jai-proxy";
       const clear = document.createElement("span");
       clear.className = "jai-clear";
       clear.textContent = "CLEAR";
       clear.title = "Clear server capture cache + reset remembered card state";
       clear.addEventListener("click", () => Pill.clear());
-      pill.append(status, clear);
+      pill.append(pillStatus, clear);
 
-      root.append(BulkPanel.build(), btn, pill);
+      root.append(BulkPanel.build(), status, btn, pill);
       document.documentElement.appendChild(root);
 
       ExportButton._el = btn;
+      ExportStatus._el = status;
       Pill._el = pill;
-      Pill._statusEl = status;
+      Pill._statusEl = pillStatus;
       this._root = root;
     },
 
@@ -468,11 +512,16 @@
   //
   // A character page's URL carries the character UUID; the chat page's does
   // not. So on a character page we fetch the JSON once (cached per id) and
-  // persist name / id / hidden (GM_setValue); the chat page — where the hidden
-  // capture actually happens — reads those back. `showdefinition:false` is the
+  // persist id + hidden (GM_setValue); the chat page — where the hidden capture
+  // actually happens — reads those back. `showdefinition:false` is the
   // open/hidden flag. Reset by the pill's CLEAR affordance.
+  //
+  // The character NAME is deliberately NOT tracked or shown: the pill only needs
+  // open-vs-hidden + capture state, and the server derives the real name from
+  // the API JSON at build time. The one place a name is still required — the
+  // per-card capture-status query for a hidden card — resolves it transiently
+  // from the cached JSON (characterName), never persisting or displaying it.
   // ---------------------------------------------------------------------------
-  const KEY_NAME = "jai_last_char_name";
   const KEY_ID = "jai_last_char_id";
   const KEY_HIDDEN = "jai_last_card_hidden";
 
@@ -480,9 +529,14 @@
   const CHAR_BASE = "https://janitorai.com/characters/";
 
   function resetPluginState() {
-    GM_setValue(KEY_NAME, "");
     GM_setValue(KEY_ID, "");
     GM_setValue(KEY_HIDDEN, false);
+  }
+
+  // The real character name from a card JSON (chat_name; falls back to the
+  // title blurb). Used only to key the hidden-card capture-status lookup.
+  function characterName(json) {
+    return ((json && (json.chat_name || json.name)) || "").trim();
   }
 
   // The character UUID from a /characters/<uuid>_<slug> path. Scoped to
@@ -497,34 +551,40 @@
     return !!document.querySelector("[class*='_messageBody_']");
   }
 
-  function chatCharacterName() {
-    const el = document.querySelector("[class*='_nameText_']");
-    return el ? el.textContent.trim() : "";
-  }
-
   const CharacterState = {
     _id: null,
     _json: null,
     _fetching: false,
 
-    // On a character page, fetch + cache the JSON once and persist the derived
-    // name / id / hidden flag. No-op on chat / browse pages (no id in URL).
-    async refresh() {
-      const id = currentCharacterId();
-      if (!id || id === this._id || this._fetching) return;
+    // Ensure the JSON for `id` is cached, fetching it once if needed, and
+    // persist the derived id + hidden flag so the chat page (no id in URL) can
+    // read them back. Returns the JSON, or null while a fetch is in flight / on
+    // error.
+    async ensureJson(id) {
+      if (!id) return null;
+      if (this._id === id && this._json) return this._json;
+      if (this._fetching) return null;
       this._fetching = true;
       try {
         const json = await JanitorClient.fetchCharacter(id);
         this._id = id;
         this._json = json;
-        GM_setValue(KEY_NAME, (json.chat_name || json.name || "").trim());
         GM_setValue(KEY_ID, id);
         GM_setValue(KEY_HIDDEN, json.showdefinition === false);
+        return json;
       } catch (err) {
         warn("character fetch failed", err);
+        return null;
       } finally {
         this._fetching = false;
       }
+    },
+
+    // On a character page, prime the cache for the id in the URL. No-op on
+    // chat / browse pages (no id in URL).
+    async refresh() {
+      const id = currentCharacterId();
+      if (id) await this.ensureJson(id);
     },
 
     cachedJson(id) {
@@ -536,6 +596,13 @@
   // Scheduler — one poll drives the pill + button. Paused while the tab is
   // hidden; backs off to 15s while the server is unreachable. A single
   // self-scheduling timer runs at a time; returning to the tab wakes it.
+  //
+  // Pill vocabulary (shared with the saucepan bridge):
+  //   🟢 jai-proxy               — connected, no card in view
+  //   🟢 jai-proxy · ready ✓     — open card, exportable right now
+  //   🟢 jai-proxy · hidden ✓    — hidden card, definition + greeting captured
+  //   🟢 jai-proxy · hidden ✗    — hidden card, nothing captured yet
+  //   🔴 jai-proxy (server down) — server unreachable
   // ---------------------------------------------------------------------------
   let serverDown = false;
   let pollTimer = null;
@@ -550,26 +617,28 @@
     const onChar = !!currentCharacterId();
     const onChat = isChatView();
     const id = currentCharacterId() || GM_getValue(KEY_ID, "");
-    const name = GM_getValue(KEY_NAME, "") || (onChat ? chatCharacterName() : "");
     const hidden = GM_getValue(KEY_HIDDEN, false);
 
     try {
       let ready = false;
       let statusText;
-      if ((!onChar && !onChat) || !name) {
+      if ((!onChar && !onChat) || !id) {
         await ServerClient.health();
         statusText = "🟢 jai-proxy";
       } else if (!hidden) {
         // Open card: the JSON carries everything; nothing to capture.
         await ServerClient.health();
-        statusText = `🟢 ${name} · open ✓`;
-        ready = !!id;
+        statusText = "🟢 jai-proxy · ready ✓";
+        ready = true;
       } else {
         // Hidden card: the definition + primary greeting come from the chat
-        // relay capture, so surface whether the server has them yet.
-        const status = await ServerClient.captureStatus(name);
-        statusText = `🟢 ${name} · Sys ${status.system ? "✓" : "✗"} · Greet ${status.greetings ? "✓" : "✗"}`;
-        ready = !!id && status.system && status.greetings;
+        // relay capture. Resolve THIS card's name (transient, from the JSON by
+        // id) purely to ask the server whether its captures are present.
+        const json = await CharacterState.ensureJson(id);
+        const status = await ServerClient.captureStatus(characterName(json));
+        const has = !!(status.system && status.greetings);
+        statusText = `🟢 jai-proxy · hidden ${has ? "✓" : "✗"}`;
+        ready = has;
       }
       serverDown = false;
       Pill.setStatus(statusText);
@@ -633,87 +702,67 @@
 
   // The reusable core of a card export: resolve the character JSON (unless one
   // is supplied), fetch its public lorebooks, POST /build. Shared by the single
-  // Export-card button and the bulk "download all open cards" panel. Returns
-  // the server result plus the resolved character + its default (chat_)name.
-  //   opts.character  — a pre-fetched JSON, to avoid a second round-trip
-  //   opts.outputName — overrides the saved card name (defaults to chat_name)
-  //   opts.url        — source URL recorded on the card (defaults to the id URL)
+  // Export-card button and the bulk "download all open cards" panel. The card
+  // name is no longer sent from here — the server derives the real character
+  // name from the API JSON (chat_name), so there's nothing to guess or prompt
+  // for. Returns the server result plus the resolved character.
+  //   opts.character — a pre-fetched JSON, to avoid a second round-trip
+  //   opts.url       — source URL recorded on the card (defaults to the id URL)
   async function buildCardById(id, opts = {}) {
     const character = opts.character || (await resolveCharacter(id));
-    const defaultName =
-      (character.chat_name || character.name || "").trim() || "Unknown";
     const lorebooks = await fetchPublicLorebooks(character);
     const payload = {
-      character: { name: defaultName, id, url: opts.url || CHAR_BASE + id },
+      character: { id, url: opts.url || CHAR_BASE + id },
       character_json: character,
       avatar_url: character.avatar ? AVATAR_BASE + character.avatar : null,
       lorebooks,
-      output_name: (opts.outputName || "").trim() || defaultName,
     };
     const result = await ServerClient.build(payload);
-    return { result, character, defaultName };
+    return { result, character };
   }
 
-  async function exportCard(el) {
-    const original = el.textContent;
-    el.textContent = "⏳ exporting…";
+  // Progress lands in the status line above the button (ExportStatus), so the
+  // button keeps its label and just disables for the duration.
+  async function exportCard() {
+    const el = ExportButton._el;
     el.disabled = true;
+    ExportStatus.show("Exporting…");
     let holdMs = 2500;
     try {
       const id = currentCharacterId() || GM_getValue(KEY_ID, "");
       if (!id) {
-        el.textContent = "⚠️ open a character page first";
+        ExportStatus.show("⚠️ Open a character page first", true);
         holdMs = 5000;
         return;
       }
 
-      const character = await resolveCharacter(id);
-      const defaultName =
-        (character.chat_name || character.name || "").trim() || "Unknown";
-
-      // Prefilled with the real character name (chat_name) so the box is never
-      // blank; whatever the user leaves becomes data.name server-side.
-      const typed = window.prompt("Save card as:", defaultName);
-      if (typed === null) {
-        el.textContent = original;
-        el.disabled = false;
-        return;
-      }
-
-      const { result } = await buildCardById(id, {
-        character,
-        outputName: typed,
-        url: location.href,
-      });
+      // No name prompt: the server derives the real character name from the
+      // API JSON (chat_name) and saves the card under it.
+      const { result } = await buildCardById(id, { url: location.href });
       const warnings = result.warnings || [];
       if (result.ok) {
         log("exported card ->", result.path, warnings);
         if (warnings.length) {
           const n = warnings.length;
-          const first =
-            warnings[0].length > 60 ? warnings[0].slice(0, 57) + "…" : warnings[0];
-          el.textContent = `⚠️ saved — ${n} warning${n === 1 ? "" : "s"}: ${first}`;
+          ExportStatus.show(`⚠️ Saved — ${n} warning${n === 1 ? "" : "s"}`, false);
           el.title = warnings.join("\n");
           holdMs = 8000;
           warn("export warnings:", warnings);
         } else {
-          el.textContent = "✅ saved";
-          el.title = result.path || "";
+          ExportStatus.show("✓ Saved");
         }
       } else {
-        el.textContent = `⚠️ ${warnings[0] || "failed"}`;
-        el.title = JSON.stringify(result);
+        ExportStatus.show(`⚠️ ${warnings[0] || "failed"}`, true);
         holdMs = 8000;
         warn("export failed", result);
       }
     } catch (err) {
-      el.textContent = "⚠️ failed";
-      el.title = String(err);
+      ExportStatus.show("⚠️ Failed", true);
       holdMs = 8000;
       warn("export failed", err);
     } finally {
       setTimeout(() => {
-        el.textContent = original;
+        ExportStatus.hide();
         el.title = "";
         el.disabled = false;
       }, holdMs);
@@ -924,27 +973,55 @@
         }
         this._renderRows(rows);
 
+        // Skip cards already on disk. The `_<id8>` fragment in each saved
+        // filename is knowable from a list row (unlike the real name), so the
+        // server can tell us which ids exist in one cheap call — those drop out
+        // before the slow one-at-a-time classify/build loop. Fails soft: if the
+        // check errors, we just export everything.
+        this._setStatus("⏳ checking which cards are already saved…");
+        let onDisk = new Set();
+        try {
+          onDisk = new Set(await ServerClient.existing(rows.map((r) => r.id)));
+        } catch (err) {
+          warn("existing-check failed; exporting all", err);
+        }
+        const pending = [];
+        for (const r of rows) {
+          if (onDisk.has(r.id)) {
+            this._setRow(r.id, "•", "already saved — skipped");
+          } else {
+            pending.push(r);
+          }
+        }
+        const already = rows.length - pending.length;
+        if (!pending.length) {
+          this._setStatus(`all ${rows.length} card(s) already saved — nothing to do`);
+          return;
+        }
+
         // The listing can't tell open from hidden, so every kept card is fetched
         // individually — warn before a long one-at-a-time run.
         const filterNote = skipped ? `\n\n${skipped} card(s) excluded by the tag filter.` : "";
+        const onDiskNote = already ? `\n\n${already} card(s) already saved — skipped.` : "";
         if (
           !window.confirm(
-            `Check ${rows.length} card(s) for open definitions and download each ` +
+            `Check ${pending.length} card(s) for open definitions and download each ` +
               "open one?\n\nThe listing can't tell open from hidden, so each card " +
               "is fetched one at a time. Hidden cards are skipped." +
+              onDiskNote +
               filterNote
           )
         ) {
-          this._setStatus(`${rows.length} cards — cancelled`);
+          this._setStatus(`${pending.length} cards — cancelled`);
           return;
         }
 
         let done = 0;
         let failed = 0;
         let hidden = 0;
-        for (let i = 0; i < rows.length; i += 1) {
-          const r = rows[i];
-          this._setStatus(`(${i + 1}/${rows.length}) ✓${done} ✗${hidden} ⚠${failed} — ${r.name}`);
+        for (let i = 0; i < pending.length; i += 1) {
+          const r = pending[i];
+          this._setStatus(`(${i + 1}/${pending.length}) ✓${done} ✗${hidden} ⚠${failed} — ${r.name}`);
           let built = false;
           try {
             this._setRow(r.id, "⏳", "checking…");
@@ -975,12 +1052,15 @@
             this._setRow(r.id, "⚠", String(err));
             warn("bulk card error", r.id, err);
           }
-          if (i < rows.length - 1) {
+          if (i < pending.length - 1) {
             await sleep(built ? CARD_BUILD_DELAY_MS : CARD_SKIP_DELAY_MS);
           }
         }
         const filtered = skipped ? ` · ⊘ ${skipped} filtered` : "";
-        this._setStatus(`done · ✓ ${done} saved · ✗ ${hidden} hidden · ⚠ ${failed} failed${filtered}`);
+        const existingNote = already ? ` · • ${already} already saved` : "";
+        this._setStatus(
+          `done · ✓ ${done} saved · ✗ ${hidden} hidden · ⚠ ${failed} failed${existingNote}${filtered}`
+        );
       } catch (err) {
         warn("bulk run failed", err);
         this._setStatus("⚠️ " + String(err));
