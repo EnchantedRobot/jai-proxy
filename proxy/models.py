@@ -145,6 +145,21 @@ class BuildResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# /build-saucepan -- the saucepan peer of /build. `character` is the thin JSON
+# the saucepan userscript fetched straight from saucepan's API:
+# {id, definition, companion, lorebooks}. The server does all deobfuscation and
+# mapping (see saucepan_mapper) and reuses the same CardBuilder -> PngWriter tail.
+# ---------------------------------------------------------------------------
+
+
+class SaucepanBuildRequest(BaseModel):
+    character: dict[str, Any] = Field(default_factory=dict)
+    avatar_url: str | None = None
+    avatar_b64: str | None = None
+    output_name: str | None = None
+
+
+# ---------------------------------------------------------------------------
 # /existing -- "which of these card ids do we already have on disk?" Lets a
 # bulk export skip cards already saved before the slow per-card fetch loop.
 # ---------------------------------------------------------------------------

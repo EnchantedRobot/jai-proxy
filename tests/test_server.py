@@ -16,6 +16,11 @@ def _character(name: str) -> dict:
     return json.loads((FIXTURES / "hampter" / f"{name}.json").read_text(encoding="utf-8"))
 
 
+def _saucepan(id_fragment: str) -> dict:
+    path = next((FIXTURES / "saucepan").glob(f"saucepan_{id_fragment}*.json"))
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def _prompt(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
 
@@ -225,6 +230,65 @@ def test_build_exports_open_card_png(tmp_path):
     # embedded as data.name.
     assert jai["pageName"] == "The Girl in Every Yearbook | Akane Kujo"
     assert "linkedAt" in jai
+
+
+# ---------------------------------------------------------------------------
+# /build-saucepan -- open card export end-to-end (saucepan JSON API path). Same
+# assemble/write tail as /build; differs only in the source mapper.
+# ---------------------------------------------------------------------------
+
+
+def test_build_saucepan_exports_open_card_png(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    eve = _saucepan("04a0c1ac")
+
+    resp = client.post("/build-saucepan", json={"character": eve})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["fields_present"]["description"] is True
+    assert body["fields_present"]["scenario"] is True
+    assert body["fields_present"]["first_mes"] is True
+    assert body["fields_present"]["alternate_greetings"] is True
+    assert body["fields_present"]["character_book"] is True
+
+    path = Path(body["path"])
+    # Foldered by creator handle, name suffixed with the companion-id fragment.
+    assert path.parent == tmp_path / "desslok"
+    assert path.name == "Eve_04a0c1ac.png"
+
+    data = _decode(path)
+    assert data["name"] == "Eve"
+    assert data["creator"] == "desslok"
+    assert data["first_mes"].startswith("Throughout her first week at Crestfall High")
+    assert len(data["alternate_greetings"]) == 3  # 5 scenarios, one blank dropped
+    # Advanced Prompt leads scenario, raw.
+    assert data["scenario"].startswith("{{char}} is an android")
+    assert len(data["character_book"]["entries"]) == 19  # two lorebooks merged
+    assert (
+        data["character_version"]
+        == "https://saucepan.ai/companion/04a0c1ac-187b-4aa0-8f5b-885533be748d"
+    )
+
+    jai = data["extensions"]["jai"]
+    assert jai["sourceKind"] == "saucepan_core"
+    assert jai["id"] == "04a0c1ac-187b-4aa0-8f5b-885533be748d"
+    assert jai["source_url"] == "https://saucepan.ai/companion/04a0c1ac-187b-4aa0-8f5b-885533be748d"
+    assert jai["creatorName"] == "desslok"
+    assert jai["pageName"] == "Eve | I Did Nothing Wrong"
+
+
+def test_build_saucepan_response_formatting_lands_in_scenario(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+
+    resp = client.post("/build-saucepan", json={"character": _saucepan("1155a61e")})
+
+    data = _decode(resp.json()["path"])
+    assert data["name"] == "Taryn"
+    # No Advanced Prompt; Response Formatting appended under a label instead.
+    assert data["scenario"].startswith("--- Response Formatting Instructions ---")
+    assert data["mes_example"] == ""
 
 
 # ---------------------------------------------------------------------------
