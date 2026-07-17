@@ -137,58 +137,60 @@ def test_normalize_lowercases_and_trims():
 
 
 # ---------------------------------------------------------------------------
-# M7: record_greetings(), and its interplay with record(), and status().
+# Primary-greeting capture: the same chat relay that carries a hidden card's
+# system prompt also carries its primary greeting (the first assistant
+# message). record() takes both, so one chat message captures both halves.
 # ---------------------------------------------------------------------------
 
 
-def test_record_greetings_creates_a_record_when_none_exists(tmp_path):
+def test_record_captures_primary_greeting_alongside_definition(tmp_path):
     store = CaptureStore(captures_dir=tmp_path)
 
-    count = store.record_greetings("Ari", ["<p>Hi there</p>", "<p>Second greeting</p>"])
-
-    assert count == 2
-    record = store.get("Ari")
-    assert record is not None
-    assert record.greetings == ["<p>Hi there</p>", "<p>Second greeting</p>"]
-
-
-def test_record_greetings_drops_blank_entries(tmp_path):
-    store = CaptureStore(captures_dir=tmp_path)
-
-    count = store.record_greetings("Ari", ["<p>Hi</p>", "", "   "])
-
-    assert count == 1
-    assert store.get("Ari").greetings == ["<p>Hi</p>"]
-
-
-def test_record_greetings_with_empty_name_is_a_noop(tmp_path):
-    store = CaptureStore(captures_dir=tmp_path)
-
-    count = store.record_greetings("", ["<p>Hi</p>"])
-
-    assert count == 0
-    assert store.get("") is None
-
-
-def test_record_after_record_greetings_preserves_greetings(tmp_path):
-    store = CaptureStore(captures_dir=tmp_path)
-    store.record_greetings("Ari", ["<p>Hi</p>"])
-
-    store.record(_load("system_prompt_hidden_ari.txt"))
+    store.record(_load("system_prompt_hidden_ari.txt"), primary_greeting="Hello there, USER")
 
     record = store.get("Ari")
-    assert record.greetings == ["<p>Hi</p>"]
+    assert record.greetings == ["Hello there, USER"]
     assert "Location: USA" in record.personality
 
 
-def test_record_greetings_after_record_preserves_definition(tmp_path):
+def test_record_without_greeting_leaves_greetings_empty(tmp_path):
     store = CaptureStore(captures_dir=tmp_path)
+
     store.record(_load("system_prompt_hidden_ari.txt"))
 
-    store.record_greetings("Ari", ["<p>Hi</p>"])
+    assert store.get("Ari").greetings == []
+
+
+def test_record_strips_greeting_whitespace_and_treats_blank_as_none(tmp_path):
+    store = CaptureStore(captures_dir=tmp_path)
+
+    store.record(_load("system_prompt_hidden_ari.txt"), primary_greeting="  Hi USER  ")
+    assert store.get("Ari").greetings == ["Hi USER"]
+
+    # A blank greeting on a later capture doesn't overwrite the good one.
+    store.record(_load("system_prompt_hidden_ari.txt"), primary_greeting="   ")
+    assert store.get("Ari").greetings == ["Hi USER"]
+
+
+def test_re_record_with_new_greeting_replaces_prior(tmp_path):
+    store = CaptureStore(captures_dir=tmp_path)
+    store.record(_load("system_prompt_hidden_ari.txt"), primary_greeting="First greeting")
+
+    store.record(_load("system_prompt_hidden_ari.txt"), primary_greeting="Second greeting")
+
+    assert store.get("Ari").greetings == ["Second greeting"]
+
+
+def test_definition_only_recapture_preserves_prior_greeting(tmp_path):
+    # A later definition-only capture (no assistant message in that request)
+    # must not wipe a primary greeting captured earlier.
+    store = CaptureStore(captures_dir=tmp_path)
+    store.record(_load("system_prompt_hidden_ari.txt"), primary_greeting="Kept greeting")
+
+    store.record(_load("system_prompt_hidden_ari.txt"))
 
     record = store.get("Ari")
-    assert record.greetings == ["<p>Hi</p>"]
+    assert record.greetings == ["Kept greeting"]
     assert "Location: USA" in record.personality
 
 
@@ -197,20 +199,18 @@ def test_status_reflects_all_four_combinations(tmp_path):
 
     assert store.status("Nobody") == {"system": False, "greetings": False}
 
-    store.record_greetings("Greet Only", ["<p>Hi</p>"])
-    assert store.status("Greet Only") == {"system": False, "greetings": True}
-
+    # Definition captured, no greeting yet.
     store.record(_load("system_prompt_hidden_ari.txt"))
     assert store.status("Ari") == {"system": True, "greetings": False}
 
-    store.record_greetings("Ari", ["<p>Hi</p>"])
+    # Greeting arrives on the next relay.
+    store.record(_load("system_prompt_hidden_ari.txt"), primary_greeting="Hi")
     assert store.status("Ari") == {"system": True, "greetings": True}
 
 
 def test_clear_removes_all_capture_files_and_in_memory_records(tmp_path):
     store = CaptureStore(captures_dir=tmp_path)
-    store.record(_load("system_prompt_hidden_ari.txt"))
-    store.record_greetings("Ari", ["<p>Hi</p>"])
+    store.record(_load("system_prompt_hidden_ari.txt"), primary_greeting="Hi")
 
     assert any(tmp_path.iterdir())
 

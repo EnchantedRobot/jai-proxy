@@ -3,19 +3,18 @@ import io
 import json
 from pathlib import Path
 
-from bs4 import BeautifulSoup
 from PIL import Image
 
+from proxy import janitor_mapper
 from proxy.cardbuilder import CardBuilder, PngWriter, _safe_filename
-from proxy.html_parser import GreetingConverter, ProfileParser
 from proxy.macros import MacroSanitizer
 from proxy.models import CaptureRecord, CharacterBook, LoreEntry, ProfileFields
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def _load(name: str) -> str:
-    return (FIXTURES / name).read_text(encoding="utf-8")
+def _load_character(name: str) -> dict:
+    return json.loads((FIXTURES / "hampter" / f"{name}.json").read_text(encoding="utf-8"))
 
 
 def _png_bytes() -> bytes:
@@ -25,26 +24,26 @@ def _png_bytes() -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# CardBuilder -- real Akane Kujo profile fixture (public card: visible DOM
-# values should win outright since there's no capture).
+# CardBuilder -- real Akane Kujo character JSON (public card: the mapped
+# profile fields win outright since there's no capture).
 # ---------------------------------------------------------------------------
 
 
 def test_build_public_card_from_real_profile_fixture():
-    profile = ProfileParser().parse(_load("profile_akane_kujo.html"))
+    profile = janitor_mapper.to_profile_fields(_load_character("open_akane_kujo"))
     card, warnings = CardBuilder().build(profile, greetings=[], capture=None, book=None)
 
     assert card.name == "Akane Kujo"
     assert card.creator == "dezea"
-    assert card.description.startswith("> Character Information:")
-    assert "Pronoun Awareness" in card.scenario
+    assert card.description.startswith(">Character Information:")
+    assert card.scenario.startswith("[System Instructions for Roleplay]")
     assert card.personality == ""
     assert "no first_mes / greetings found" in warnings
 
 
 def test_build_maps_greetings_to_first_mes_and_alternates():
-    # CardBuilder consumes already-converted greeting markdown (the server
-    # route runs GreetingConverter first); it only sanitizes macros here.
+    # CardBuilder consumes authored greeting markdown straight from the JSON;
+    # it only sanitizes macros here.
     profile = ProfileFields(name="Test", description="d", scenario="s")
     card, _ = CardBuilder().build(
         profile, greetings=["Hello **there**", "Second greeting"], capture=None, book=None
@@ -137,14 +136,10 @@ def test_safe_filename_strips_unsafe_characters():
 
 
 def test_png_writer_round_trips_card_json(tmp_path):
-    profile = ProfileParser().parse(_load("profile_akane_kujo.html"))
-    greeting_html = str(
-        BeautifulSoup(_load("profile_akane_kujo.html"), "html.parser")
-        .find(id="panel-info-2")
-        .select_one(".characterInfoMarkdownContainer")
-    )
-    greeting = GreetingConverter().convert(greeting_html)
-    card, _ = CardBuilder().build(profile, greetings=[greeting], capture=None, book=None)
+    akane = _load_character("open_akane_kujo")
+    profile = janitor_mapper.to_profile_fields(akane)
+    greetings = janitor_mapper.greetings(akane)
+    card, _ = CardBuilder().build(profile, greetings=greetings, capture=None, book=None)
 
     writer = PngWriter(output_dir=tmp_path)
     path = writer.write(card, _png_bytes())

@@ -39,9 +39,9 @@ def test_sabrina_hill_public_card(parser):
     parsed = parser.parse(raw)
 
     # Tag-derived name is best-effort -- "Sabrina's Persona" strips to
-    # "Sabrina", not the full "Sabrina Hill" from inside the body. The DOM
-    # (ProfileParser) is the source of truth for the full name; visible DOM
-    # wins over the capture at merge time (cardbuilder, M3+).
+    # "Sabrina", not the full "Sabrina Hill" from inside the body. The card
+    # JSON's chat_name (via janitor_mapper) is the source of truth for the
+    # full name; it wins over the capture at merge time (cardbuilder).
     assert parsed.name == "Sabrina"
     assert parsed.personality.startswith("> Basic Information:")
     assert "Name: Sabrina Hill" in parsed.personality

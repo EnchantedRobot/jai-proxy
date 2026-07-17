@@ -8,17 +8,20 @@ lorebook + avatar) into `./cards/`.
 ## How it works
 
 A **thin userscript bridge** does only what must happen inside JanitorAI's
-authenticated, CSP-protected page — relaying the chat request, reading the DOM,
-mining lorebook IDs from React fibers, and fetching cookie-authenticated
-`/hampter/script/<id>` lorebooks. A local **FastAPI server** does everything
-else: HTML→markdown, macro repair, V3 JSON assembly, avatar fetch, and PNG
-`tEXt`-chunk embedding (via Pillow). Because the fragile parsing lives in Python,
-a JanitorAI markup change is fixed by editing the server and restarting — no
-userscript reinstall.
+authenticated page — relaying the chat request, and reading a character straight
+from JanitorAI's own JSON API (`GET /hampter/characters/<id>` for the card,
+`/hampter/script/<id>` for public lorebooks), both bearer-authenticated in-page.
+A local **FastAPI server** does everything else: maps the JSON onto Character
+Card V3, repairs macros, converts the creator-notes blurb HTML→markdown,
+assembles the V3 JSON, fetches the avatar, and embeds it into the PNG `tEXt`
+chunks (via Pillow). Because the mapping lives in Python, a JanitorAI schema
+change is fixed by editing the server and restarting — no userscript reinstall.
 
-Hidden definitions are never rendered to the browser; they only exist in the chat
-**system prompt** sent to the model. The server captures that prompt as it relays
-the chat request to a local MLX model, so nothing leaves your machine.
+Hidden definitions are never served by the API; they only exist in the chat
+**system prompt** sent to the model, and the card's primary greeting only in the
+chat's first message. The server captures both as it relays the chat request to
+a local MLX model, so nothing leaves your machine, and merges them with the JSON
+(alternate greetings, tags, creator notes, avatar) at export.
 
 ## Setup (macOS)
 
@@ -37,50 +40,55 @@ proxy/config settings, set the endpoint to
 `http://127.0.0.1:8000/v1/chat/completions` (any model name — the server
 overrides it with the loaded MLX model).
 
+The userscript is **compiled** from small modules under `userscript/src/`. After
+editing any of them, rebuild the single-file bundle with:
+
+```bash
+make compile        # -> userscript/jai-proxy-bridge.user.js
+```
+
 ## Usage
 
-A pill in the bottom-right corner shows 🟢/🔴 for server reachability. On a chat
-page it also shows the current character and its capture state, e.g.
-`🟢 Ari · Sys ✓ · Greet ✗`.
+A pill in the bottom-right corner shows 🟢/🔴 for server reachability. On a
+character page it also shows the character and, for hidden cards, its capture
+state, e.g. `🟢 Ari · Sys ✓ · Greet ✗` (open cards just show `· open ✓`).
 
-Just above the pill are two buttons: a context-aware **Export** button (its label
-changes with the page) and a small **🗑 Clear cache** button.
+Just above the pill is the **⬇ Export card** button; it turns green when the card
+in view can be exported right now. The pill carries a small **CLEAR** link on its
+right edge.
 
 ### Public cards
 
-Open the character's profile page and click **⬇ Export card**. Everything is
-scraped from the DOM immediately — no chat needed. You're prompted for the card
-name (`Save card as:`, prefilled with the detected name but editable, since
-JanitorAI's page title is often a scenario blurb rather than the real name). The
-button reports `✅ saved` on a clean export.
+Open the character's page and click **⬇ Export card**. The card is read straight
+from JanitorAI's JSON API — no chat needed. You're prompted for the card name
+(`Save card as:`, prefilled with the real name (`chat_name`) but editable, since
+JanitorAI's card title is often a scenario blurb rather than the character name).
+The button reports `✅ saved` on a clean export. Alternate greetings and public
+lorebooks are fetched automatically during export; there's no separate step.
 
 ### Hidden-definition cards
 
-A hidden card's profile shows none of the definition and none of the greetings,
-so both must be captured from the chat experience via **two explicit steps**:
+A hidden card's JSON omits the definition and its primary greeting — both only
+exist in the chat. So there's **one** extra step:
 
-1. **Open a chat** with the character. The Export button relabels to
-   **⬇ Export greetings** — click it to harvest all starting-message swipes from
-   the DOM (`✅ captured N greetings`; pill shows `Greet ✓`).
-2. **Send any chat message** (e.g. `hello`). The server captures the hidden
-   definition out of the system prompt as it relays the request (pill shows
-   `Sys ✓`).
-3. **Return to the profile page** and click **⬇ Export card**.
+1. **Open a chat** with the character and **send any message** (e.g. `hello`).
+   As the server relays that request it captures the hidden definition from the
+   system prompt *and* the primary greeting from the chat's first message in one
+   shot (pill shows `Sys ✓ · Greet ✓`).
+2. Click **⬇ Export card** (on the character page, or from the chat).
 
-If you click Export card on a hidden profile before both captures exist, the
-build **hard-fails** with a message telling you what's missing — it never writes
-a broken card.
-
-Alternate greetings and lorebooks are collected automatically during export (the
-button walks the greeting carousel / harvests the chat swipes and mines any
-attached lorebook script IDs itself); there's no separate lorebook step.
+If you click Export card on a hidden card before it's been captured, the build
+**hard-fails** with a message telling you to send a chat message first — it never
+writes a broken card. Everything else a hidden card needs (name, tags, creator
+notes, alternate greetings, avatar, lorebooks) still comes from the JSON.
 
 ### Clearing the cache
 
 Hidden cards are matched by character name against accumulated captures, so name
-collisions get likelier as captures pile up. **🗑 Clear cache** wipes all
-captured system prompts and greetings (`./cards/.captures/`). Finished PNGs in
-`./cards/` are not affected.
+collisions get likelier as captures pile up. The pill's **CLEAR** link wipes all
+captured system prompts and greetings (`./cards/.captures/`) and also resets the
+plugin's own remembered state (last card name / id / hidden flag). Finished PNGs
+in `./cards/` are not affected.
 
 ### Reading the result
 
@@ -96,17 +104,18 @@ otherwise check the server logs).
 uv run pytest
 ```
 
-149 tests. All server-side logic (system-prompt parser, HTML/profile parser,
-macro repair, lorebook mapper, card builder, PNG round-trip, and the FastAPI
-routes) is validated against **real captured fixtures** in `tests/fixtures/` —
-see `tests/fixtures/README.md` for provenance. The userscript's in-page
-DOM/React-fiber interaction has no automated tests; it's verified live.
+160 tests. All server-side logic (JanitorAI-JSON→V3 mapper, system-prompt parser,
+macro repair, lorebook mapper, card builder, PNG round-trip, HTML→markdown, and
+the FastAPI routes) is validated against **real captured fixtures** in
+`tests/fixtures/` (8 real `/hampter/characters/<id>` payloads in
+`tests/fixtures/hampter/`) — see `tests/fixtures/README.md` for provenance. The
+userscript's in-page JSON/auth interaction has no automated tests; it's verified
+live.
 
 ## Status
 
-Server-side feature-complete (M0–M7); `uv run pytest` green. The remaining open
-item is end-to-end live-browser verification of the hidden-card flow — the
-open-card export has been confirmed live end-to-end.
+`uv run pytest` green (160). Server-side JSON refactor complete; live end-to-end
+verification of the userscript export flows is pending.
 
 Deliberately out of scope unless a real need surfaces: true token-by-token
 streaming (the server wraps MLX's full reply as a single SSE chunk, which

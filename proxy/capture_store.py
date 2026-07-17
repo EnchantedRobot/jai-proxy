@@ -44,7 +44,12 @@ class CaptureStore:
         self._records: dict[str, CaptureRecord] = {}
         self._load_existing_records()
 
-    def record(self, system_prompt: str) -> None:
+    def record(self, system_prompt: str, primary_greeting: str | None = None) -> None:
+        """Archive + parse a hidden-definition chat system prompt. The same
+        chat relay also carries the card's primary greeting as its first
+        `assistant` message (the definition is hidden but the greeting is
+        rendered into the chat), so the server passes it in here: a single
+        chat message now captures BOTH halves a hidden card needs."""
         if not system_prompt:
             return
         self._raw_prompts.append(system_prompt)
@@ -69,9 +74,14 @@ class CaptureStore:
             return
 
         existing = self._records.get(key)
-        # greetings deliberately stays whatever the previous record had --
-        # the explicit /capture-greetings flow may have already populated
-        # them, and a later system-prompt capture must not wipe that out.
+        # A non-empty primary greeting from this relay wins; otherwise keep
+        # whatever the previous record held so a later definition-only capture
+        # (no assistant message yet) doesn't wipe a greeting already captured.
+        greeting = (primary_greeting or "").strip()
+        if greeting:
+            greetings = [greeting]
+        else:
+            greetings = existing.greetings if existing else []
         # lore_entries deliberately stays whatever the previous record had
         # (empty, today) rather than trying to mine lore out of raw prompt
         # text. Real evidence (system_prompt_open_akane_kujo.txt lines
@@ -90,31 +100,13 @@ class CaptureStore:
             mes_example=parsed.mes_example,
             raw_system_prompt=system_prompt,
             lore_entries=existing.lore_entries if existing else [],
-            greetings=existing.greetings if existing else [],
+            greetings=greetings,
         )
         self._records[key] = record
         self._persist(key, record)
 
     def get(self, name: str) -> CaptureRecord | None:
         return self._records.get(normalize(name))
-
-    def record_greetings(self, name: str, greetings_html: list[str]) -> int:
-        key = normalize(name)
-        if not key:
-            logger.warning("record_greetings: empty name, dropping %d greeting(s)", len(greetings_html))
-            return 0
-
-        cleaned = [h for h in greetings_html if h and h.strip()]
-        existing = self._records.get(key)
-        if existing:
-            record = existing.model_copy(
-                update={"greetings": cleaned, "updated_at": datetime.now(timezone.utc)}
-            )
-        else:
-            record = CaptureRecord(name=name, greetings=cleaned)
-        self._records[key] = record
-        self._persist(key, record)
-        return len(cleaned)
 
     def status(self, name: str) -> dict[str, bool]:
         rec = self.get(name)
