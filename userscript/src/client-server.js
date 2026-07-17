@@ -61,6 +61,18 @@
       return JSON.parse(text);
     },
 
+    // Which of these card ids are already saved on disk. Lets a bulk run skip
+    // cards we already have before the slow per-card fetch loop.
+    async existing(ids) {
+      const { text } = await this._request({
+        method: "POST",
+        path: "/existing",
+        body: { ids },
+        timeout: 30000,
+      });
+      return JSON.parse(text).existing || [];
+    },
+
     async captureStatus(name) {
       const { text } = await this._request({
         path: "/capture-status?name=" + encodeURIComponent(name),

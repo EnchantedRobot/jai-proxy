@@ -227,6 +227,57 @@ def test_build_exports_open_card_png(tmp_path):
     assert "linkedAt" in jai
 
 
+# ---------------------------------------------------------------------------
+# /existing -- "which of these ids are already on disk?" for bulk skip.
+# ---------------------------------------------------------------------------
+
+
+def test_existing_reports_only_ids_already_on_disk(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    akane = _character("open_akane_kujo")
+
+    # Save one card, then ask about its id plus one we never built.
+    client.post(
+        "/build",
+        json={
+            "character": {"name": "Akane Kujo", "id": "abc123"},
+            "character_json": akane,
+        },
+    )
+
+    resp = client.post("/existing", json={"ids": ["abc123", "never-built-999"]})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"existing": ["abc123"]}
+
+
+def test_existing_matches_on_id_fragment_regardless_of_name(tmp_path):
+    # The saved filename keys on the first 8 id chars, so a full UUID whose
+    # fragment matches an on-disk card is reported even though the caller has
+    # no idea what name it was saved under.
+    client = make_client(FakeMLXClient(), tmp_path)
+    client.post(
+        "/build",
+        json={
+            "character": {"name": "Whoever", "id": "deadbeef-1111-2222-3333-444455556666"},
+            "character_json": {"chat_name": "Whoever", "creator_name": "acreator"},
+        },
+    )
+
+    resp = client.post(
+        "/existing", json={"ids": ["deadbeef-1111-2222-3333-444455556666"]}
+    )
+
+    assert resp.json()["existing"] == ["deadbeef-1111-2222-3333-444455556666"]
+
+
+def test_existing_empty_request_returns_empty(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    resp = client.post("/existing", json={"ids": []})
+    assert resp.status_code == 200
+    assert resp.json() == {"existing": []}
+
+
 def test_build_falls_back_to_character_name_without_character_json(tmp_path):
     client = make_client(FakeMLXClient(), tmp_path)
 
@@ -374,7 +425,11 @@ def test_build_hidden_card_merges_capture_and_json(tmp_path):
     # Metadata from the JSON.
     assert data["creator"] == "somecreator"
     assert data["tags"] == ["AnyPOV", "mystery"]
-    assert data["creator_notes"] == "The creator's authored note."
+    # creator_notes leads with a markdown reference to the original avatar.
+    assert data["creator_notes"] == (
+        "![Ari](https://ella.janitorai.com/bot-avatars/ari.webp)\n\n"
+        "The creator's authored note."
+    )
     assert data["extensions"]["jai"]["pageName"] == "A Mysterious Transfer Student"
 
 

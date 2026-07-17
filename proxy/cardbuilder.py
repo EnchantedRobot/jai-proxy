@@ -5,11 +5,13 @@ import io
 import json
 import re
 import shutil
+from collections.abc import Iterable
 from pathlib import Path
 
 from PIL import Image
 
 from proxy import pngtools
+from proxy.avatar_transform import normalize_avatar
 from proxy.config import settings
 from proxy.macros import MacroSanitizer
 from proxy.models import CaptureRecord, CharacterBook, CharacterCardV3, ProfileFields
@@ -53,6 +55,7 @@ class CardBuilder:
         greetings: list[str],
         capture: CaptureRecord | None,
         book: CharacterBook | None,
+        avatar_url: str | None = None,
     ) -> tuple[CharacterCardV3, list[str]]:
         warnings: list[str] = []
 
@@ -76,6 +79,13 @@ class CardBuilder:
         alternate_greetings = [sanitize(desub(g)) for g in greetings[1:]]
 
         name = profile.name or (capture.name if capture else "") or "Unknown"
+
+        if avatar_url:
+            # Leads creator_notes with the original (uncropped, unresized)
+            # avatar, echoing the character sidebar JanitorAI shows next to
+            # these notes -- and keeps a clean reference to it before the
+            # embedded avatar gets cropped/downscaled for SillyTavern.
+            creator_notes = f"![{name}]({avatar_url})\n\n{creator_notes}"
 
         if not description and not scenario and not mes_example:
             warnings.append("no description/scenario/example dialogs found")
@@ -143,10 +153,13 @@ class PngWriter:
         target_dir = out_dir / creator_dir
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        # Normalize whatever the avatar is (webp/jpg/png) to PNG bytes, then
-        # optionally quantize. pngquant strips text chunks, so the card is
-        # injected last -- directly into the (compressed) byte stream.
+        # Normalize whatever the avatar is (webp/jpg/png) to PNG bytes, crop a
+        # detected 3-image stack down to its primary portrait and cap the
+        # longest side, then optionally quantize. pngquant strips text chunks,
+        # so the card is injected last -- directly into the (compressed) byte
+        # stream.
         image = Image.open(io.BytesIO(avatar_png)).convert("RGBA")
+        image = normalize_avatar(image)
         buffer = io.BytesIO()
         image.save(buffer, "PNG")
         image_bytes = buffer.getvalue()
@@ -165,3 +178,22 @@ class PngWriter:
         path = target_dir / filename
         path.write_bytes(image_bytes)
         return path
+
+    def existing(self, card_ids: Iterable[str], out_dir: Path | None = None) -> set[str]:
+        """The subset of card_ids whose card PNG is already on disk.
+
+        Matches on the id fragment -- the `_<id8>` disambiguator every card
+        filename carries -- because that fragment is knowable from a list row
+        before the real character name is (the name comes from a per-card
+        fetch, the id doesn't). So a bulk export can drop cards already saved
+        without fetching them. Ids with no usable fragment never match (we
+        can't key on a name we don't have here), so they're re-exported."""
+        out_dir = out_dir or self._output_dir
+        found: set[str] = set()
+        for card_id in card_ids:
+            fragment = _id_fragment(card_id)
+            if not fragment:
+                continue
+            if next(out_dir.glob(f"**/*_{fragment}.png"), None) is not None:
+                found.add(card_id)
+        return found

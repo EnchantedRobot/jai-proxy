@@ -110,6 +110,18 @@
       return JSON.parse(text);
     },
 
+    // Which of these card ids are already saved on disk. Lets a bulk run skip
+    // cards we already have before the slow per-card fetch loop.
+    async existing(ids) {
+      const { text } = await this._request({
+        method: "POST",
+        path: "/existing",
+        body: { ids },
+        timeout: 30000,
+      });
+      return JSON.parse(text).existing || [];
+    },
+
     async captureStatus(name) {
       const { text } = await this._request({
         path: "/capture-status?name=" + encodeURIComponent(name),
@@ -924,27 +936,55 @@
         }
         this._renderRows(rows);
 
+        // Skip cards already on disk. The `_<id8>` fragment in each saved
+        // filename is knowable from a list row (unlike the real name), so the
+        // server can tell us which ids exist in one cheap call — those drop out
+        // before the slow one-at-a-time classify/build loop. Fails soft: if the
+        // check errors, we just export everything.
+        this._setStatus("⏳ checking which cards are already saved…");
+        let onDisk = new Set();
+        try {
+          onDisk = new Set(await ServerClient.existing(rows.map((r) => r.id)));
+        } catch (err) {
+          warn("existing-check failed; exporting all", err);
+        }
+        const pending = [];
+        for (const r of rows) {
+          if (onDisk.has(r.id)) {
+            this._setRow(r.id, "•", "already saved — skipped");
+          } else {
+            pending.push(r);
+          }
+        }
+        const already = rows.length - pending.length;
+        if (!pending.length) {
+          this._setStatus(`all ${rows.length} card(s) already saved — nothing to do`);
+          return;
+        }
+
         // The listing can't tell open from hidden, so every kept card is fetched
         // individually — warn before a long one-at-a-time run.
         const filterNote = skipped ? `\n\n${skipped} card(s) excluded by the tag filter.` : "";
+        const onDiskNote = already ? `\n\n${already} card(s) already saved — skipped.` : "";
         if (
           !window.confirm(
-            `Check ${rows.length} card(s) for open definitions and download each ` +
+            `Check ${pending.length} card(s) for open definitions and download each ` +
               "open one?\n\nThe listing can't tell open from hidden, so each card " +
               "is fetched one at a time. Hidden cards are skipped." +
+              onDiskNote +
               filterNote
           )
         ) {
-          this._setStatus(`${rows.length} cards — cancelled`);
+          this._setStatus(`${pending.length} cards — cancelled`);
           return;
         }
 
         let done = 0;
         let failed = 0;
         let hidden = 0;
-        for (let i = 0; i < rows.length; i += 1) {
-          const r = rows[i];
-          this._setStatus(`(${i + 1}/${rows.length}) ✓${done} ✗${hidden} ⚠${failed} — ${r.name}`);
+        for (let i = 0; i < pending.length; i += 1) {
+          const r = pending[i];
+          this._setStatus(`(${i + 1}/${pending.length}) ✓${done} ✗${hidden} ⚠${failed} — ${r.name}`);
           let built = false;
           try {
             this._setRow(r.id, "⏳", "checking…");
@@ -975,12 +1015,15 @@
             this._setRow(r.id, "⚠", String(err));
             warn("bulk card error", r.id, err);
           }
-          if (i < rows.length - 1) {
+          if (i < pending.length - 1) {
             await sleep(built ? CARD_BUILD_DELAY_MS : CARD_SKIP_DELAY_MS);
           }
         }
         const filtered = skipped ? ` · ⊘ ${skipped} filtered` : "";
-        this._setStatus(`done · ✓ ${done} saved · ✗ ${hidden} hidden · ⚠ ${failed} failed${filtered}`);
+        const existingNote = already ? ` · • ${already} already saved` : "";
+        this._setStatus(
+          `done · ✓ ${done} saved · ✗ ${hidden} hidden · ⚠ ${failed} failed${existingNote}${filtered}`
+        );
       } catch (err) {
         warn("bulk run failed", err);
         this._setStatus("⚠️ " + String(err));

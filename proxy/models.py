@@ -145,6 +145,20 @@ class BuildResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# /existing -- "which of these card ids do we already have on disk?" Lets a
+# bulk export skip cards already saved before the slow per-card fetch loop.
+# ---------------------------------------------------------------------------
+
+
+class ExistingRequest(BaseModel):
+    ids: list[str] = Field(default_factory=list)
+
+
+class ExistingResponse(BaseModel):
+    existing: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # Character Card V3
 # ---------------------------------------------------------------------------
 

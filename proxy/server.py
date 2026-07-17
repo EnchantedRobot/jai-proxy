@@ -14,7 +14,7 @@ from proxy.cardbuilder import CardBuilder, PngWriter
 from proxy.config import settings
 from proxy.lorebook import LorebookMapper
 from proxy.mlx_client import MLXClient, MLXError
-from proxy.models import BuildRequest, BuildResponse
+from proxy.models import BuildRequest, BuildResponse, ExistingRequest, ExistingResponse
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("jai_proxy.server")
@@ -116,6 +116,13 @@ async def clear_captures() -> dict[str, Any]:
     return {"ok": True, "removed": removed}
 
 
+@app.post("/existing")
+async def existing(req: ExistingRequest) -> ExistingResponse:
+    """Report which of the given card ids are already saved on disk, so a bulk
+    export can skip them before the slow one-at-a-time classify/build loop."""
+    return ExistingResponse(existing=sorted(png_writer.existing(req.ids)))
+
+
 @app.post("/build")
 async def build(req: BuildRequest) -> BuildResponse:
     character = req.character_json or {}
@@ -154,7 +161,8 @@ async def build(req: BuildRequest) -> BuildResponse:
     if capture is not None:
         book = lorebook_mapper.merge(book, capture.lore_entries)
 
-    card, warnings = card_builder.build(profile, greetings, capture=capture, book=book)
+    avatar_url = req.avatar_url or janitor_mapper.avatar_url(character)
+    card, warnings = card_builder.build(profile, greetings, capture=capture, book=book, avatar_url=avatar_url)
     warnings = lore_warnings + warnings
 
     # data.name is the real character name (chat_name); the JSON `name` field
@@ -178,7 +186,6 @@ async def build(req: BuildRequest) -> BuildResponse:
         }
     }
 
-    avatar_url = req.avatar_url or janitor_mapper.avatar_url(character)
     avatar_bytes = await avatar_fetcher.fetch(avatar_url, req.avatar_b64)
     path = png_writer.write(card, avatar_bytes, card_id=card_id)
 
