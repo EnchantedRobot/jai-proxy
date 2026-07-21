@@ -53,6 +53,33 @@ def test_poss_p_matches_before_poss_is_not_half_eaten():
     assert text == "that is {{user}}"
 
 
+def test_corrects_user_typo_and_clears_the_warning():
+    # The reported case: {{usee}} is a typo of {{user}} -- correct it silently
+    # rather than surfacing an "unresolved macro" warning.
+    s = MacroSanitizer()
+    text, warnings = s.sanitize("Hello {{usee}}, how are you?")
+    assert text == "Hello {{user}}, how are you?"
+    assert warnings == []
+
+
+def test_corrects_assorted_user_and_char_typos():
+    s = MacroSanitizer()
+    for typo in ("usee", "uesr", "usre", "userr", "usr"):
+        assert s.sanitize(f"{{{{{typo}}}}}") == ("{{user}}", [])
+    for typo in ("chr", "cahr", "chra", "charr"):
+        assert s.sanitize(f"{{{{{typo}}}}}") == ("{{char}}", [])
+
+
+def test_corrects_typo_with_dropped_brace():
+    s = MacroSanitizer()
+    assert s.sanitize("{usee} waved")[0] == "{{user}} waved"
+
+
+def test_typo_correction_is_case_insensitive():
+    s = MacroSanitizer()
+    assert s.sanitize("{{USEE}}")[0] == "{{user}}"
+
+
 def test_bare_word_braces_in_prose_are_untouched():
     s = MacroSanitizer()
     text, warnings = s.sanitize("some {characters} and {user_name} stay as-is")

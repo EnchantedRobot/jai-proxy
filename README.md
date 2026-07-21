@@ -109,17 +109,44 @@ a missing field — hover the button for the full list), or `⚠️ <message>` i
 build request itself failed (the hidden-card gate reports its reason here;
 otherwise check the server logs).
 
+### Importing datacat cards
+
+datacat (a separate closed-source retriever) exports a card straight into the
+PNG as an embedded `chara`/`ccv3` character card. For bulk acquisition that's
+faster than the
+send-a-chat-then-capture flow, so those PNGs can be re-homed into the archive
+directly — no server needed:
+
+```bash
+# drop datacat PNGs into ./import, then:
+make import
+```
+
+Each card is remapped into the same `cards/<creator>/<name>_<id8>.png` layout
+the retriever produces, running the same macro sanitizer, creator-notes
+HTML→markdown, avatar normalize, and pngquant compression. Once landed, the card
+shows as **acquired** on the next JanitorAI scan (the scan keys off the `_<id8>`
+filename fragment).
+
+Two caveats, both from datacat's side: it does **not** retrieve the lorebook
+(`character_book`), so an imported card carries none — for a card whose creator
+uses one, the send-a-chat capture flow is still the way to get it. And a card
+whose id is **already** in `cards/` is skipped, never overwritten, so a full
+retrieval (with its lorebook) is never downgraded to an import. To replace one,
+delete the existing file and re-run.
+
 ## Tests
 
 ```bash
 uv run pytest
 ```
 
-160 tests. All server-side logic (JanitorAI-JSON→V3 mapper, system-prompt parser,
-macro repair, lorebook mapper, card builder, PNG round-trip, HTML→markdown, and
-the FastAPI routes) is validated against **real captured fixtures** in
-`tests/fixtures/` (8 real `/hampter/characters/<id>` payloads in
-`tests/fixtures/hampter/`) — see `tests/fixtures/README.md` for provenance. The
+All server-side logic (JanitorAI-JSON→V3 mapper, system-prompt parser, macro
+repair, lorebook mapper, card builder, PNG round-trip, HTML→markdown, the datacat
+import mapper, and the FastAPI routes) is validated against **real captured
+fixtures** in `tests/fixtures/` (8 real `/hampter/characters/<id>` payloads in
+`tests/fixtures/hampter/`, 2 real datacat card exports in
+`tests/fixtures/datacat/`) — see `tests/fixtures/README.md` for provenance. The
 userscript's in-page JSON/auth interaction has no automated tests; it's verified
 live.
 

@@ -48,6 +48,23 @@ def _text_chunk(keyword: str, text: str) -> bytes:
     return _encode_chunk(b"tEXt", payload)
 
 
+def read_text_chunks(png: bytes) -> dict[str, str]:
+    """Return the `tEXt` chunks of `png` as {keyword: text}. The inverse of
+    inject_text_chunks -- used to read an already-embedded character card back
+    out of a PNG (e.g. a datacat export in the import pipeline). Only plain
+    `tEXt` is decoded; the card writers here (and datacat's) use tEXt, so
+    compressed zTXt/iTXt variants are not expected and are skipped. Later
+    chunks win on a duplicate keyword."""
+    if png[:8] != _PNG_SIGNATURE:
+        raise ValueError("not a PNG stream")
+    out: dict[str, str] = {}
+    for ctype, cdata in _iter_chunks(png):
+        if ctype == b"tEXt":
+            keyword, _, text = cdata.partition(b"\x00")
+            out[keyword.decode("latin-1")] = text.decode("latin-1")
+    return out
+
+
 def inject_text_chunks(png: bytes, texts: dict[str, str]) -> bytes:
     """Return `png` with `texts` written as tEXt chunks immediately after IHDR,
     stripping any pre-existing text chunks first. Placement before IDAT means

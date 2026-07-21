@@ -12,6 +12,9 @@ wheels/
 # jai-proxy output archive
 /cards/
 
+# datacat PNGs staged for `make import`
+/import/
+
 # Editors
 .idea/
 .vscode/

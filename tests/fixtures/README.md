@@ -47,6 +47,15 @@ Proof that the primary greeting rides in as the first `assistant` message — th
 `capture_store.record(..., primary_greeting=...)` depends on. Exercised by
 `tests/test_server.py`.
 
+## `datacat/*.json`
+The base64-decoded character card embedded in two real datacat PNG exports (the `ccv3`
+chunk of `import/*.png`, captured 2026-07-21). Primary fixtures for `datacat_mapper.py`.
+datacat writes a full `chara_card_v3` with macros intact and no `character_book`, so these
+back the `make import` path.
+
+- `abigail.json` (toraval) — single greeting, no alternates; HTML `creator_notes`.
+- `alt_greetings.json` (Aoi, AlissaOne) — a `first_mes` plus 5 `alternate_greetings`.
+
 ## `saucepan/`
 **Different site (saucepan.ai), not JanitorAI.** This now backs the live `/build-saucepan`
 path (the "New saucepan engine"), not a parked userscript.
