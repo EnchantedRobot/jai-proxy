@@ -21,6 +21,21 @@
       font-weight: 600; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.3);
     }
     #jai-proxy-export:disabled { cursor: default; }
+    #jai-proxy-hide {
+      pointer-events: auto; display: none; padding: 8px 12px; border-radius: 10px;
+      border: none; background: #333; color: #fff; font-family: inherit;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0,0,0,.3);
+    }
+    #jai-proxy-hide.jai-on { background: #b5533d; }
+    /* Class-only, reversible hide of cards not worth showing: already saved
+       (jai-captured) or skipped by the tag filter (jai-filtered). The marker
+       class lands on the card wrapper; the <html> flag flips them all at once
+       so JAI's own inline styles are never disturbed. */
+    html.jai-hide-captured .profile-character-card-wrapper.jai-captured,
+    html.jai-hide-captured .profile-character-card-wrapper.jai-filtered {
+      display: none !important;
+    }
     #jai-proxy-pill {
       display: flex; align-items: center; gap: 8px; padding: 4px 10px;
       border-radius: 999px; background: #222; color: #fff; border: 1px solid #444;
@@ -171,6 +186,14 @@
       btn.textContent = "⬇ Export to card";
       btn.addEventListener("click", () => ExportButton.onClick());
 
+      const hideBtn = document.createElement("button");
+      hideBtn.id = "jai-proxy-hide";
+      hideBtn.textContent = "🙈 Hide saved";
+      hideBtn.title =
+        "Hide cards already saved to disk — plus, on a creator page, cards the " +
+        "include/exclude tag filter would skip";
+      hideBtn.addEventListener("click", () => HideCaptured.onClick());
+
       const pill = document.createElement("div");
       pill.id = "jai-proxy-pill";
       const pillStatus = document.createElement("span");
@@ -182,13 +205,14 @@
       clear.addEventListener("click", () => Pill.clear());
       pill.append(pillStatus, clear);
 
-      root.append(BulkPanel.build(), status, btn, pill);
+      root.append(BulkPanel.build(), hideBtn, status, btn, pill);
       document.documentElement.appendChild(root);
 
       ExportButton._el = btn;
       ExportStatus._el = status;
       Pill._el = pill;
       Pill._statusEl = pillStatus;
+      HideCaptured.setButton(hideBtn);
       this._root = root;
     },
 

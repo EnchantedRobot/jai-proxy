@@ -105,6 +105,11 @@
     // only; show/hide it as the SPA navigates.
     BulkPanel.toggle(!!currentCreatorId());
 
+    // The "hide saved cards" toggle lives on any listing surface: show its
+    // button where cards render and, while active, fold in cards that
+    // infinite-scroll has appended since the last tick.
+    await HideCaptured.refresh();
+
     const onChar = !!currentCharacterId();
     const onChat = isChatView();
     const id = currentCharacterId() || GM_getValue(KEY_ID, "");
