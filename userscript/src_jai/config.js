@@ -18,6 +18,6 @@
   //   exclude: ["futa", "futanari"]    → drop either tag
   // ---------------------------------------------------------------------------
   const BULK_TAG_FILTER = {
-    include: [],
+    include: ["female"],
     exclude: ["futa", "futanari"],
   };

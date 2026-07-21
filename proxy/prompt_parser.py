@@ -12,7 +12,14 @@ from proxy.models import ParsedDefinition
 # in other JanitorAI export tooling.
 _SKIP_TAGS_FOR_NAME = {"system", "scenario", "example_dialogs", "persona", "userpersona"}
 
-_OPEN_TAG_RE = re.compile(r"<\s*([^<>/]+?)\s*>", re.IGNORECASE)
+# An opening tag: `<name>` where `name` may itself contain `/` (real chat_names
+# like "Celeste // Brightstar" produce `<Celeste // Brightstar's Persona>`). The
+# `(?!/)` lookahead is what keeps this from also matching *closing* tags
+# (`</name>`) -- we reject a `/` only as the first character, not inside the name.
+# (Excluding `/` outright, as an earlier version did, meant a slash in the
+# character name hid the persona tag, so the parser latched onto an inner tag and
+# keyed the capture under the wrong name -- see test_slash_in_name_* .)
+_OPEN_TAG_RE = re.compile(r"<\s*(?!/)([^<>]+?)\s*>", re.IGNORECASE)
 
 # Support the straight apostrophe plus common curly/typographic variants a
 # creator's name might carry in from copy-paste.
