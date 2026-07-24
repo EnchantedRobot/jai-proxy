@@ -52,6 +52,30 @@ def _chub_data(gallery_id: str | None = None) -> dict:
     return data
 
 
+def _jannyai_data(gallery_id: str | None = None) -> dict:
+    data = {
+        "name": "Abby",
+        "creator": "@MathiDoos",
+        "description": "A card about {{char}} meeting {{user}}.",
+        "scenario": "{{user}} runs into {{char}}.",
+        "first_mes": "Hey {{user}}, it's {{char}}.",
+        "creator_notes": "<p>a blurb</p>",
+        "tags": ["Female"],
+        "extensions": {
+            "jannyai": {
+                "id": "c9630bdc-c851-4d90-a6e2-fc96a19b3e1a",
+                "creatorUsername": "@MathiDoos",
+                "slug": "character-abby",
+                "pageName": "Abby",
+                "tagline": "a blurb",
+            }
+        },
+    }
+    if gallery_id is not None:
+        data["extensions"]["gallery_id"] = gallery_id
+    return data
+
+
 def _write_existing(cards_dir: Path, *, name: str, creator: str, cid: str, data: dict) -> Path:
     """Put a card on disk the way a prior (fuller) retrieval would -- through the
     real writer, so its filename and PNG structure match what an import looks
@@ -173,6 +197,21 @@ def test_datacat_extensions_omits_absent_gallery_id():
 
 
 # ---------------------------------------------------------------------------
+# _jannyai_extensions -- fresh JannyAI write keeps its block + a gallery_id
+# ---------------------------------------------------------------------------
+
+
+def test_jannyai_extensions_stamps_provenance_and_keeps_block():
+    ext = importer._jannyai_extensions(_jannyai_data(gallery_id="GID7"), "MathiDoos")
+    assert ext["jai"]["sourceKind"] == "jannyai_import"
+    assert ext["jai"]["creatorName"] == "MathiDoos"
+    assert ext["gallery_id"] == "GID7"
+    # the "@handle", slug and tagline survive in the preserved block
+    assert ext["jannyai"]["creatorUsername"] == "@MathiDoos"
+    assert ext["jannyai"]["tagline"] == "a blurb"
+
+
+# ---------------------------------------------------------------------------
 # main() -- the whole flow
 # ---------------------------------------------------------------------------
 
@@ -198,6 +237,29 @@ def test_main_backfills_gallery_id_into_existing_card(tmp_path, monkeypatch):
     patched = _read_data(existing)
     assert patched["extensions"]["gallery_id"] == "f1AMBFO5oPUr"
     assert _pixel_chunks(existing.read_bytes()) == _pixel_chunks(before)
+
+
+def test_main_imports_jannyai_card(tmp_path, monkeypatch):
+    cards = tmp_path / "cards"
+    imports = tmp_path / "import"
+    imports.mkdir()
+
+    (imports / "Abby.png").write_bytes(_import_png(_jannyai_data(gallery_id="wdE3mtqqauvd")))
+
+    assert _run_import(imports, cards, monkeypatch) == 0
+
+    # Foldered by the "@"-stripped creator, suffixed with the id fragment.
+    written = sorted(cards.glob("**/*.png"))
+    assert written == [cards / "MathiDoos" / "Abby_c9630bdc.png"]
+
+    data = _read_data(written[0])
+    assert data["name"] == "Abby"
+    assert data.get("character_book") is None  # JannyAI carries no lorebook
+    assert "{{char}}" in data["description"]  # macros preserved
+    assert data["extensions"]["jai"]["sourceKind"] == "jannyai_import"
+    assert data["extensions"]["gallery_id"] == "wdE3mtqqauvd"
+    # creator_notes de-HTML'd on the way in
+    assert "<p>" not in (data.get("creator_notes") or "")
 
 
 def test_main_skips_when_import_has_no_gallery_id(tmp_path, monkeypatch):

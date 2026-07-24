@@ -9,6 +9,9 @@ acquired on the next scan (which keys off the `_<id>` filename fragment):
     It carries no lorebook, so it's rebuilt through the CardBuilder (macro
     sanitize, creator-notes de-HTML) with a fresh datacat_import provenance
     block. See proxy/datacat_mapper.py.
+  * JannyAI  -- a jannyai.com card export, structurally a twin of datacat
+    (definition-only, no lorebook, macros intact), rebuilt the same way with a
+    fresh jannyai_import provenance block. See proxy/jannyai_mapper.py.
   * Chub.ai  -- an already-complete chara_card_v3 (its own lorebook + rich
     extensions). It's passed through near-verbatim: macros sanitized,
     creator_notes de-HTML'd, tags cleaned, everything else (extensions, the
@@ -42,7 +45,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from proxy import chub_mapper, datacat_mapper, pngtools
+from proxy import chub_mapper, datacat_mapper, jannyai_mapper, pngtools
 from proxy.cardbuilder import CardBuilder, PngWriter
 from proxy.config import settings
 from proxy.macros import MacroSanitizer
@@ -91,6 +94,39 @@ def _import_datacat(
     card, warnings = builder.build(profile, greetings, capture=None, book=None)
     card.character_version = datacat_mapper.source_url(data) or "jai-proxy"
     card.extensions = _datacat_extensions(data, profile.creator)
+    out = writer.write(card, raw, card_id=cid or None)
+    return out, warnings
+
+
+def _jannyai_extensions(data: dict, creator: str) -> dict:
+    """Provenance mirroring _datacat_extensions but flagged `jannyai_import` and
+    carrying JannyAI's own block (so the "@handle", slug and tagline survive).
+    A source `gallery_id` is carried over so a fresh import keeps it."""
+    extensions = {
+        "jai": {
+            "source_url": jannyai_mapper.source_url(data),
+            "id": jannyai_mapper.card_id(data) or None,
+            "sourceKind": "jannyai_import",
+            "creatorName": creator,
+            "pageName": jannyai_mapper.page_name(data),
+            "linkedAt": _utc_now_iso(),
+        },
+        "jannyai": jannyai_mapper.jannyai_block(data),
+    }
+    gid = _gallery_id(data)
+    if gid is not None:
+        extensions["gallery_id"] = gid
+    return extensions
+
+
+def _import_jannyai(
+    builder: CardBuilder, writer: PngWriter, data: dict, raw: bytes, cid: str
+) -> tuple[Path, list[str]]:
+    profile = jannyai_mapper.to_profile_fields(data)
+    greetings = jannyai_mapper.greetings(data)
+    card, warnings = builder.build(profile, greetings, capture=None, book=None)
+    card.character_version = jannyai_mapper.source_url(data) or "jai-proxy"
+    card.extensions = _jannyai_extensions(data, profile.creator)
     out = writer.write(card, raw, card_id=cid or None)
     return out, warnings
 
@@ -209,8 +245,10 @@ def main() -> int:
             records.append((path, raw, "chub", data, chub_mapper.card_id(data)))
         elif datacat_mapper.is_datacat(data):
             records.append((path, raw, "datacat", data, datacat_mapper.card_id(data)))
+        elif jannyai_mapper.is_jannyai(data):
+            records.append((path, raw, "jannyai", data, jannyai_mapper.card_id(data)))
         else:
-            print(f"  skip  {path.name}: unrecognized card (not datacat or Chub)")
+            print(f"  skip  {path.name}: unrecognized card (not datacat, JannyAI or Chub)")
             skipped_unparsable += 1
 
     already = writer.existing([cid for *_, cid in records if cid])
@@ -246,6 +284,8 @@ def main() -> int:
         try:
             if source == "chub":
                 out, warnings = _import_chub(writer, sanitizer, data, raw, cid)
+            elif source == "jannyai":
+                out, warnings = _import_jannyai(builder, writer, data, raw, cid)
             else:
                 out, warnings = _import_datacat(builder, writer, data, raw, cid)
         except Exception as exc:  # one bad PNG must not abort the batch
