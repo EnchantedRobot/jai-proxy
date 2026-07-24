@@ -143,13 +143,37 @@ class PngWriter:
         out_dir: Path | None = None,
         card_id: str | None = None,
     ) -> Path:
+        return self.write_payload(
+            card.to_dict(),
+            avatar_png,
+            creator=card.creator,
+            name=card.name,
+            out_dir=out_dir,
+            card_id=card_id,
+        )
+
+    def write_payload(
+        self,
+        card_payload: dict,
+        avatar_png: bytes,
+        *,
+        creator: str,
+        name: str,
+        out_dir: Path | None = None,
+        card_id: str | None = None,
+    ) -> Path:
+        """Embed an already-assembled card envelope (the {spec, spec_version,
+        data, ...V2 mirror} dict a CharacterCardV3.to_dict produces) into the
+        avatar and write it. `write` routes a CharacterCardV3 through here; the
+        import pipeline uses it directly for a Chub card that's passed through as
+        a raw dict (so its lorebook extras and int positions survive untouched)."""
         # Cards are foldered by creator and suffixed with a card-id fragment --
         # <creator>/<name>_<id8>.png -- so a bulk export can't collide two cards
         # that share a name (different creators land in different folders; same
         # creator + same name is disambiguated by the id). Re-exporting the same
         # card yields the same path and overwrites, which is intended.
         out_dir = out_dir or self._output_dir
-        creator_dir = _safe_filename(card.creator) if card.creator.strip() else "unknown_creator"
+        creator_dir = _safe_filename(creator) if creator.strip() else "unknown_creator"
         target_dir = out_dir / creator_dir
         target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -169,11 +193,11 @@ class PngWriter:
             if quantized is not None:
                 image_bytes = quantized
 
-        payload = base64.b64encode(json.dumps(card.to_dict()).encode("utf-8")).decode("ascii")
+        payload = base64.b64encode(json.dumps(card_payload).encode("utf-8")).decode("ascii")
         image_bytes = pngtools.inject_text_chunks(image_bytes, {"chara": payload, "ccv3": payload})
 
         fragment = _id_fragment(card_id)
-        stem = _safe_filename(card.name)
+        stem = _safe_filename(name)
         filename = f"{stem}_{fragment}.png" if fragment else f"{stem}.png"
         path = target_dir / filename
         path.write_bytes(image_bytes)
@@ -197,3 +221,18 @@ class PngWriter:
             if next(out_dir.glob(f"**/*_{fragment}.png"), None) is not None:
                 found.add(card_id)
         return found
+
+    def find(self, name: str, card_id: str, out_dir: Path | None = None) -> list[Path]:
+        """On-disk card PNGs whose filename matches this name *and* id fragment
+        -- the `<name>_<id8>.png` stem a prior write produced. Narrower than
+        `existing` (which keys on the id fragment alone): it pins the match to
+        the same character name too, so a field can be backfilled into exactly
+        the card an import would otherwise skip without risking a same-fragment,
+        different-name neighbour. Empty when the id has no usable fragment (name
+        alone isn't a safe key here) or nothing matches."""
+        out_dir = out_dir or self._output_dir
+        fragment = _id_fragment(card_id)
+        if not fragment:
+            return []
+        stem = _safe_filename(name)
+        return sorted(out_dir.glob(f"**/{stem}_{fragment}.png"))

@@ -56,6 +56,17 @@ back the `make import` path.
 - `abigail.json` (toraval) — single greeting, no alternates; HTML `creator_notes`.
 - `alt_greetings.json` (Aoi, AlissaOne) — a `first_mes` plus 5 `alternate_greetings`.
 
+## `chub/*.json`
+The base64-decoded `data` object embedded in a real Chub.ai PNG export (the `ccv3`
+chunk of an `import/*.png`, captured 2026-07-22), wrapped as `{"data": …}`. Primary
+fixture for `chub_mapper.py`. Unlike datacat, a Chub card is an already-complete
+`chara_card_v3` with its own `character_book` and a rich `extensions` block, so this
+backs the passthrough import path (clean the text, preserve the rest).
+
+- `sakura_makoto.json` (Sancay) — 5 lorebook entries (with `probability` /
+  `selectiveLogic` extras), a styled `creator_notes` blurb carrying a `<style>` CSS
+  block, and a `depth_prompt` extension.
+
 ## `saucepan/`
 **Different site (saucepan.ai), not JanitorAI.** This now backs the live `/build-saucepan`
 path (the "New saucepan engine"), not a parked userscript.

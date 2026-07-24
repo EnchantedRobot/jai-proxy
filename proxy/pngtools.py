@@ -13,10 +13,13 @@ exactly (re-saving via Pillow would inflate it back). Mirrors the approach in
 
 from __future__ import annotations
 
+import base64
+import json
 import struct
 import subprocess
 import zlib
 from pathlib import Path
+from typing import Any
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # Every flavour of textual chunk. We strip all of them before re-injecting so a
@@ -63,6 +66,33 @@ def read_text_chunks(png: bytes) -> dict[str, str]:
             keyword, _, text = cdata.partition(b"\x00")
             out[keyword.decode("latin-1")] = text.decode("latin-1")
     return out
+
+
+def extract_embedded_card(png: bytes) -> dict[str, Any] | None:
+    """Return the character-card `data` object embedded in a tavern PNG, or
+    None if the PNG carries no readable card. Prefers the V3 `ccv3` chunk,
+    falls back to the V2 `chara` chunk (card writers here, datacat, and Chub all
+    write both with identical content). The chunk payload is base64(JSON); the
+    JSON nests the card fields under `data` (with a top-level V2 mirror), so the
+    nested object is returned -- or the whole object when there's no `data` key.
+
+    The single reader shared by every import source (datacat_mapper, chub_mapper)
+    -- the inverse of the card `to_dict`/inject_text_chunks the writers produce."""
+    try:
+        chunks = read_text_chunks(png)
+    except ValueError:
+        return None
+    payload = chunks.get("ccv3") or chunks.get("chara")
+    if not payload:
+        return None
+    try:
+        obj = json.loads(base64.b64decode(payload))
+    except (ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(obj, dict):
+        return None
+    data = obj.get("data")
+    return data if isinstance(data, dict) else obj
 
 
 def inject_text_chunks(png: bytes, texts: dict[str, str]) -> bytes:

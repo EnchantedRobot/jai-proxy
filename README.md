@@ -109,31 +109,38 @@ a missing field — hover the button for the full list), or `⚠️ <message>` i
 build request itself failed (the hidden-card gate reports its reason here;
 otherwise check the server logs).
 
-### Importing datacat cards
+### Importing cards (datacat & Chub.ai)
 
-datacat (a separate closed-source retriever) exports a card straight into the
-PNG as an embedded `chara`/`ccv3` character card. For bulk acquisition that's
-faster than the
-send-a-chat-then-capture flow, so those PNGs can be re-homed into the archive
-directly — no server needed:
+Some sources hand you a PNG that already embeds a `chara`/`ccv3` character card.
+Dropping a bucket of those into `./import` and re-homing them is faster than the
+send-a-chat-then-capture flow — no server needed:
 
 ```bash
-# drop datacat PNGs into ./import, then:
+# drop card PNGs into ./import, then:
 make import
 ```
 
-Each card is remapped into the same `cards/<creator>/<name>_<id8>.png` layout
-the retriever produces, running the same macro sanitizer, creator-notes
-HTML→markdown, avatar normalize, and pngquant compression. Once landed, the card
-shows as **acquired** on the next JanitorAI scan (the scan keys off the `_<id8>`
-filename fragment).
+Each card lands in the same `cards/<creator>/<name>_<id>.png` layout the native
+retriever produces (so it shows as **acquired** on the next scan, which keys off
+the `_<id>` filename fragment), running the shared avatar normalize + pngquant
+compression. Two source formats are auto-detected:
 
-Two caveats, both from datacat's side: it does **not** retrieve the lorebook
-(`character_book`), so an imported card carries none — for a card whose creator
-uses one, the send-a-chat capture flow is still the way to get it. And a card
-whose id is **already** in `cards/` is skipped, never overwritten, so a full
-retrieval (with its lorebook) is never downgraded to an import. To replace one,
-delete the existing file and re-run.
+- **datacat** (a closed-source JanitorAI retriever) — a bare definition with
+  **no lorebook**. It's rebuilt through the card builder (macro sanitize,
+  creator-notes HTML→markdown) with a `datacat_import` provenance block. Because
+  it lacks the `character_book`, a card whose creator uses one is still better
+  grabbed via the send-a-chat capture flow.
+- **Chub.ai** (recognised by `extensions.chub`) — an already-complete
+  `chara_card_v3` with its **own lorebook and rich extensions**. It's passed
+  through near-verbatim: macros are sanitized and `creator_notes` is converted
+  from Chub's styled HTML (its `<style>`/CSS shell is stripped, not leaked) to
+  markdown, but the `extensions` block (including the `depth_prompt` injection)
+  and the whole `character_book` — down to entry fields like `probability` /
+  `selectiveLogic` and Chub's int-or-string `position` — are preserved exactly.
+
+A card whose id is **already** in `cards/` is skipped, never overwritten, so a
+fuller retrieval is never downgraded to an import. To replace one, delete the
+existing file and re-run.
 
 ## Tests
 
@@ -143,17 +150,18 @@ uv run pytest
 
 All server-side logic (JanitorAI-JSON→V3 mapper, system-prompt parser, macro
 repair, lorebook mapper, card builder, PNG round-trip, HTML→markdown, the datacat
-import mapper, and the FastAPI routes) is validated against **real captured
-fixtures** in `tests/fixtures/` (8 real `/hampter/characters/<id>` payloads in
-`tests/fixtures/hampter/`, 2 real datacat card exports in
-`tests/fixtures/datacat/`) — see `tests/fixtures/README.md` for provenance. The
-userscript's in-page JSON/auth interaction has no automated tests; it's verified
-live.
+and Chub import mappers, and the FastAPI routes) is validated against **real
+captured fixtures** in `tests/fixtures/` (8 real `/hampter/characters/<id>`
+payloads in `tests/fixtures/hampter/`, 2 real datacat card exports in
+`tests/fixtures/datacat/`, a real Chub export in `tests/fixtures/chub/`) — see
+`tests/fixtures/README.md` for provenance. The userscript's in-page JSON/auth
+interaction has no automated tests; it's verified live.
 
 ## Status
 
-`uv run pytest` green (160). Server-side JSON refactor complete; live end-to-end
-verification of the userscript export flows is pending.
+`uv run pytest` green (233). Server-side JSON refactor complete; datacat + Chub.ai
+bulk import live; live end-to-end verification of the userscript export flows is
+pending.
 
 Deliberately out of scope unless a real need surfaces: true token-by-token
 streaming (the server wraps MLX's full reply as a single SSE chunk, which

@@ -13,8 +13,9 @@ test:
 run:
 	uv run python -m proxy.server
 
-# Bulk-import datacat card PNGs from ./import into ./cards (see
-# scripts/import_datacat.py). Cards already on disk are skipped, never
-# overwritten. Extra flags pass through via ARGS, e.g. `make import ARGS=--no-compress`.
+# Bulk-import card PNGs from ./import into ./cards -- datacat and Chub.ai
+# exports are auto-detected (see scripts/import_cards.py). Cards already on disk
+# are skipped, never overwritten. Extra flags pass through via ARGS, e.g.
+# `make import ARGS=--no-compress`.
 import:
-	uv run python scripts/import_datacat.py $(ARGS)
+	uv run python scripts/import_cards.py $(ARGS)

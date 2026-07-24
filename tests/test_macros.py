@@ -66,7 +66,7 @@ def test_corrects_assorted_user_and_char_typos():
     s = MacroSanitizer()
     for typo in ("usee", "uesr", "usre", "userr", "usr"):
         assert s.sanitize(f"{{{{{typo}}}}}") == ("{{user}}", [])
-    for typo in ("chr", "cahr", "chra", "charr"):
+    for typo in ("chr", "cahr", "chra", "charr", "chars", "chair"):
         assert s.sanitize(f"{{{{{typo}}}}}") == ("{{char}}", [])
 
 
@@ -92,6 +92,15 @@ def test_unknown_macros_are_collected_as_warnings():
     text, warnings = s.sanitize("{{time}} then {{weather}} then {{user}}")
     assert text == "{{time}} then {{weather}} then {{user}}"
     assert warnings == ["time", "weather"]
+
+
+def test_original_macro_is_known_and_not_warned():
+    # {{original}} is a real ST macro (post_history_instructions / system_prompt)
+    # that Chub cards carry; it resolves in ST, so it isn't "unresolved".
+    s = MacroSanitizer()
+    text, warnings = s.sanitize("{{original}}\nNever speak as {{user}}.")
+    assert text == "{{original}}\nNever speak as {{user}}."
+    assert warnings == []
 
 
 def test_unknown_macros_deduped_and_sorted():

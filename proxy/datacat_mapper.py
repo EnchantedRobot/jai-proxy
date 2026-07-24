@@ -26,8 +26,6 @@ character id, creator, and page name.
 
 from __future__ import annotations
 
-import base64
-import json
 from typing import Any
 
 from proxy import pngtools
@@ -46,25 +44,10 @@ def _s(value: Any) -> str:
 
 def extract_card(png: bytes) -> dict[str, Any] | None:
     """Return the embedded character-card `data` object from a datacat PNG, or
-    None if the PNG carries no readable card. Prefers the V3 `ccv3` chunk, falls
-    back to the V2 `chara` chunk (datacat writes both with identical content).
-    The chunk payload is base64(JSON); the JSON nests the fields under `data`
-    (with a top-level V2 mirror), so the nested object is returned."""
-    try:
-        chunks = pngtools.read_text_chunks(png)
-    except ValueError:
-        return None
-    payload = chunks.get("ccv3") or chunks.get("chara")
-    if not payload:
-        return None
-    try:
-        obj = json.loads(base64.b64decode(payload))
-    except (ValueError, json.JSONDecodeError):
-        return None
-    if not isinstance(obj, dict):
-        return None
-    data = obj.get("data")
-    return data if isinstance(data, dict) else obj
+    None if the PNG carries no readable card. Thin alias for the shared
+    pngtools.extract_embedded_card reader (datacat writes the same
+    base64(JSON) `ccv3`/`chara` chunks every tavern card does)."""
+    return pngtools.extract_embedded_card(png)
 
 
 def datacat_block(data: dict[str, Any]) -> dict[str, Any]:
@@ -83,6 +66,12 @@ def card_id(data: dict[str, Any]) -> str:
     """The JanitorAI character id (from the datacat block). Drives the `_<id8>`
     filename fragment and the acquired-detection glob."""
     return _s(datacat_block(data).get("id"))
+
+
+def name(data: dict[str, Any]) -> str:
+    """The character name (`data.name`) -- the same value the native path and
+    chub_mapper key card filenames on. Mirrors chub_mapper.name."""
+    return _s(data.get("name"))
 
 
 def creator(data: dict[str, Any]) -> str:

@@ -44,7 +44,7 @@
   // ---------------------------------------------------------------------------
   const BULK_TAG_FILTER = {
     include: ["female"],
-    exclude: ["futa", "futanari"],
+    exclude: ["futa", "futanari", "wlw"],
   };
 
   // The one config knob. Change if the server runs elsewhere.

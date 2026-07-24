@@ -28,7 +28,11 @@ _BROKEN_MACRO_RE = re.compile(
 )
 
 _MACRO_TOKEN_RE = re.compile(r"\{\{\s*([\w.\-]+)\s*\}\}")
-_ST_KNOWN_MACROS = frozenset({"user", "char"})
+# SillyTavern resolves {{user}} and {{char}} everywhere; it also resolves
+# {{original}} inside system_prompt / post_history_instructions (it expands to
+# the default prompt content). Chub cards routinely carry {{original}} there, so
+# it's a legitimate macro, not an "unresolved" one -- don't warn on it.
+_ST_KNOWN_MACROS = frozenset({"user", "char", "original", "weekday", "date"})
 
 # Common misspellings of the two macro names creators hand-type. A slipped
 # keystroke -- {{usee}}, {{uesr}} -- yields a macro neither JanitorAI nor
@@ -37,15 +41,31 @@ _ST_KNOWN_MACROS = frozenset({"user", "char"})
 # braces, never as prose, so mapping each to its intended name is a pure fix,
 # same as the broken-bracket repair. Keys must be lowercase.
 _MACRO_TYPOS = {
+    "use": "user",
+    "𝙐𝙨𝙚𝙧": "user",
     "usee": "user",
+    "usser": "user",
+    "users": "user",
     "uesr": "user",
     "usre": "user",
     "userr": "user",
     "usr": "user",
+    "suer": "user",
+    "sun": "user",
+    "spouse": "user",
+    "random_user_1": "user",
+    "ob": "user",
     "chr": "char",
     "cahr": "char",
     "chra": "char",
     "charr": "char",
+    # "chars" is the plural slip (mirrors "users" -> user); "chair" is a
+    # keystroke slip of "char" seen in the wild ("{{chair}} is {{user}}'s
+    # classmate"). Both only ever match inside macro braces, never as prose.
+    "chars": "char",
+    "chair": "char",
+    "𝘾𝙝𝙖𝙧": "char",
+    "cha": "char",
 }
 
 # Same bracket tolerance as _BROKEN_MACRO_RE (1-2 braces each side) so a typo

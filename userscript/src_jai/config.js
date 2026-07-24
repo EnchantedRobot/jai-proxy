@@ -19,5 +19,5 @@
   // ---------------------------------------------------------------------------
   const BULK_TAG_FILTER = {
     include: ["female"],
-    exclude: ["futa", "futanari"],
+    exclude: ["futa", "futanari", "wlw"],
   };
