@@ -9,8 +9,14 @@ wheels/
 # Virtual environments
 .venv
 
-# jai-proxy output archive
+# Local configuration (see .env.template, which IS tracked)
+.env
+
+# jai-proxy output archive -- only used when JAI_PROXY_OUTPUT_DIR is unset
 /cards/
+
+# Server working state: definition captures + lorebook cache
+/state/
 
 # datacat PNGs staged for `make import`
 /import/

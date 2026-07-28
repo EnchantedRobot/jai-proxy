@@ -3,7 +3,9 @@
 Archives JanitorAI character cards as SillyTavern-compatible **Character Card V3**
 PNGs, for personal use. It captures both **public** cards and **creator-hidden**
 definitions, and saves each as a self-contained PNG (definition + all greetings +
-lorebook + avatar) into `./cards/`.
+lorebook + avatar) into the cards folder — `./cards/` by default, or straight
+into SillyTavern's own characters directory (see
+[Configuration](#configuration-env)).
 
 ## How it works
 
@@ -32,8 +34,47 @@ uv run python -m proxy.server        # serves http://127.0.0.1:8000
 
 MLX must already be running separately with an OpenAI-compatible endpoint at
 `http://127.0.0.1:8011/v1` and a model loaded (default `Llama-3.2-3B-Instruct-4bit`).
-All defaults (MLX URL/model, port, output dir) live in `proxy/config.py` and are
-env-overridable.
+
+### Configuration (`.env`)
+
+Defaults live in `proxy/config.py`; override them per-machine in a git-ignored
+`.env` at the repo root, which the server, every script under `scripts/`, and the
+test suite all read:
+
+```bash
+cp .env.template .env
+```
+
+The two keys that matter most:
+
+| key | default | what it does |
+| --- | --- | --- |
+| `JAI_PROXY_OUTPUT_DIR` | `./cards` | where cards land |
+| `JAI_PROXY_CARD_LAYOUT` | `flat` | `flat` = `<name>_<id8>.png`; `nested` = `<creator>/<name>_<id8>.png` |
+
+**Pointing `JAI_PROXY_OUTPUT_DIR` at SillyTavern's characters folder** (typically
+`…/SillyTavern/data/default-user/characters`) makes SillyTavern the archive
+itself rather than a copy of it: a card you edit there is edited in the archive,
+a card you delete there is gone from the archive, and a newly retrieved card is
+in SillyTavern the moment it's written. There is no sync step because there is
+only one folder. This is what `flat` is for — SillyTavern reads its characters
+folder **non-recursively**, so a `nested` archive is invisible to it. Nothing is
+lost by going flat: the creator stays on the card (`extensions.jai.creatorName`),
+and the `_<id8>` filename fragment keeps names unique across creators.
+
+Two things to know if you do share the folder with SillyTavern:
+
+- SillyTavern re-encodes a card's PNG whenever you save an edit to it, so that
+  card loses its pngquant compression (the data — including `extensions.jai`,
+  `gallery_id` and the lorebook — round-trips intact; it seeds its write from
+  the card's original JSON).
+- SillyTavern's explicit **Rename** action renames the file to `<Name>.png`,
+  dropping the `_<id8>` fragment that marks a card as already-acquired. Ordinary
+  saves keep the filename; renames don't. A renamed card can be retrieved again
+  as a duplicate.
+
+Working state (`state/captures`, `state/lorecache`) is deliberately kept out of
+the cards folder, since that folder may not be ours.
 
 Install `userscript/jai-proxy-bridge.user.js` in Tampermonkey. In JanitorAI's
 proxy/config settings, set the endpoint to
@@ -97,9 +138,9 @@ notes, alternate greetings, avatar, lorebooks) still comes from the JSON.
 
 Hidden cards are matched by character name against accumulated captures, so name
 collisions get likelier as captures pile up. The pill's **CLEAR** link wipes all
-captured system prompts and greetings (`./cards/.captures/`) and also resets the
-plugin's own remembered state (last card id / hidden flag). Finished PNGs in
-`./cards/` are not affected.
+captured system prompts and greetings (`./state/captures/`) and also resets the
+plugin's own remembered state (last card id / hidden flag). Finished card PNGs
+are not affected.
 
 ### Reading the result
 
@@ -120,10 +161,10 @@ send-a-chat-then-capture flow — no server needed:
 make import
 ```
 
-Each card lands in the same `cards/<creator>/<name>_<id>.png` layout the native
-retriever produces (so it shows as **acquired** on the next scan, which keys off
-the `_<id>` filename fragment), running the shared avatar normalize + pngquant
-compression. Two source formats are auto-detected:
+Each card lands in the configured cards folder under the same `<name>_<id>.png`
+naming the native retriever produces (so it shows as **acquired** on the next
+scan, which keys off the `_<id>` filename fragment), running the shared avatar
+normalize + pngquant compression. Two source formats are auto-detected:
 
 - **datacat** (a closed-source JanitorAI retriever) — a bare definition with
   **no lorebook**. It's rebuilt through the card builder (macro sanitize,
@@ -138,9 +179,9 @@ compression. Two source formats are auto-detected:
   and the whole `character_book` — down to entry fields like `probability` /
   `selectiveLogic` and Chub's int-or-string `position` — are preserved exactly.
 
-A card whose id is **already** in `cards/` is skipped, never overwritten, so a
-fuller retrieval is never downgraded to an import. To replace one, delete the
-existing file and re-run.
+A card whose id is **already** in the cards folder is skipped, never overwritten,
+so a fuller retrieval is never downgraded to an import. To replace one, delete
+the existing file and re-run.
 
 ### Gallery ids (SillyTavern-CharacterLibrary)
 

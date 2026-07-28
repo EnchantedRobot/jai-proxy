@@ -251,9 +251,9 @@ def test_main_imports_jannyai_card(tmp_path, monkeypatch):
 
     assert _run_import(imports, cards, monkeypatch) == 0
 
-    # Foldered by the "@"-stripped creator, suffixed with the id fragment.
+    # Named from the character, suffixed with the id fragment.
     written = sorted(cards.glob("**/*.png"))
-    assert written == [cards / "MathiDoos" / "Abby_c9630bdc.png"]
+    assert written == [cards / "Abby_c9630bdc.png"]
 
     data = _read_data(written[0])
     assert data["name"] == "Abby"

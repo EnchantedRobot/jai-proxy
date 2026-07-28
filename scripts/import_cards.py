@@ -1,9 +1,11 @@
 """Bulk-import character-card PNGs into the cards archive.
 
 Two kinds of already-embedded PNG export are recognised when dropped into
-`./import`, both re-homed into `cards/<creator>/<name>_<id>.png` -- the exact
-layout and naming the native retriever produces -- so a landed card shows as
-acquired on the next scan (which keys off the `_<id>` filename fragment):
+`./import`, both re-homed into the configured cards folder as
+`<name>_<id>.png` -- the exact layout and naming the native retriever produces
+(see JAI_PROXY_OUTPUT_DIR / JAI_PROXY_CARD_LAYOUT in .env.template) -- so a
+landed card shows as acquired on the next scan (which keys off the `_<id>`
+filename fragment):
 
   * datacat  -- a JanitorAI card pulled by the closed-source datacat retriever.
     It carries no lorebook, so it's rebuilt through the CardBuilder (macro
@@ -18,9 +20,9 @@ acquired on the next scan (which keys off the `_<id>` filename fragment):
     whole character_book) preserved as is. See proxy/chub_mapper.py.
 
 Both share the same tail: avatar normalize + pngquant compression, and a card
-whose id already lives in `cards/` is skipped, never overwritten (the one on
-disk may be a fuller retrieval -- e.g. a datacat import lacks the lorebook a
-native pull would have). To replace one, delete the existing file and re-run.
+whose id already lives in the cards folder is skipped, never overwritten (the
+one on disk may be a fuller retrieval -- e.g. a datacat import lacks the lorebook
+a native pull would have). To replace one, delete the existing file and re-run.
 
 One field is the exception to never-touch: `extensions.gallery_id`, the handle a
 card carries to its stored image gallery (see proxy/gallery.py). A legacy export
@@ -36,7 +38,7 @@ delete the on-disk card and re-run.
 Offline batch -- it does not need the proxy server running.
 
     make import
-    uv run python scripts/import_cards.py --import-dir import --cards-dir cards
+    uv run python scripts/import_cards.py --import-dir import --cards-dir /some/where
 """
 
 from __future__ import annotations
@@ -232,7 +234,7 @@ def main() -> int:
             if added:
                 backfilled += added
             else:
-                detail = "gallery_id already set" if gid and targets else "already in cards/"
+                detail = "gallery_id already set" if gid and targets else "already in the cards folder"
                 print(f"  skip  {path.name}: {detail} (id {cid})")
             skipped_existing += 1
             continue

@@ -154,10 +154,12 @@ class PngWriter:
         output_dir: Path | None = None,
         compress: bool | None = None,
         pngquant_bin: Path | None = None,
+        layout: str | None = None,
     ) -> None:
         self._output_dir = output_dir or settings.output_dir
         self._compress = settings.compress if compress is None else compress
         self._pngquant_bin = self._resolve_pngquant(pngquant_bin or settings.pngquant_bin)
+        self._layout = layout or settings.card_layout
 
     @staticmethod
     def _resolve_pngquant(configured: Path) -> Path | None:
@@ -199,14 +201,16 @@ class PngWriter:
         avatar and write it. `write` routes a CharacterCardV3 through here; the
         import pipeline uses it directly for a Chub card that's passed through as
         a raw dict (so its lorebook extras and int positions survive untouched)."""
-        # Cards are foldered by creator and suffixed with a card-id fragment --
-        # <creator>/<name>_<id8>.png -- so a bulk export can't collide two cards
-        # that share a name (different creators land in different folders; same
-        # creator + same name is disambiguated by the id). Re-exporting the same
-        # card yields the same path and overwrites, which is intended.
+        # Every card is named <name>_<id8>.png -- the id fragment disambiguates
+        # two cards sharing a name, so the whole archive fits in one directory
+        # without collisions. That flat layout is the default because
+        # SillyTavern reads its characters folder non-recursively; `nested` adds
+        # back the original <creator>/ level. Re-exporting the same card yields
+        # the same path and overwrites, which is intended.
         out_dir = out_dir or self._output_dir
-        creator_dir = _safe_filename(creator) if creator.strip() else "unknown_creator"
-        target_dir = out_dir / creator_dir
+        target_dir = out_dir
+        if self._layout == "nested":
+            target_dir = out_dir / (_safe_filename(creator) if creator.strip() else "unknown_creator")
         target_dir.mkdir(parents=True, exist_ok=True)
 
         fragment = _id_fragment(card_id)

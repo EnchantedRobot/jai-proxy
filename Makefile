@@ -1,8 +1,7 @@
-.PHONY: compile test run import gallery-ids export
+.PHONY: compile test run import gallery-ids check
 
-# Where `make export` drops the cards. Override on the command line if needed,
-# e.g. `make export DEST=/tmp/characters`.
-DEST ?= $(HOME)/workspaces/SillyTavern/data/default-user/characters
+# Every target reads .env (see .env.template) via proxy/config.py -- most
+# importantly JAI_PROXY_OUTPUT_DIR, the cards folder they all read and write.
 
 # Concatenate userscript/src_jai/*.js   -> userscript/jai-proxy-bridge.user.js
 # and userscript/src_saucepan/*.js       -> userscript/saucepan-proxy-bridge.user.js
@@ -17,26 +16,20 @@ test:
 run:
 	uv run python -m proxy.server
 
-# Bulk-import card PNGs from ./import into ./cards -- datacat and Chub.ai
-# exports are auto-detected (see scripts/import_cards.py). Cards already on disk
-# are skipped, never overwritten. Extra flags pass through via ARGS, e.g.
-# `make import ARGS=--no-compress`.
+# Bulk-import card PNGs from ./import into the cards folder -- datacat, JannyAI
+# and Chub.ai exports are auto-detected (see scripts/import_cards.py). Cards
+# already on disk are skipped, never overwritten. Extra flags pass through via
+# ARGS, e.g. `make import ARGS=--no-compress`.
 import:
 	uv run python scripts/import_cards.py $(ARGS)
 
 # Backfill `extensions.gallery_id` (SillyTavern-CharacterLibrary's per-character
-# gallery handle) into any card in ./cards missing one. Read-only report by
-# default; `make gallery-ids ARGS=--apply` writes them in place.
+# gallery handle) into any card missing one. Read-only report by default;
+# `make gallery-ids ARGS=--apply` writes them in place.
 gallery-ids:
 	uv run python scripts/backfill_gallery_ids.py $(ARGS)
 
-# Flat-copy every card PNG in ./cards (which is nested per creator) into $(DEST),
-# SillyTavern's characters folder. Filenames are unique across creators, so the
-# flattening is lossless. Existing files are overwritten.
-export:
-	@mkdir -p "$(DEST)"
-	@find cards -type f -name '*.png' | while read -r f; do \
-		cp "$$f" "$(DEST)/"; \
-	done; \
-	n=$$(find cards -type f -name '*.png' | wc -l | tr -d ' '); \
-	echo "Copied $$n cards to $(DEST)"
+# Re-audit built cards against the current macro/formatting rules. Read-only;
+# `make check ARGS=--repair` rewrites the cards that would change.
+check:
+	uv run python scripts/check_cards.py $(ARGS)

@@ -28,7 +28,7 @@ parsed dict in place rather than round-tripping through the pydantic card models
 Identification + naming: a Chub card is recognized by `extensions.chub`. Its
 `data.name`/`data.creator` are the character name and creator, and
 `extensions.chub.id` (a unique numeric id, not a hash) drives the
-`cards/<creator>/<name>_<id>.png` layout and the acquired-detection glob.
+`<name>_<id>.png` filename layout and the acquired-detection glob.
 """
 
 from __future__ import annotations

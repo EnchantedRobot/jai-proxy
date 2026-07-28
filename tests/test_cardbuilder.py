@@ -196,11 +196,12 @@ def test_png_writer_round_trips_card_json(tmp_path):
     greetings = janitor_mapper.greetings(akane)
     card, _ = CardBuilder().build(profile, greetings=greetings, capture=None, book=None)
 
-    writer = PngWriter(output_dir=tmp_path)
+    writer = PngWriter(output_dir=tmp_path, layout="flat")
     path = writer.write(card, _png_bytes(), card_id="bffaaf71-6c33-4e82-8cf2-3699f2ce4d92")
 
-    # Foldered by creator, name suffixed with the 8-char id fragment.
-    assert path.parent == tmp_path / "dezea"
+    # Flat by default (SillyTavern doesn't recurse), name suffixed with the
+    # 8-char id fragment that keeps it unique across creators.
+    assert path.parent == tmp_path
     assert path.name == "Akane_Kujo_bffaaf71.png"
     assert path.exists()
 
@@ -260,14 +261,47 @@ def test_png_writer_downscales_oversized_avatar(tmp_path):
 
 
 def test_png_writer_creates_output_dir_if_missing(tmp_path):
-    out_dir = tmp_path / "nested" / "cards"
+    out_dir = tmp_path / "deep" / "cards"
     profile = ProfileFields(name="Nested")
     card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
 
-    path = PngWriter(output_dir=out_dir).write(card, _png_bytes())
+    path = PngWriter(output_dir=out_dir, layout="flat").write(card, _png_bytes())
     assert path.exists()
-    # No creator on the card -> foldered under "unknown_creator".
-    assert path.parent == out_dir / "unknown_creator"
+    assert path.parent == out_dir
+
+
+def test_png_writer_nested_layout_folders_by_creator(tmp_path):
+    profile = ProfileFields(name="Akane Kujo", creator="dezea")
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+
+    writer = PngWriter(output_dir=tmp_path, layout="nested")
+    path = writer.write(card, _png_bytes(), card_id="bffaaf71-6c33-4e82-8cf2-3699f2ce4d92")
+
+    assert path.parent == tmp_path / "dezea"
+    assert path.name == "Akane_Kujo_bffaaf71.png"
+
+
+def test_png_writer_nested_layout_falls_back_to_unknown_creator(tmp_path):
+    profile = ProfileFields(name="Orphan")
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+
+    path = PngWriter(output_dir=tmp_path, layout="nested").write(card, _png_bytes())
+    assert path.parent == tmp_path / "unknown_creator"
+
+
+def test_existing_and_find_match_across_both_layouts(tmp_path):
+    """The lookups a bulk export skips on -- id-fragment `existing` and
+    name+fragment `find` -- glob recursively, so a folder holding cards written
+    under either layout (an archive migrated from nested to flat) still
+    resolves both."""
+    cid = "bffaaf71-6c33-4e82-8cf2-3699f2ce4d92"
+    profile = ProfileFields(name="Akane Kujo", creator="dezea")
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+    PngWriter(output_dir=tmp_path, layout="nested").write(card, _png_bytes(), card_id=cid)
+
+    flat = PngWriter(output_dir=tmp_path, layout="flat")
+    assert flat.existing([cid]) == {cid}
+    assert [p.name for p in flat.find("Akane Kujo", cid)] == ["Akane_Kujo_bffaaf71.png"]
 
 
 # ---------------------------------------------------------------------------

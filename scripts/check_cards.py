@@ -3,7 +3,7 @@ macro/formatting rules.
 
 Cards are imported once and kept, but the cleaners keep improving -- new macro
 typos get added to proxy.macros over time, the creator_notes de-HTML gets
-tighter. This asks: given today's rules, does any card in `cards/` still carry a
+tighter. This asks: given today's rules, does any card in the archive still carry a
 macro we'd now fix, an unresolvable macro worth a human eyeball, or a leaked
 HTML/CSS artifact in its notes?
 

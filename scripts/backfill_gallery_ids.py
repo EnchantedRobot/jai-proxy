@@ -4,7 +4,7 @@
 character's image gallery on (see proxy/gallery.py). Every card written from now
 on gets one at write time -- PngWriter stamps it -- but cards built before that
 existed, and imports whose source carried no id, don't have one. This is the
-catch-up pass: scan `cards/`, mint an id for each card missing one, and patch it
+catch-up pass: scan the cards folder, mint an id for each card missing one, and patch it
 into the PNG in place.
 
     uv run python scripts/backfill_gallery_ids.py            # report only

@@ -209,9 +209,9 @@ def test_build_exports_open_card_png(tmp_path):
     assert body["fields_present"]["alternate_greetings"] is True
 
     path = Path(body["path"])
-    # Foldered by creator, name suffixed with the card-id fragment.
+    # Flat in the cards folder, name suffixed with the card-id fragment.
     assert path.exists()
-    assert path.parent == tmp_path / "dezea"
+    assert path.parent == tmp_path
     assert path.name == "Akane_Kujo_abc123.png"
 
     data = _decode(path)
@@ -261,8 +261,8 @@ def test_build_saucepan_exports_open_card_png(tmp_path):
     assert body["fields_present"]["character_book"] is True
 
     path = Path(body["path"])
-    # Foldered by creator handle, name suffixed with the companion-id fragment.
-    assert path.parent == tmp_path / "desslok"
+    # Flat in the cards folder, name suffixed with the companion-id fragment.
+    assert path.parent == tmp_path
     assert path.name == "Eve_04a0c1ac.png"
 
     data = _decode(path)
@@ -495,8 +495,7 @@ def test_build_names_card_from_chat_name_not_title_blurb(tmp_path):
 
     assert resp.status_code == 200
     path = Path(resp.json()["path"])
-    # chat_name drives the filename stem; creator folders it; id suffixes it.
-    assert path.parent.name == "somecreator"
+    # chat_name drives the filename stem; the id fragment suffixes it.
     assert path.name == "Chatname_deadbeef.png"
 
     data = _decode(path)

@@ -5,7 +5,7 @@ datacat is a closed-source retriever that pulls JanitorAI cards very much the
 way this project's own engine does, and writes the result straight into a PNG
 as an embedded `chara`/`ccv3` character card (chara_card_v3). Bulk-grabbing a
 bucket of those cards is faster than the send-a-chat-then-capture flow, so the
-import pipeline re-homes them into `cards/<creator>/<name>_<id8>.png`.
+import pipeline re-homes them into the cards folder as `<name>_<id8>.png`.
 
 Two facts about datacat exports shape the mapping:
 
