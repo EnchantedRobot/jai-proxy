@@ -18,14 +18,36 @@
         return;
       }
 
-      const export_ = await SaucepanClient.fetchExport(id, (p) => {
-        if (p.phase === "lore") {
-          ExportStatus.show(`Fetching lore ${p.done} / ${p.total}…`);
-        } else if (p.phase === "companion") {
-          ExportStatus.show("Fetching companion…");
-        } else {
-          ExportStatus.show("Fetching…");
+      // Ask the server which of this companion's lorebooks it already has cached,
+      // so we fetch only the misses (a lorebook is one saucepan request PER
+      // chapter — the slow part — and creators reuse "standard" lorebooks across
+      // many characters). A failed/unreachable check just fetches everything.
+      const allIds = SaucepanClient.lorebookIds();
+      let cached = [];
+      let missing = allIds;
+      if (allIds.length) {
+        try {
+          const split = await ServerClient.lorebooksExisting("saucepan", allIds);
+          cached = split.cached || [];
+          missing = split.missing || allIds;
+        } catch (err) {
+          warn("lorebook cache check failed; fetching all", err);
         }
+      }
+
+      const export_ = await SaucepanClient.fetchExport(id, {
+        lorebookIds: missing,
+        cachedLorebookIds: cached,
+        onProgress: (p) => {
+          if (p.phase === "lore") {
+            ExportStatus.show(`Fetching lore ${p.done} / ${p.total}…`);
+          } else if (p.phase === "companion") {
+            const note = cached.length ? ` (${cached.length} cached)` : "";
+            ExportStatus.show(`Fetching companion${note}…`);
+          } else {
+            ExportStatus.show("Fetching…");
+          }
+        },
       });
 
       ExportStatus.show("Building on server…");

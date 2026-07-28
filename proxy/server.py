@@ -13,6 +13,7 @@ from proxy.capture_store import CaptureStore
 from proxy.cardbuilder import CardBuilder, PngWriter
 from proxy.config import settings
 from proxy.lorebook import LorebookMapper
+from proxy.lorebook_cache import LorebookCache
 from proxy.mlx_client import MLXClient, MLXError
 from proxy.models import (
     BuildRequest,
@@ -21,6 +22,8 @@ from proxy.models import (
     CharacterBook,
     ExistingRequest,
     ExistingResponse,
+    LorebookExistingRequest,
+    LorebookExistingResponse,
     ProfileFields,
     SaucepanBuildRequest,
 )
@@ -63,6 +66,7 @@ card_builder = CardBuilder()
 png_writer = PngWriter()
 avatar_fetcher = AvatarFetcher()
 lorebook_mapper = LorebookMapper()
+lorebook_cache = LorebookCache()
 
 
 def _utc_now_iso() -> str:
@@ -80,7 +84,12 @@ def _first_message_of_role(messages: list[dict[str, Any]], role: str) -> str:
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    return {"ok": True, "captures": capture_store.count, "model": settings.mlx_model}
+    return {
+        "ok": True,
+        "captures": capture_store.count,
+        "lorebooks": lorebook_cache.count,
+        "model": settings.mlx_model,
+    }
 
 
 @app.get("/v1/models")
@@ -123,6 +132,21 @@ async def capture_status(name: str) -> dict[str, Any]:
 @app.post("/clear-captures")
 async def clear_captures() -> dict[str, Any]:
     removed = capture_store.clear()
+    return {"ok": True, "removed": removed}
+
+
+@app.post("/lorebooks/existing")
+async def lorebooks_existing(req: LorebookExistingRequest) -> LorebookExistingResponse:
+    """Split the requested lorebook ids into the ones already cached (skip the
+    fetch, reference by id in the build) and the ones missing (fetch, then send
+    up -- the build endpoint caches them write-through)."""
+    cached, missing = lorebook_cache.split(req.source, req.ids)
+    return LorebookExistingResponse(cached=cached, missing=missing)
+
+
+@app.post("/clear-lorebooks")
+async def clear_lorebooks() -> dict[str, Any]:
+    removed = lorebook_cache.clear()
     return {"ok": True, "removed": removed}
 
 
@@ -246,6 +270,35 @@ async def build(req: BuildRequest) -> BuildResponse:
     )
 
 
+def _resolve_saucepan_lorebooks(raw: dict[str, Any]) -> None:
+    """Reconcile the export's lorebooks with the on-disk cache, in place.
+
+    The cache-aware userscript sends only the lorebooks it had to fetch (the
+    cache misses) in `lorebooks`, plus `cached_lorebook_ids` for the rest. We
+    write the fresh ones through to the cache and load the cached ids back in, so
+    saucepan_mapper sees every attached lorebook exactly as if all had been
+    fetched. An older userscript that sends every lorebook inline (and no
+    cached_lorebook_ids) still works -- it just also warms the cache."""
+    fetched = [b for b in (raw.get("lorebooks") or []) if isinstance(b, dict)]
+    present: set[str] = set()
+    for book in fetched:
+        lid = (book.get("id") or "").strip()
+        if lid:
+            lorebook_cache.put("saucepan", lid, book)
+            present.add(lid)
+
+    combined = list(fetched)
+    for raw_id in raw.get("cached_lorebook_ids") or []:
+        lid = (raw_id or "").strip()
+        if not lid or lid in present:
+            continue
+        blob = lorebook_cache.get("saucepan", lid)
+        if blob is not None:
+            combined.append(blob)
+            present.add(lid)
+    raw["lorebooks"] = combined
+
+
 @app.post("/build-saucepan")
 async def build_saucepan(req: SaucepanBuildRequest) -> BuildResponse:
     """saucepan peer of /build. The userscript posts the raw
@@ -254,6 +307,7 @@ async def build_saucepan(req: SaucepanBuildRequest) -> BuildResponse:
     saucepan definitions carry macros intact, so there's no hidden-capture /
     name-reversal step -- it's a straight open-card build."""
     raw = req.character or {}
+    _resolve_saucepan_lorebooks(raw)
     profile = saucepan_mapper.to_profile_fields(raw)
     greetings = saucepan_mapper.greetings(raw)
     book = saucepan_mapper.character_book(raw, character_name=profile.name)

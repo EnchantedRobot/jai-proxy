@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     port: int = 8000
     output_dir: Path = Path("./cards")
     captures_dir: Path = Path("./cards/.captures")
+    # Speed cache of raw lorebook payloads keyed by (source, lorebook id). A
+    # lorebook is reused across many characters, and fetching one is the slow
+    # part of an export, so we stash it here on first sight and skip the fetch
+    # every later time. Purely a cache -- wipe/refresh via POST /clear-lorebooks.
+    lorebook_cache_dir: Path = Path("./cards/.lorecache")
     request_timeout: float = 120.0
     allowed_origins: list[str] = ["*"]
     user_names: list[str] = ["USER"]
@@ -27,3 +32,4 @@ class Settings(BaseSettings):
 settings = Settings()
 settings.output_dir.mkdir(parents=True, exist_ok=True)
 settings.captures_dir.mkdir(parents=True, exist_ok=True)
+settings.lorebook_cache_dir.mkdir(parents=True, exist_ok=True)

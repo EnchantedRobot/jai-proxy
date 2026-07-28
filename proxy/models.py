@@ -175,6 +175,25 @@ class ExistingResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# /lorebooks/existing -- "which of these lorebook ids do we already have
+# cached?" A lorebook is reused across many characters and fetching one is the
+# slow part of an export (saucepan needs one request per chapter), so the
+# userscript asks this first and only fetches the misses; the cached ones ride
+# into the build by id (see LorebookCache).
+# ---------------------------------------------------------------------------
+
+
+class LorebookExistingRequest(BaseModel):
+    source: str
+    ids: list[str] = Field(default_factory=list)
+
+
+class LorebookExistingResponse(BaseModel):
+    cached: list[str] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # Character Card V3
 # ---------------------------------------------------------------------------
 

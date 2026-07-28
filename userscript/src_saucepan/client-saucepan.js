@@ -100,19 +100,26 @@
       return !!inner && inner.open_definition === false;
     },
 
-    // The full raw export for a companion id: {id, definition, companion,
-    // lorebooks}. Exactly the shape POST /build-saucepan expects.
+    // The raw export for a companion id: {id, definition, companion, lorebooks,
+    // cached_lorebook_ids}. Exactly the shape POST /build-saucepan expects.
     //
-    // onProgress(p) is called as fetching advances, so the overlay can show a
-    // live count instead of a static "Fetching…". It fires with one of:
-    //   {phase:"definition"} | {phase:"companion"} | {phase:"lore", done, total}
+    // opts.lorebookIds — the lorebook ids to actually fetch (the cache MISSES;
+    //   defaults to every lorebook on the page when omitted). Fetching a
+    //   lorebook is the slow part of an export — one request per chapter — so
+    //   skipping the ones the server already has is the whole speed-up.
+    // opts.cachedLorebookIds — ids the server already has; stamped onto the
+    //   export as `cached_lorebook_ids` so the build pulls them from cache.
+    // opts.onProgress(p) — called as fetching advances so the overlay can show a
+    //   live count. Fires with one of:
+    //     {phase:"definition"} | {phase:"companion"} | {phase:"lore", done, total}
     // Chapters are still fetched one at a time (a steady serial trickle, the
     // same request pattern the page itself makes) rather than in a burst, to
-    // stay well under any saucepan rate limit — the count just makes the wait
-    // legible, it isn't a speed-up.
-    async fetchExport(id, onProgress) {
-      const report = typeof onProgress === "function" ? onProgress : () => {};
-      const out = { id };
+    // stay well under any saucepan rate limit.
+    async fetchExport(id, opts = {}) {
+      const report = typeof opts.onProgress === "function" ? opts.onProgress : () => {};
+      const fetchIds = opts.lorebookIds || this.lorebookIds();
+      const cachedIds = opts.cachedLorebookIds || [];
+      const out = { id, cached_lorebook_ids: cachedIds };
 
       report({ phase: "definition" });
       out.definition = await apiGet(`/api/v1/companion/definition?companion_id=${id}`);
@@ -120,12 +127,12 @@
       report({ phase: "companion" });
       out.companion = await this.fetchCompanion(id);
 
-      // Read every lorebook's chapter LIST first (one cheap call each). These
-      // carry the chapter counts, so summing them gives a real denominator for
-      // the progress count before any chapter body is fetched.
+      // Read each MISSING lorebook's chapter LIST first (one cheap call each).
+      // These carry the chapter counts, so summing them gives a real denominator
+      // for the progress count before any chapter body is fetched.
       const books = [];
       let total = 0;
-      for (const lid of this.lorebookIds()) {
+      for (const lid of fetchIds) {
         const list = await apiGet(`/api/v2/lorebooks/${lid}/chapters`);
         const chapters = (list && list.chapters) || [];
         books.push({ id: lid, list, chapters });
@@ -144,7 +151,10 @@
         }
         out.lorebooks.push({ id: book.id, list: book.list, chapters });
       }
-      log(`fetched export for ${id} — lorebooks: ${out.lorebooks.length}`);
+      log(
+        `fetched export for ${id} — lorebooks fetched: ${out.lorebooks.length}, ` +
+          `from cache: ${cachedIds.length}`
+      );
       return out;
     },
   };

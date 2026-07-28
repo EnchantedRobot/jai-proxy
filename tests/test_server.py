@@ -63,6 +63,9 @@ def make_client(fake: FakeMLXClient, tmp_path=None) -> TestClient:
     server_module.capture_store = server_module.CaptureStore(captures_dir=tmp_path)
     server_module.png_writer = server_module.PngWriter(output_dir=tmp_path)
     server_module.avatar_fetcher = FakeAvatarFetcher()
+    server_module.lorebook_cache = server_module.LorebookCache(
+        cache_dir=(tmp_path / ".lorecache") if tmp_path else None
+    )
     return TestClient(server_module.app)
 
 
@@ -231,6 +234,10 @@ def test_build_exports_open_card_png(tmp_path):
     assert jai["pageName"] == "The Girl in Every Yearbook | Akane Kujo"
     assert "linkedAt" in jai
 
+    # A served card is CharacterLibrary-ready: it leaves with its own gallery id.
+    gallery_id = data["extensions"]["gallery_id"]
+    assert len(gallery_id) == 12 and gallery_id.isalnum()
+
 
 # ---------------------------------------------------------------------------
 # /build-saucepan -- open card export end-to-end (saucepan JSON API path). Same
@@ -313,6 +320,93 @@ def test_build_saucepan_hidden_card_warns_but_exports_public_fields(tmp_path):
     assert data["creator"] == "GreatN"
     assert data["extensions"]["jai"]["sourceKind"] == "saucepan_core"
     assert data["mes_example"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Lorebook cache -- /lorebooks/existing + /clear-lorebooks + the cache-aware
+# /build-saucepan path (fetch only the misses, reference cached lorebooks by id).
+# ---------------------------------------------------------------------------
+
+
+def test_lorebooks_existing_splits_cached_and_missing(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    eve = _saucepan("04a0c1ac")
+    lb_ids = [b["id"] for b in eve["lorebooks"]]
+
+    # Nothing cached yet: every id is missing.
+    resp = client.post("/lorebooks/existing", json={"source": "saucepan", "ids": lb_ids})
+    assert resp.status_code == 200
+    assert resp.json() == {"cached": [], "missing": lb_ids}
+
+    # A full build warms the cache write-through; now both come back cached.
+    assert client.post("/build-saucepan", json={"character": eve}).json()["ok"] is True
+    resp = client.post(
+        "/lorebooks/existing",
+        json={"source": "saucepan", "ids": lb_ids + ["never-seen"]},
+    )
+    assert resp.json() == {"cached": lb_ids, "missing": ["never-seen"]}
+
+
+def test_lorebooks_existing_namespaces_by_source(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    eve = _saucepan("04a0c1ac")
+    lb_ids = [b["id"] for b in eve["lorebooks"]]
+    client.post("/build-saucepan", json={"character": eve})
+
+    # The same ids under a different source are a miss -- id spaces don't cross.
+    resp = client.post("/lorebooks/existing", json={"source": "janitor", "ids": lb_ids})
+    assert resp.json() == {"cached": [], "missing": lb_ids}
+
+
+def test_build_saucepan_reuses_cached_lorebooks_by_id(tmp_path):
+    # The heart of the cache: after one build warms the lorebooks, a second build
+    # that fetches NO lorebooks but references them by `cached_lorebook_ids` must
+    # reproduce the identical character_book -- proving a cache-loaded lorebook is
+    # indistinguishable from a freshly fetched one.
+    client = make_client(FakeMLXClient(), tmp_path)
+    eve = _saucepan("04a0c1ac")
+    lb_ids = [b["id"] for b in eve["lorebooks"]]
+
+    first = client.post("/build-saucepan", json={"character": eve}).json()
+    first_book = _decode(first["path"])["character_book"]
+    assert len(first_book["entries"]) == 19
+
+    eve_cached = {k: v for k, v in eve.items() if k != "lorebooks"}
+    eve_cached["lorebooks"] = []
+    eve_cached["cached_lorebook_ids"] = lb_ids
+    second = client.post("/build-saucepan", json={"character": eve_cached}).json()
+
+    assert second["ok"] is True
+    assert _decode(second["path"])["character_book"] == first_book
+
+
+def test_build_saucepan_skips_uncached_referenced_lorebook(tmp_path):
+    # A referenced-but-uncached id is skipped (graceful degrade), not an error --
+    # the safety net if the cache was cleared between the /existing check and the
+    # build.
+    client = make_client(FakeMLXClient(), tmp_path)
+    eve = _saucepan("04a0c1ac")
+    stripped = {k: v for k, v in eve.items() if k != "lorebooks"}
+    stripped["lorebooks"] = []
+    stripped["cached_lorebook_ids"] = ["totally-unknown-id"]
+
+    body = client.post("/build-saucepan", json={"character": stripped}).json()
+    assert body["ok"] is True
+    assert body["fields_present"]["character_book"] is False
+
+
+def test_clear_lorebooks_wipes_cache(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    eve = _saucepan("04a0c1ac")
+    lb_ids = [b["id"] for b in eve["lorebooks"]]
+    client.post("/build-saucepan", json={"character": eve})
+
+    assert client.get("/health").json()["lorebooks"] == 2
+    assert client.post("/clear-lorebooks").json() == {"ok": True, "removed": 2}
+    assert client.get("/health").json()["lorebooks"] == 0
+
+    resp = client.post("/lorebooks/existing", json={"source": "saucepan", "ids": lb_ids})
+    assert resp.json() == {"cached": [], "missing": lb_ids}
 
 
 # ---------------------------------------------------------------------------

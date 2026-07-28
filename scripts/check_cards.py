@@ -29,7 +29,6 @@ and only touches cards that actually change.
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import re
 from collections import Counter
@@ -111,26 +110,6 @@ def _diff_snippet(before: str, after: str, ctx: int = 40) -> str:
     return f"{b!r} => {a!r}"
 
 
-def _rewrite_png(raw: bytes, envelope: dict, data: dict) -> bytes:
-    """Re-embed `data` (a mutated chara_card_v3 `data` object) into `raw`,
-    preserving every non-text chunk -- i.e. the pixels -- exactly. Rebuilds the
-    canonical envelope (spec header + V2 top-level mirror) the writers emit."""
-    new_env = {
-        "spec": envelope.get("spec", "chara_card_v3"),
-        "spec_version": envelope.get("spec_version", "3.0"),
-        "data": data,
-    }
-    new_env.update(data)  # V2-compat mirror, matching CharacterCardV3.to_dict
-    payload = base64.b64encode(json.dumps(new_env).encode("utf-8")).decode("ascii")
-    return pngtools.inject_text_chunks(raw, {"chara": payload, "ccv3": payload})
-
-
-def _pixel_chunks(png: bytes) -> list[tuple[bytes, bytes]]:
-    """Every non-text chunk -- the parts a text-only rewrite must leave byte-
-    identical. Used to assert --repair changed nothing but the card."""
-    return [(t, d) for t, d in pngtools._iter_chunks(png) if t not in pngtools._TEXT_CHUNK_TYPES]
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--cards-dir", type=Path, default=settings.output_dir)
@@ -159,16 +138,11 @@ def main() -> int:
 
     for path in cards:
         raw = path.read_bytes()
-        try:
-            chunks = pngtools.read_text_chunks(raw)
-            envelope = json.loads(base64.b64decode(chunks.get("ccv3") or chunks.get("chara") or ""))
-        except Exception:
+        parsed = pngtools.read_envelope(raw)
+        if parsed is None:
             unreadable += 1
             continue
-        data = envelope.get("data") if isinstance(envelope.get("data"), dict) else envelope
-        if not isinstance(data, dict):
-            unreadable += 1
-            continue
+        envelope, data = parsed
 
         card_changes = []
         card_unresolved: Counter = Counter()
@@ -198,9 +172,9 @@ def main() -> int:
                 artifacts.append({"path": rel, "reasons": reasons})
 
         if dirty:
-            before = _pixel_chunks(raw)
-            new_bytes = _rewrite_png(raw, envelope, data)
-            after = _pixel_chunks(new_bytes)
+            before = pngtools.non_text_chunks(raw)
+            new_bytes = pngtools.embed_card(raw, envelope, data)
+            after = pngtools.non_text_chunks(new_bytes)
             if before != after:  # must never happen: repair touches only tEXt
                 print(f"  ABORT {rel}: pixel chunks changed, not writing")
                 continue

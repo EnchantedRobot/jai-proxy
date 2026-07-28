@@ -17,7 +17,7 @@ from pathlib import Path
 from PIL import Image
 
 import scripts.import_cards as importer
-from proxy import pngtools
+from proxy import gallery, pngtools
 from proxy.cardbuilder import PngWriter
 
 
@@ -79,11 +79,23 @@ def _jannyai_data(gallery_id: str | None = None) -> dict:
 def _write_existing(cards_dir: Path, *, name: str, creator: str, cid: str, data: dict) -> Path:
     """Put a card on disk the way a prior (fuller) retrieval would -- through the
     real writer, so its filename and PNG structure match what an import looks
-    for. compress=False keeps the pixel bytes deterministic for the diff check."""
+    for. compress=False keeps the pixel bytes deterministic for the diff check.
+
+    The writer stamps a gallery_id on everything it writes, so when `data` itself
+    carries none the stamped id is peeled back off: a card with no gallery_id is
+    now by definition a *legacy* one (written before ids existed), and those are
+    the only cards an import can still backfill into."""
     writer = PngWriter(output_dir=cards_dir, compress=False)
-    return writer.write_payload(
+    source_had_id = gallery.read_id(data) is not None  # the write stamps one in place
+    path = writer.write_payload(
         _envelope(data), _png_bytes((8, 8)), creator=creator, name=name, card_id=cid
     )
+    if not source_had_id:
+        raw = path.read_bytes()
+        envelope, written = pngtools.read_envelope(raw)
+        written["extensions"].pop("gallery_id", None)
+        path.write_bytes(pngtools.embed_card(raw, envelope, written))
+    return path
 
 
 def _read_data(path: Path) -> dict:
@@ -110,17 +122,8 @@ def _run_import(import_dir: Path, cards_dir: Path, monkeypatch) -> int:
     return importer.main()
 
 
-# ---------------------------------------------------------------------------
-# _gallery_id accessor
-# ---------------------------------------------------------------------------
-
-
-def test_gallery_id_present_absent_and_empty():
-    assert importer._gallery_id({"extensions": {"gallery_id": "f1AMBFO5oPUr"}}) == "f1AMBFO5oPUr"
-    assert importer._gallery_id({"extensions": {"chub": {"id": 1}}}) is None
-    assert importer._gallery_id({}) is None
-    assert importer._gallery_id({"extensions": {"gallery_id": ""}}) is None
-    assert importer._gallery_id({"extensions": None}) is None
+# The gallery_id accessor itself now lives in proxy/gallery.py (shared with the
+# writer and the backfill script) -- see tests/test_gallery.py.
 
 
 # ---------------------------------------------------------------------------

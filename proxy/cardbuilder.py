@@ -7,10 +7,11 @@ import re
 import shutil
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 from PIL import Image
 
-from proxy import pngtools
+from proxy import gallery, pngtools
 from proxy.avatar_transform import normalize_avatar
 from proxy.config import settings
 from proxy.macros import MacroSanitizer
@@ -32,6 +33,37 @@ def _id_fragment(card_id: str | None) -> str:
     name."""
     token = _UNSAFE_FILENAME_RE.sub("", (card_id or "").strip())
     return token[:8]
+
+
+def _gallery_id_on_disk(path: Path) -> Any | None:
+    """The gallery_id of the card already written at `path`, if there is one.
+    Re-exporting a character overwrites its card, and a fresh id there would
+    orphan the gallery folder SillyTavern-CharacterLibrary already keyed to the
+    old one -- so the id is carried across the overwrite."""
+    if not path.exists():
+        return None
+    try:
+        data = pngtools.extract_embedded_card(path.read_bytes())
+    except OSError:
+        return None
+    return gallery.read_id(data) if data else None
+
+
+def _stamp_gallery_id(card_payload: dict, path: Path) -> None:
+    """Ensure the card carries an `extensions.gallery_id` before it's embedded,
+    so it lands in its own gallery folder in SillyTavern-CharacterLibrary (see
+    proxy/gallery.py). Precedence: an id the payload already has (an import
+    passing its source's extensions through) > the id on the card being
+    overwritten > a freshly minted one. Mutates the payload in place, keeping
+    the envelope's V2 top-level mirror in step with `data`."""
+    data = card_payload.get("data")
+    if not isinstance(data, dict):
+        data = card_payload
+    if gallery.read_id(data) is not None:
+        return
+    gallery.ensure_id(data, preferred=_gallery_id_on_disk(path))
+    if data is not card_payload:
+        card_payload["extensions"] = data["extensions"]
 
 
 def _pick(visible: str, hidden: str) -> str:
@@ -177,6 +209,15 @@ class PngWriter:
         target_dir = out_dir / creator_dir
         target_dir.mkdir(parents=True, exist_ok=True)
 
+        fragment = _id_fragment(card_id)
+        stem = _safe_filename(name)
+        filename = f"{stem}_{fragment}.png" if fragment else f"{stem}.png"
+        path = target_dir / filename
+
+        # Every card leaves here with a gallery_id -- resolved against the card
+        # this write may be overwriting, hence after the path is known.
+        _stamp_gallery_id(card_payload, path)
+
         # Normalize whatever the avatar is (webp/jpg/png) to PNG bytes, crop a
         # detected 3-image stack down to its primary portrait and cap the
         # longest side, then optionally quantize. pngquant strips text chunks,
@@ -196,10 +237,6 @@ class PngWriter:
         payload = base64.b64encode(json.dumps(card_payload).encode("utf-8")).decode("ascii")
         image_bytes = pngtools.inject_text_chunks(image_bytes, {"chara": payload, "ccv3": payload})
 
-        fragment = _id_fragment(card_id)
-        stem = _safe_filename(name)
-        filename = f"{stem}_{fragment}.png" if fragment else f"{stem}.png"
-        path = target_dir / filename
         path.write_bytes(image_bytes)
         return path
 

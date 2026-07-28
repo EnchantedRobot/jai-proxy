@@ -142,6 +142,28 @@ A card whose id is **already** in `cards/` is skipped, never overwritten, so a
 fuller retrieval is never downgraded to an import. To replace one, delete the
 existing file and re-run.
 
+### Gallery ids (SillyTavern-CharacterLibrary)
+
+CharacterLibrary gives each character its own image-gallery folder, keyed on the
+character name **plus** an `extensions.gallery_id` — a random 12-character
+alphanumeric string it mints for characters that don't have one. Without an id
+the folder is keyed on the name alone, so two characters called "Aurora" share
+(and overwrite) one gallery.
+
+Every card written here carries one: `PngWriter` stamps it at write time, using
+the same alphabet and length CharacterLibrary does, so our cards drop in and work
+unchanged. An id already on a card is never regenerated — an import keeps the id
+its source carried, and re-exporting a character keeps the id the card on disk
+already has, so a gallery folder is never orphaned.
+
+Cards built before this (or imported from a source with no id) can be caught up
+in place:
+
+```bash
+make gallery-ids              # read-only report: which cards lack an id
+make gallery-ids ARGS=--apply # mint and patch them in (pixels preserved)
+```
+
 ## Tests
 
 ```bash
@@ -159,7 +181,7 @@ interaction has no automated tests; it's verified live.
 
 ## Status
 
-`uv run pytest` green (233). Server-side JSON refactor complete; datacat + Chub.ai
+`uv run pytest` green (283). Server-side JSON refactor complete; datacat + Chub.ai
 bulk import live; live end-to-end verification of the userscript export flows is
 pending.
 

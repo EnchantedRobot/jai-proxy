@@ -23,12 +23,15 @@ disk may be a fuller retrieval -- e.g. a datacat import lacks the lorebook a
 native pull would have). To replace one, delete the existing file and re-run.
 
 One field is the exception to never-touch: `extensions.gallery_id`, the handle a
-card carries to its stored image gallery. A legacy export often has one the
-older on-disk card lacks, so when an import matches an existing card (same name +
-id) the gallery_id is *backfilled* into that card in place -- pixels and every
-other field untouched -- rather than the import simply being dropped. If the
-on-disk card already carries a gallery_id it's left alone. This lets galleries be
-assigned to characters without re-downloading their avatars.
+card carries to its stored image gallery (see proxy/gallery.py). A legacy export
+often has one an older on-disk card lacks, so when an import matches an existing
+card (same name + id) the gallery_id is *backfilled* into that card in place --
+pixels and every other field untouched -- rather than the import simply being
+dropped. This lets galleries be assigned to characters without re-downloading
+their avatars. An id already on the on-disk card always wins, so the backfill
+only reaches cards written before the writer started stamping ids (or scanned by
+scripts/backfill_gallery_ids.py). To adopt a legacy export's id over one of ours,
+delete the on-disk card and re-run.
 
 Offline batch -- it does not need the proxy server running.
 
@@ -39,13 +42,11 @@ Offline batch -- it does not need the proxy server running.
 from __future__ import annotations
 
 import argparse
-import base64
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from proxy import chub_mapper, datacat_mapper, jannyai_mapper, pngtools
+from proxy import chub_mapper, datacat_mapper, gallery, jannyai_mapper, pngtools
 from proxy.cardbuilder import CardBuilder, PngWriter
 from proxy.config import settings
 from proxy.macros import MacroSanitizer
@@ -53,14 +54,6 @@ from proxy.macros import MacroSanitizer
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-
-
-def _gallery_id(data: dict) -> Any | None:
-    """A card's `extensions.gallery_id` -- the handle to its stored image gallery
-    -- or None if it carries none. A plain sibling of the chub/datacat block, so
-    it reads the same from any source's `data` object."""
-    gid = (data.get("extensions") or {}).get("gallery_id")
-    return gid if gid not in (None, "") else None
 
 
 def _datacat_extensions(data: dict, creator: str) -> dict:
@@ -80,7 +73,7 @@ def _datacat_extensions(data: dict, creator: str) -> dict:
         },
         "datacat": datacat_mapper.datacat_block(data),
     }
-    gid = _gallery_id(data)
+    gid = gallery.read_id(data)
     if gid is not None:
         extensions["gallery_id"] = gid
     return extensions
@@ -113,7 +106,7 @@ def _jannyai_extensions(data: dict, creator: str) -> dict:
         },
         "jannyai": jannyai_mapper.jannyai_block(data),
     }
-    gid = _gallery_id(data)
+    gid = gallery.read_id(data)
     if gid is not None:
         extensions["gallery_id"] = gid
     return extensions
@@ -148,39 +141,6 @@ def _import_chub(
     return out, warnings
 
 
-def _read_envelope(raw: bytes) -> tuple[dict, dict] | None:
-    """(envelope, data) for the chara_card_v3 embedded in `raw`, or None if it
-    carries no readable card. Unlike pngtools.extract_embedded_card (which hands
-    back only `data`), this keeps the outer envelope so the card can be
-    re-embedded with its spec header intact."""
-    try:
-        chunks = pngtools.read_text_chunks(raw)
-        envelope = json.loads(base64.b64decode(chunks.get("ccv3") or chunks.get("chara") or ""))
-    except Exception:
-        return None
-    if not isinstance(envelope, dict):
-        return None
-    data = envelope.get("data") if isinstance(envelope.get("data"), dict) else envelope
-    if not isinstance(data, dict):
-        return None
-    return envelope, data
-
-
-def _embed_card(raw: bytes, envelope: dict, data: dict) -> bytes:
-    """Re-embed `data` into `raw`, preserving every non-text (pixel) chunk and
-    the envelope's spec header. Mirrors scripts/check_cards.py's repair write:
-    inject_text_chunks rewrites only the tEXt chunks, so pngquant's IDAT is kept
-    byte-for-byte."""
-    new_env = {
-        "spec": envelope.get("spec", "chara_card_v3"),
-        "spec_version": envelope.get("spec_version", "3.0"),
-        "data": data,
-    }
-    new_env.update(data)  # V2-compat top-level mirror, matching to_dict
-    payload = base64.b64encode(json.dumps(new_env).encode("utf-8")).decode("ascii")
-    return pngtools.inject_text_chunks(raw, {"chara": payload, "ccv3": payload})
-
-
 def _backfill_gallery_id(path: Path, gallery_id: Any) -> str:
     """Add `gallery_id` to the extensions of the card at `path`, rewriting the
     PNG in place (pixels preserved). Returns a status:
@@ -189,18 +149,13 @@ def _backfill_gallery_id(path: Path, gallery_id: Any) -> str:
       'unreadable' -- the PNG had no readable card; left untouched
     """
     raw = path.read_bytes()
-    parsed = _read_envelope(raw)
+    parsed = pngtools.read_envelope(raw)
     if parsed is None:
         return "unreadable"
     envelope, data = parsed
-    extensions = data.get("extensions")
-    if not isinstance(extensions, dict):
-        extensions = {}
-        data["extensions"] = extensions
-    if extensions.get("gallery_id") not in (None, ""):
+    if gallery.ensure_id(data, preferred=gallery_id) is None:
         return "present"
-    extensions["gallery_id"] = gallery_id
-    path.write_bytes(_embed_card(raw, envelope, data))
+    path.write_bytes(pngtools.embed_card(raw, envelope, data))
     return "added"
 
 
@@ -264,7 +219,7 @@ def main() -> int:
             # Never overwrite an existing (possibly fuller) card -- but a legacy
             # export may carry a gallery_id the on-disk card lacks. Backfill just
             # that one field into the matching card(s), everything else untouched.
-            gid = _gallery_id(data)
+            gid = gallery.read_id(data)
             targets = writer.find(_source_name(source, data), cid, args.cards_dir) if gid else []
             added = 0
             for target in targets:
