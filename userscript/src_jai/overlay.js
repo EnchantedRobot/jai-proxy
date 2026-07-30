@@ -190,8 +190,8 @@
       hideBtn.id = "jai-proxy-hide";
       hideBtn.textContent = "🙈 Hide saved";
       hideBtn.title =
-        "Hide cards already saved to disk — plus, on a creator page, cards the " +
-        "include/exclude tag filter would skip";
+        "Hide cards already saved to disk, plus cards the include/exclude tag " +
+        "filter would skip — on the homepage, search, or a creator page";
       hideBtn.addEventListener("click", () => HideCaptured.onClick());
 
       const pill = document.createElement("div");
