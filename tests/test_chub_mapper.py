@@ -71,18 +71,28 @@ def test_provenance_accessors():
 # ---------------------------------------------------------------------------
 
 
-def test_creator_notes_dehtmled_and_css_stripped():
+def test_creator_notes_keep_layout_but_lose_css():
+    """A Chub blurb carries real layout, so it is tamed in place rather than
+    flattened -- the markup survives, the stylesheet does not."""
     data = load_data("sakura_makoto")
     assert "<style" in data["creator_notes"]  # raw Chub HTML in the source
     cleaned, _ = clean()
     notes = cleaned["creator_notes"]
     assert notes  # present
-    # No raw HTML tags, and crucially no leaked CSS from the <style> block.
-    for tag in ("<div", "<style", "<span", "<h1", "<img"):
-        assert tag not in notes
+
+    # The <style> block is gone -- this is what SillyTavern prompts about, and
+    # it only ever inspects <style> elements.
+    assert "<style" not in notes
     assert ".sakura-img" not in notes  # a CSS selector that used to leak in
-    assert "object-fit" not in notes
     assert "@keyframes" not in notes
+
+    # ...but the structure it described is still here.
+    assert "<div" in notes
+    assert "<img" in notes
+
+    # Nothing that could escape the creator-notes drawer or fight the theme.
+    for banned in ("position:", "z-index", "animation", "color:", "background"):
+        assert banned not in notes
 
 
 def test_macros_preserved_in_definition():

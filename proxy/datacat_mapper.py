@@ -17,7 +17,7 @@ Two facts about datacat exports shape the mapping:
     path), datacat definitions keep {{user}}/{{char}} as real macros, so there
     is no literal-persona-name reversal step -- a straight open-card build.
     `creator_notes` arrives as raw JanitorAI HTML, so it's run through the same
-    html_to_md sanitizer the JanitorAI path uses.
+    clean_creator_notes normalizer every other source uses.
 
 The card's `data.name` is the character name (the same value this project keys
 on) and `extensions.datacat.{id,creatorName,pageName}` carry the JanitorAI
@@ -29,7 +29,7 @@ from __future__ import annotations
 from typing import Any
 
 from proxy import pngtools
-from proxy.html_md import html_to_md
+from proxy.notes_html import clean_creator_notes
 from proxy.models import ProfileFields
 
 # A datacat card originates from JanitorAI; reconstruct the canonical character
@@ -102,7 +102,7 @@ def to_profile_fields(data: dict[str, Any]) -> ProfileFields:
         description=_s(data.get("description")),
         scenario=_s(data.get("scenario")),
         mes_example=_s(data.get("mes_example")),
-        creator_notes=html_to_md(data.get("creator_notes") or ""),
+        creator_notes=clean_creator_notes(data.get("creator_notes") or ""),
     )
 
 

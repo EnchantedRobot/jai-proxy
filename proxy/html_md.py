@@ -56,6 +56,12 @@ def clean_tag(t: str) -> str:
 # converts a character's `description` blurb into creator_notes. The character
 # definition itself (personality/scenario/example_dialogs) and the greetings
 # arrive as authored markdown in the JSON and need no conversion.
+#
+# Callers reach this through proxy.notes_html.clean_creator_notes, which sends
+# blurbs that carry real layout (Chub's grid-and-panel documents) down a
+# structure-preserving path instead -- flattening one of those to markdown
+# destroys it. Shallow styled prose, which is what every other source authors,
+# still lands here.
 # ---------------------------------------------------------------------------
 
 

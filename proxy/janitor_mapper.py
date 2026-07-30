@@ -3,7 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from proxy.html_md import clean_tag, html_to_md
+from proxy.html_md import clean_tag
+from proxy.notes_html import clean_creator_notes
 from proxy.models import ProfileFields
 
 # JanitorAI avatars are served from this CDN prefix; the JSON carries only the
@@ -91,7 +92,7 @@ def to_profile_fields(character: dict[str, Any]) -> ProfileFields:
         description=_s(character.get("personality")),
         scenario=_s(character.get("scenario")),
         mes_example=_s(character.get("example_dialogs")),
-        creator_notes=html_to_md(character.get("description") or ""),
+        creator_notes=clean_creator_notes(character.get("description") or ""),
     )
 
 

@@ -25,7 +25,7 @@ def _safe_filename(name: str) -> str:
     return slug or "unnamed"
 
 
-def _id_fragment(card_id: str | None) -> str:
+def id_fragment(card_id: str | None) -> str:
     """A short, filename-safe slice of the card id used to disambiguate cards
     that share a creator and name. For a JanitorAI UUID this is the first
     segment (8 hex chars) -- collision-safe within a single creator's folder.
@@ -213,7 +213,7 @@ class PngWriter:
             target_dir = out_dir / (_safe_filename(creator) if creator.strip() else "unknown_creator")
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        fragment = _id_fragment(card_id)
+        fragment = id_fragment(card_id)
         stem = _safe_filename(name)
         filename = f"{stem}_{fragment}.png" if fragment else f"{stem}.png"
         path = target_dir / filename
@@ -256,7 +256,7 @@ class PngWriter:
         out_dir = out_dir or self._output_dir
         found: set[str] = set()
         for card_id in card_ids:
-            fragment = _id_fragment(card_id)
+            fragment = id_fragment(card_id)
             if not fragment:
                 continue
             if next(out_dir.glob(f"**/*_{fragment}.png"), None) is not None:
@@ -272,7 +272,7 @@ class PngWriter:
         different-name neighbour. Empty when the id has no usable fragment (name
         alone isn't a safe key here) or nothing matches."""
         out_dir = out_dir or self._output_dir
-        fragment = _id_fragment(card_id)
+        fragment = id_fragment(card_id)
         if not fragment:
             return []
         stem = _safe_filename(name)

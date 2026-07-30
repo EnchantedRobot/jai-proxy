@@ -8,7 +8,7 @@ import pytest
 from PIL import Image
 
 from proxy import janitor_mapper, pngtools
-from proxy.cardbuilder import CardBuilder, PngWriter, _id_fragment, _safe_filename
+from proxy.cardbuilder import CardBuilder, PngWriter, _safe_filename, id_fragment
 from proxy.config import settings
 from proxy.macros import MacroSanitizer
 from proxy.models import CaptureRecord, CharacterBook, LoreEntry, ProfileFields
@@ -161,13 +161,13 @@ def test_safe_filename_strips_unsafe_characters():
 
 
 def test_id_fragment_takes_first_uuid_segment():
-    assert _id_fragment("bffaaf71-6c33-4e82-8cf2-3699f2ce4d92") == "bffaaf71"
+    assert id_fragment("bffaaf71-6c33-4e82-8cf2-3699f2ce4d92") == "bffaaf71"
     # Non-UUID / shorter ids pass through (capped at 8 chars).
-    assert _id_fragment("abc123") == "abc123"
-    assert _id_fragment("0123456789") == "01234567"
+    assert id_fragment("abc123") == "abc123"
+    assert id_fragment("0123456789") == "01234567"
     # Nothing usable -> empty, so the filename degrades to just the name.
-    assert _id_fragment(None) == ""
-    assert _id_fragment("   ") == ""
+    assert id_fragment(None) == ""
+    assert id_fragment("   ") == ""
 
 
 # ---------------------------------------------------------------------------

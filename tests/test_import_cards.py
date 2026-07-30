@@ -18,7 +18,7 @@ from PIL import Image
 
 import scripts.import_cards as importer
 from proxy import gallery, pngtools
-from proxy.cardbuilder import PngWriter
+from proxy.cardbuilder import CardBuilder, PngWriter
 
 
 def _envelope(data: dict) -> dict:
@@ -45,11 +45,26 @@ def _chub_data(gallery_id: str | None = None) -> dict:
         "name": "Tsuko",
         "creator": "SteakedGamer",
         "description": "hello",
-        "extensions": {"chub": {"id": 4937471}},
+        "extensions": {
+            "chub": {"id": 4937471, "full_path": "SteakedGamer/tsuko", "pageName": "Tsuko"},
+            "depth_prompt": {"prompt": "stay in character", "depth": 4},
+            "fav": False,
+        },
     }
     if gallery_id is not None:
         data["extensions"]["gallery_id"] = gallery_id
     return data
+
+
+def _datacat_data(cid: str = "f901406d-c5bb-48d7-b37a-6815e94ee879") -> dict:
+    return {
+        "name": "Abigail",
+        "creator": "toraval",
+        "description": "The Queen of Dragons",
+        "first_mes": "*Abigail enters.*",
+        "creator_notes": "<p>a blurb</p>",
+        "extensions": {"datacat": {"id": cid, "sourceKind": "janitor", "creatorName": "toraval", "pageName": "Abigail"}},
+    }
 
 
 def _jannyai_data(gallery_id: str | None = None) -> dict:
@@ -106,7 +121,7 @@ def _pixel_chunks(png: bytes):
     return [(t, d) for t, d in pngtools._iter_chunks(png) if t not in pngtools._TEXT_CHUNK_TYPES]
 
 
-def _run_import(import_dir: Path, cards_dir: Path, monkeypatch) -> int:
+def _run_import(import_dir: Path, cards_dir: Path, monkeypatch, *extra: str) -> int:
     monkeypatch.setattr(
         sys,
         "argv",
@@ -117,6 +132,7 @@ def _run_import(import_dir: Path, cards_dir: Path, monkeypatch) -> int:
             "--cards-dir",
             str(cards_dir),
             "--no-compress",
+            *extra,
         ],
     )
     return importer.main()
@@ -200,6 +216,110 @@ def test_datacat_extensions_omits_absent_gallery_id():
 
 
 # ---------------------------------------------------------------------------
+# _import_datacat -- optional original-avatar link via an image_resolver
+# ---------------------------------------------------------------------------
+
+
+class _FakeResolver:
+    def __init__(self, url: str | None):
+        self._url = url
+        self.calls: list[str] = []
+
+    def resolve(self, character_id: str) -> str | None:
+        self.calls.append(character_id)
+        return self._url
+
+
+def test_import_datacat_leads_creator_notes_with_resolved_avatar(tmp_path):
+    builder = CardBuilder()
+    writer = PngWriter(output_dir=tmp_path, compress=False)
+    resolver = _FakeResolver("https://ella.janitorai.com/bot-avatars/abc.webp")
+
+    out, warnings = importer._import_datacat(
+        builder, writer, _datacat_data(), _png_bytes(), "f901406d-c5bb-48d7-b37a-6815e94ee879", resolver
+    )
+
+    assert resolver.calls == ["f901406d-c5bb-48d7-b37a-6815e94ee879"]
+    notes = _read_data(out)["creator_notes"]
+    assert notes.startswith("![Abigail](https://ella.janitorai.com/bot-avatars/abc.webp)")
+    assert not warnings
+
+
+def test_import_datacat_notes_when_resolver_finds_nothing(tmp_path):
+    builder = CardBuilder()
+    writer = PngWriter(output_dir=tmp_path, compress=False)
+    resolver = _FakeResolver(None)
+
+    out, warnings = importer._import_datacat(
+        builder, writer, _datacat_data(), _png_bytes(), "f901406d-c5bb-48d7-b37a-6815e94ee879", resolver
+    )
+
+    assert any("original avatar not recovered" in w for w in warnings)
+    assert not _read_data(out)["creator_notes"].startswith("![")
+
+
+def test_import_datacat_without_resolver_is_unchanged(tmp_path):
+    builder = CardBuilder()
+    writer = PngWriter(output_dir=tmp_path, compress=False)
+
+    out, warnings = importer._import_datacat(
+        builder, writer, _datacat_data(), _png_bytes(), "f901406d-c5bb-48d7-b37a-6815e94ee879"
+    )
+
+    assert not warnings
+    assert not _read_data(out)["creator_notes"].startswith("![")
+
+
+def test_main_fetch_datacat_images_flag_wires_resolver_and_closes_it(tmp_path, monkeypatch):
+    cards = tmp_path / "cards"
+    imports = tmp_path / "import"
+    imports.mkdir()
+    (imports / "abigail.png").write_bytes(_import_png(_datacat_data()))
+
+    resolver = _FakeResolver("https://ella.janitorai.com/bot-avatars/xyz.webp")
+    closed = []
+    resolver.close = lambda: closed.append(True)
+    monkeypatch.setattr(importer, "DatacatImageResolver", lambda: resolver)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "import_cards.py",
+            "--import-dir",
+            str(imports),
+            "--cards-dir",
+            str(cards),
+            "--no-compress",
+            "--fetch-datacat-images",
+        ],
+    )
+    assert importer.main() == 0
+
+    written = sorted(cards.glob("**/*.png"))
+    assert resolver.calls == ["f901406d-c5bb-48d7-b37a-6815e94ee879"]
+    assert closed == [True]
+    notes = _read_data(written[0])["creator_notes"]
+    assert notes.startswith("![Abigail](https://ella.janitorai.com/bot-avatars/xyz.webp)")
+
+
+def test_main_without_flag_never_constructs_resolver(tmp_path, monkeypatch):
+    """Default run stays a pure offline batch -- DatacatImageResolver (which
+    owns a live httpx.Client) must not even be instantiated."""
+    cards = tmp_path / "cards"
+    imports = tmp_path / "import"
+    imports.mkdir()
+    (imports / "abigail.png").write_bytes(_import_png(_datacat_data()))
+
+    def _boom():
+        raise AssertionError("DatacatImageResolver should not be constructed without the flag")
+
+    monkeypatch.setattr(importer, "DatacatImageResolver", _boom)
+
+    assert _run_import(imports, cards, monkeypatch) == 0
+
+
+# ---------------------------------------------------------------------------
 # _jannyai_extensions -- fresh JannyAI write keeps its block + a gallery_id
 # ---------------------------------------------------------------------------
 
@@ -265,6 +385,35 @@ def test_main_imports_jannyai_card(tmp_path, monkeypatch):
     assert "<p>" not in (data.get("creator_notes") or "")
 
 
+def test_main_imports_chub_card(tmp_path, monkeypatch):
+    cards = tmp_path / "cards"
+    imports = tmp_path / "import"
+    imports.mkdir()
+
+    (imports / "tsuko.png").write_bytes(_import_png(_chub_data(gallery_id="f1AMBFO5oPUr")))
+
+    assert _run_import(imports, cards, monkeypatch) == 0
+
+    written = sorted(cards.glob("**/*.png"))
+    assert written == [cards / "Tsuko_4937471.png"]
+
+    data = _read_data(written[0])
+    # A fresh extensions.jai provenance stamp, the same every other source gets.
+    assert data["extensions"]["jai"] == {
+        "source_url": "https://chub.ai/characters/SteakedGamer/tsuko",
+        "id": "4937471",
+        "sourceKind": "chub_import",
+        "creatorName": "SteakedGamer",
+        "pageName": "Tsuko",
+        "linkedAt": data["extensions"]["jai"]["linkedAt"],
+    }
+    # Chub's own extensions block (id, gallery_id, depth_prompt, fav) survives.
+    assert data["extensions"]["chub"]["id"] == 4937471
+    assert data["extensions"]["gallery_id"] == "f1AMBFO5oPUr"
+    assert data["extensions"]["depth_prompt"] == {"prompt": "stay in character", "depth": 4}
+    assert data["extensions"]["fav"] is False
+
+
 def test_main_skips_when_import_has_no_gallery_id(tmp_path, monkeypatch):
     cards = tmp_path / "cards"
     imports = tmp_path / "import"
@@ -277,3 +426,94 @@ def test_main_skips_when_import_has_no_gallery_id(tmp_path, monkeypatch):
 
     assert _run_import(imports, cards, monkeypatch) == 0
     assert "gallery_id" not in _read_data(existing).get("extensions", {})
+
+
+# ---------------------------------------------------------------------------
+# --overwrite -- deliberate re-import over existing cards
+# ---------------------------------------------------------------------------
+
+
+def test_overwrite_replaces_an_existing_card(tmp_path, monkeypatch):
+    """Without the flag an existing id is skipped; with it the card is rebuilt
+    from the export. This is the path for re-dumping sources after a pipeline
+    change (e.g. the creator-notes taming)."""
+    cards = tmp_path / "cards"
+    imports = tmp_path / "import"
+    imports.mkdir()
+
+    stale = _chub_data()
+    stale["description"] = "stale text"
+    _write_existing(cards, name="Tsuko", creator="SteakedGamer", cid="4937471", data=stale)
+
+    fresh = _chub_data()
+    fresh["description"] = "fresh text"
+    (imports / "tsuko.png").write_bytes(_import_png(fresh))
+
+    # default: left alone
+    assert _run_import(imports, cards, monkeypatch) == 0
+    assert _read_data(cards / "Tsuko_4937471.png")["description"] == "stale text"
+
+    # --overwrite: rebuilt
+    assert _run_import(imports, cards, monkeypatch, "--overwrite") == 0
+    assert _read_data(cards / "Tsuko_4937471.png")["description"] == "fresh text"
+    assert sorted(cards.glob("**/*.png")) == [cards / "Tsuko_4937471.png"]
+
+
+def test_overwrite_keeps_the_on_disk_gallery_id(tmp_path, monkeypatch):
+    """The gallery handle belongs to the archive, not the export -- an
+    overwrite must not swap it for whatever the source happens to carry."""
+    cards = tmp_path / "cards"
+    imports = tmp_path / "import"
+    imports.mkdir()
+
+    _write_existing(
+        cards,
+        name="Tsuko",
+        creator="SteakedGamer",
+        cid="4937471",
+        data=_chub_data(gallery_id="ONDISK00000a"),
+    )
+    (imports / "tsuko.png").write_bytes(_import_png(_chub_data(gallery_id="FROMEXPORT01")))
+
+    assert _run_import(imports, cards, monkeypatch, "--overwrite") == 0
+    assert _read_data(cards / "Tsuko_4937471.png")["extensions"]["gallery_id"] == "ONDISK00000a"
+
+
+def test_overwrite_prunes_a_card_renamed_upstream(tmp_path, monkeypatch):
+    """The filename is `<name>_<id8>.png`; only the id half is stable. A rename
+    would otherwise leave the old file behind and fork the card in two."""
+    cards = tmp_path / "cards"
+    imports = tmp_path / "import"
+    imports.mkdir()
+
+    _write_existing(
+        cards, name="Tsuko", creator="SteakedGamer", cid="4937471", data=_chub_data()
+    )
+
+    renamed = _chub_data()
+    renamed["name"] = "Tsuko Reborn"
+    (imports / "tsuko.png").write_bytes(_import_png(renamed))
+
+    assert _run_import(imports, cards, monkeypatch, "--overwrite") == 0
+    assert sorted(cards.glob("**/*.png")) == [cards / "Tsuko_Reborn_4937471.png"]
+
+
+def test_overwrite_leaves_unrelated_cards_alone(tmp_path, monkeypatch):
+    """Pruning keys on the id fragment, so a different card must survive."""
+    cards = tmp_path / "cards"
+    imports = tmp_path / "import"
+    imports.mkdir()
+
+    other = _chub_data()
+    other["name"] = "Someone Else"
+    other["extensions"]["chub"]["id"] = 9999999
+    neighbour = _write_existing(
+        cards, name="Someone Else", creator="SteakedGamer", cid="9999999", data=other
+    )
+    _write_existing(
+        cards, name="Tsuko", creator="SteakedGamer", cid="4937471", data=_chub_data()
+    )
+    (imports / "tsuko.png").write_bytes(_import_png(_chub_data()))
+
+    assert _run_import(imports, cards, monkeypatch, "--overwrite") == 0
+    assert neighbour.exists()

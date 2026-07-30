@@ -15,7 +15,7 @@ card is rebuilt:
   * Macros intact. Definitions keep {{user}}/{{char}} as real macros (like
     datacat/saucepan, unlike the hidden-capture path), so there's no
     literal-persona-name reversal -- a straight open-card build. `creator_notes`
-    arrives as raw HTML, run through the same html_to_md sanitizer.
+    arrives as raw HTML, run through the same clean_creator_notes normalizer.
 
 The `extensions.jannyai` block carries the JannyAI character id, creator handle
 (`creatorUsername`, an "@name"), URL slug, `pageName`, and `tagline` (the blurb).
@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from proxy.html_md import html_to_md
+from proxy.notes_html import clean_creator_notes
 from proxy.models import ProfileFields
 
 # A JannyAI card originates from jannyai.com; reconstruct the canonical character
@@ -101,7 +101,7 @@ def to_profile_fields(data: dict[str, Any]) -> ProfileFields:
         description=_s(data.get("description")),
         scenario=_s(data.get("scenario")),
         mes_example=_s(data.get("mes_example")),
-        creator_notes=html_to_md(data.get("creator_notes") or ""),
+        creator_notes=clean_creator_notes(data.get("creator_notes") or ""),
     )
 
 

@@ -11,9 +11,9 @@ that keeps the card almost verbatim and only:
   * sanitizes macros (typo + broken-bracket repair, pronoun fold) in the
     definition text fields and lorebook-entry content -- macros stay intact,
     there's no persona-name reversal (Chub is a fully open card, like datacat),
-  * converts `creator_notes` from Chub's authored HTML to markdown (Chub notes
-    wrap the blurb in a heavily styled shell with a `<style>` CSS block
-    SillyTavern chokes on -- html_to_md now drops those), and
+  * tames `creator_notes` -- Chub wraps the blurb in a page-sized styled shell
+    with a `<style>` CSS block SillyTavern warns about, so the sheet is inlined
+    and dropped while the layout it described survives (see notes_html), and
   * strips emoji/hash noise from tags.
 
 Everything else is preserved AS IS: `extensions` (untouched -- including the
@@ -36,7 +36,8 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from proxy.html_md import clean_tag, html_to_md
+from proxy.html_md import clean_tag
+from proxy.notes_html import clean_creator_notes
 from proxy.macros import MacroSanitizer
 
 # Reconstruct the canonical Chub character URL from the card's full_path so an
@@ -127,9 +128,9 @@ def clean_card(
             scrub(g) if isinstance(g, str) else g for g in card["alternate_greetings"]
         ]
 
-    # creator_notes: authored HTML (+ a <style> CSS block) -> markdown, then
-    # sanitize any macros left in the prose.
-    card["creator_notes"] = scrub(html_to_md(card.get("creator_notes") or ""))
+    # creator_notes: a laid-out Chub blurb keeps its structure (minus the CSS),
+    # plainer notes flatten to markdown; then sanitize any macros in the prose.
+    card["creator_notes"] = scrub(clean_creator_notes(card.get("creator_notes") or ""))
 
     # tags: strip leading emoji / "#" SillyTavern can't render, drop any that
     # clean down to nothing.

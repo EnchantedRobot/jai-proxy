@@ -9,20 +9,36 @@ filename fragment):
 
   * datacat  -- a JanitorAI card pulled by the closed-source datacat retriever.
     It carries no lorebook, so it's rebuilt through the CardBuilder (macro
-    sanitize, creator-notes de-HTML) with a fresh datacat_import provenance
+    sanitize, creator-notes cleanup) with a fresh datacat_import provenance
     block. See proxy/datacat_mapper.py.
   * JannyAI  -- a jannyai.com card export, structurally a twin of datacat
     (definition-only, no lorebook, macros intact), rebuilt the same way with a
     fresh jannyai_import provenance block. See proxy/jannyai_mapper.py.
   * Chub.ai  -- an already-complete chara_card_v3 (its own lorebook + rich
     extensions). It's passed through near-verbatim: macros sanitized,
-    creator_notes de-HTML'd, tags cleaned, everything else (extensions, the
-    whole character_book) preserved as is. See proxy/chub_mapper.py.
+    creator_notes tamed (layout kept, stylesheet dropped -- see
+    proxy/notes_html.py), tags cleaned, everything else (the whole
+    character_book, Chub's own extensions block) preserved as is -- plus a
+    fresh `extensions.jai` provenance stamp layered on top, the same one every
+    other source gets. See proxy/chub_mapper.py.
 
 Both share the same tail: avatar normalize + pngquant compression, and a card
 whose id already lives in the cards folder is skipped, never overwritten (the
 one on disk may be a fuller retrieval -- e.g. a datacat import lacks the lorebook
-a native pull would have). To replace one, delete the existing file and re-run.
+a native pull would have). `--overwrite` reverses that for a deliberate re-import
+-- after a pipeline change that alters how cards are built, re-dump the source
+exports and re-run with it. The on-disk gallery_id still wins, and a card renamed
+upstream has its old `<name>_<id8>.png` pruned so the overwrite can't fork.
+
+`--fetch-datacat-images` (datacat only) turns on one extra, opt-in network
+step: for each datacat card, ask datacat.run's own API (see
+proxy/datacat_api.py) for the untouched original JanitorAI avatar URL, and
+lead creator_notes with it -- mirroring what the native retriever already
+does for its own avatar_url, so SillyTavern-CharacterLibrary's creator-notes
+media scan picks up the full-resolution original as a gallery image even
+though the embedded avatar here is cropped/compressed. Off by default so this
+stays a pure offline batch otherwise; a card whose original can't be
+recovered (gone from datacat's index, etc.) just imports without the link.
 
 One field is the exception to never-touch: `extensions.gallery_id`, the handle a
 card carries to its stored image gallery (see proxy/gallery.py). A legacy export
@@ -49,8 +65,9 @@ from pathlib import Path
 from typing import Any
 
 from proxy import chub_mapper, datacat_mapper, gallery, jannyai_mapper, pngtools
-from proxy.cardbuilder import CardBuilder, PngWriter
+from proxy.cardbuilder import CardBuilder, PngWriter, id_fragment
 from proxy.config import settings
+from proxy.datacat_api import DatacatImageResolver
 from proxy.macros import MacroSanitizer
 
 
@@ -82,11 +99,19 @@ def _datacat_extensions(data: dict, creator: str) -> dict:
 
 
 def _import_datacat(
-    builder: CardBuilder, writer: PngWriter, data: dict, raw: bytes, cid: str
+    builder: CardBuilder,
+    writer: PngWriter,
+    data: dict,
+    raw: bytes,
+    cid: str,
+    image_resolver: DatacatImageResolver | None = None,
 ) -> tuple[Path, list[str]]:
     profile = datacat_mapper.to_profile_fields(data)
     greetings = datacat_mapper.greetings(data)
-    card, warnings = builder.build(profile, greetings, capture=None, book=None)
+    avatar_url = image_resolver.resolve(cid) if image_resolver and cid else None
+    card, warnings = builder.build(profile, greetings, capture=None, book=None, avatar_url=avatar_url)
+    if image_resolver and cid and not avatar_url:
+        warnings.append("datacat: original avatar not recovered (no link added)")
     card.character_version = datacat_mapper.source_url(data) or "jai-proxy"
     card.extensions = _datacat_extensions(data, profile.creator)
     out = writer.write(card, raw, card_id=cid or None)
@@ -126,13 +151,34 @@ def _import_jannyai(
     return out, warnings
 
 
+def _chub_extensions(data: dict) -> dict:
+    """Chub's own extensions block (chub/depth_prompt/fav/gallery_id, ...)
+    passed through untouched, plus a fresh `extensions.jai` provenance block
+    layered on top -- the same stamp every other source gets (see
+    _datacat_extensions/_jannyai_extensions), flagged `chub_import` so a
+    Chub-imported card is linkable in SillyTavern-CharacterLibrary without a
+    separate lookup."""
+    extensions = dict(data.get("extensions") or {})
+    extensions["jai"] = {
+        "source_url": chub_mapper.source_url(data),
+        "id": chub_mapper.card_id(data) or None,
+        "sourceKind": "chub_import",
+        "creatorName": chub_mapper.creator(data),
+        "pageName": chub_mapper.page_name(data),
+        "linkedAt": _utc_now_iso(),
+    }
+    return extensions
+
+
 def _import_chub(
     writer: PngWriter, sanitizer: MacroSanitizer, data: dict, raw: bytes, cid: str
 ) -> tuple[Path, list[str]]:
     # A Chub card is already a full chara_card_v3 -- clean the text fields and
     # pass the rest (extensions, lorebook) straight through, then embed the raw
-    # payload so nothing our card models don't carry gets dropped.
+    # payload so nothing our card models don't carry gets dropped. An
+    # extensions.jai stamp is layered on top of Chub's own extensions block.
     cleaned, warnings = chub_mapper.clean_card(data, sanitizer)
+    cleaned["extensions"] = _chub_extensions(cleaned)
     out = writer.write_payload(
         chub_mapper.to_payload(cleaned),
         raw,
@@ -166,6 +212,37 @@ def _source_name(source: str, data: dict) -> str:
     return chub_mapper.name(data) if source == "chub" else datacat_mapper.name(data)
 
 
+def _adopt_on_disk_gallery_id(data: dict, card_id: str, cards_dir: Path) -> Any | None:
+    """Pin an --overwrite re-import to the gallery_id already in the archive.
+
+    Normal precedence is payload > on-disk (see cardbuilder._stamp_gallery_id),
+    which is right for a first import. It is wrong for an overwrite: the gallery
+    folder in SillyTavern-CharacterLibrary is keyed by the id the on-disk card
+    carries, so adopting a re-dumped export's id instead would orphan every
+    image already filed under the old one."""
+    fragment = id_fragment(card_id)
+    if not fragment:
+        return None
+    for path in sorted(cards_dir.glob(f"**/*_{fragment}.png")):
+        card = pngtools.extract_embedded_card(path.read_bytes())
+        gid = gallery.read_id(card) if card else None
+        if gid is not None:
+            data.setdefault("extensions", {})["gallery_id"] = gid
+            return gid
+    return None
+
+
+def _stale_siblings(card_id: str, written: Path, cards_dir: Path) -> list[Path]:
+    """Cards carrying this id fragment at some *other* path -- what an
+    --overwrite re-import leaves behind when the character has been renamed
+    upstream, since the filename is `<name>_<id8>.png` and only the id half is
+    stable. Without this the "overwrite" would quietly fork into two cards."""
+    fragment = id_fragment(card_id)
+    if not fragment:
+        return []
+    return [p for p in cards_dir.glob(f"**/*_{fragment}.png") if p != written]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--import-dir", type=Path, default=Path("import"))
@@ -174,6 +251,25 @@ def main() -> int:
         "--no-compress",
         action="store_true",
         help="skip pngquant avatar compression (on by default, matching the server)",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help=(
+            "re-import cards whose id is already in the cards folder, replacing "
+            "them (default: skip). Use after a pipeline change that alters how "
+            "cards are built -- e.g. re-dumping Chub exports to pick up the "
+            "creator-notes taming. The on-disk gallery_id is preserved"
+        ),
+    )
+    parser.add_argument(
+        "--fetch-datacat-images",
+        action="store_true",
+        help=(
+            "for datacat imports, call datacat.run to recover the original avatar "
+            "URL and lead creator_notes with it (off by default; the only network "
+            "call this script makes -- see proxy/datacat_api.py)"
+        ),
     )
     args = parser.parse_args()
 
@@ -184,6 +280,7 @@ def main() -> int:
     builder = CardBuilder()
     writer = PngWriter(output_dir=args.cards_dir, compress=not args.no_compress)
     sanitizer = MacroSanitizer(user_names=settings.user_names)
+    image_resolver = DatacatImageResolver() if args.fetch_datacat_images else None
 
     # First pass: read + parse + classify every PNG (keeping the bytes for reuse
     # as the avatar), so a single existing() scan can pre-compute which ids are
@@ -210,14 +307,14 @@ def main() -> int:
 
     already = writer.existing([cid for *_, cid in records if cid])
 
-    written = skipped_existing = errored = backfilled = 0
+    written = skipped_existing = errored = backfilled = pruned = 0
     seen_ids: set[str] = set()
     for path, raw, source, data, cid in records:
         if cid and cid in seen_ids:
             print(f"  skip  {path.name}: duplicate in this batch (id {cid})")
             skipped_existing += 1
             continue
-        if cid and cid in already:
+        if cid and cid in already and not args.overwrite:
             # Never overwrite an existing (possibly fuller) card -- but a legacy
             # export may carry a gallery_id the on-disk card lacks. Backfill just
             # that one field into the matching card(s), everything else untouched.
@@ -238,13 +335,15 @@ def main() -> int:
                 print(f"  skip  {path.name}: {detail} (id {cid})")
             skipped_existing += 1
             continue
+        if args.overwrite and cid and cid in already:
+            _adopt_on_disk_gallery_id(data, cid, args.cards_dir)
         try:
             if source == "chub":
                 out, warnings = _import_chub(writer, sanitizer, data, raw, cid)
             elif source == "jannyai":
                 out, warnings = _import_jannyai(builder, writer, data, raw, cid)
             else:
-                out, warnings = _import_datacat(builder, writer, data, raw, cid)
+                out, warnings = _import_datacat(builder, writer, data, raw, cid, image_resolver)
         except Exception as exc:  # one bad PNG must not abort the batch
             print(f"  ERROR {path.name}: {exc}")
             errored += 1
@@ -254,11 +353,20 @@ def main() -> int:
         suffix = f"  ({'; '.join(warnings)})" if warnings else ""
         print(f"  write {path.name} [{source}] -> {out.relative_to(args.cards_dir)}{suffix}")
         written += 1
+        if args.overwrite and cid:
+            for stale in _stale_siblings(cid, out, args.cards_dir):
+                stale.unlink()
+                print(f"  prune {stale.relative_to(args.cards_dir)} (renamed since last import)")
+                pruned += 1
+
+    if image_resolver:
+        image_resolver.close()
 
     print(
         f"\nimported {written}, skipped {skipped_existing} existing "
         f"({backfilled} gallery_id backfilled), {skipped_unparsable} unrecognized, "
         f"{errored} errored (of {len(pngs)} PNGs in {args.import_dir})"
+        + (f", pruned {pruned} renamed" if pruned else "")
     )
     return 0
 

@@ -61,6 +61,17 @@ class Settings(BaseSettings):
     compress: bool = True
     pngquant_bin: Path = Path(__file__).resolve().parent / "pngquant"
 
+    # Outbound proxy for server-initiated calls to third-party APIs (currently
+    # just proxy/datacat_api.py's original-avatar lookup). httpx's single
+    # `proxy=` kwarg, so one URL covers http+https; None disables it.
+    http_proxy: str | None = None
+
+    # A datacat.run anonymous session token, so DatacatImageResolver reuses it
+    # instead of hitting /api/liberator/identify on every run. Left unset the
+    # first time; the resolver fetches one and writes it back here itself --
+    # see proxy/datacat_api.py._persist_session_token.
+    datacat_session_token: str | None = None
+
 
 settings = Settings()
 settings.output_dir.mkdir(parents=True, exist_ok=True)

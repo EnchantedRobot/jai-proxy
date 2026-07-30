@@ -25,7 +25,7 @@ run:
 # already on disk are skipped, never overwritten. Extra flags pass through via
 # ARGS, e.g. `make import ARGS=--no-compress`.
 import:
-	uv run python scripts/import_cards.py $(ARGS)
+	uv run python scripts/import_cards.py $(ARGS) --fetch-datacat-images
 
 # Backfill `extensions.gallery_id` (SillyTavern-CharacterLibrary's per-character
 # gallery handle) into any card missing one. Read-only report by default;
