@@ -70,6 +70,13 @@ def avatar_url(character: dict[str, Any]) -> str | None:
     return f"{_AVATAR_BASE}{filename}" if filename else None
 
 
+def creator_id(character: dict[str, Any]) -> str:
+    """The JanitorAI creator's UUID, carried in the JSON alongside
+    `creator_name`. Feeds extensions.datacat.creatorId -- the field
+    SillyTavern-CharacterLibrary's datacat provider keys creator lookups on."""
+    return _s(character.get("creator_id"))
+
+
 def to_profile_fields(character: dict[str, Any]) -> ProfileFields:
     """Map a JanitorAI /hampter/characters/<id> JSON payload onto the
     ProfileFields the CardBuilder already consumes. For hidden cards the

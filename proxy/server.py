@@ -73,6 +73,31 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
+def _datacat_block(
+    *,
+    card_id: str | None,
+    source_kind: str,
+    creator_id: str,
+    creator_name: str,
+    page_name: str,
+    linked_at: str,
+) -> dict[str, Any]:
+    """extensions.datacat provenance -- the shape SillyTavern-CharacterLibrary's
+    datacat provider reads and writes natively (modules/providers/datacat/
+    datacat-provider.js), built from the same source fields as extensions.jai
+    so a freshly downloaded card is already linkable there without a separate
+    datacat lookup. `source_kind` is datacat's own vocabulary ("janitor" /
+    "saucepan"), distinct from extensions.jai's sourceKind values."""
+    return {
+        "id": card_id,
+        "sourceKind": source_kind,
+        "creatorId": creator_id or None,
+        "creatorName": creator_name,
+        "pageName": page_name,
+        "linkedAt": linked_at,
+    }
+
+
 def _first_message_of_role(messages: list[dict[str, Any]], role: str) -> str:
     for message in messages:
         if message.get("role") == role:
@@ -245,6 +270,7 @@ async def build(req: BuildRequest) -> BuildResponse:
     # name -- see "She needs your help"), preserved as metadata instead.
     page_name = (character.get("name") or "").strip()
     card_id = req.character.id or character.get("id")
+    linked_at = _utc_now_iso()
     extensions = {
         "jai": {
             "source_url": req.character.url,
@@ -252,8 +278,16 @@ async def build(req: BuildRequest) -> BuildResponse:
             "sourceKind": "janitor_core",
             "creatorName": profile.creator,
             "pageName": page_name,
-            "linkedAt": _utc_now_iso(),
-        }
+            "linkedAt": linked_at,
+        },
+        "datacat": _datacat_block(
+            card_id=card_id,
+            source_kind="janitor",
+            creator_id=janitor_mapper.creator_id(character),
+            creator_name=profile.creator,
+            page_name=page_name,
+            linked_at=linked_at,
+        ),
     }
 
     return await _assemble_and_write(
@@ -322,15 +356,25 @@ async def build_saucepan(req: SaucepanBuildRequest) -> BuildResponse:
         )
 
     source_url = f"{SAUCEPAN_ORIGIN}/companion/{card_id}" if card_id else None
+    page_name = saucepan_mapper.page_name(raw)
+    linked_at = _utc_now_iso()
     extensions = {
         "jai": {
             "source_url": source_url,
             "id": card_id or None,
             "sourceKind": "saucepan_core",
             "creatorName": profile.creator,
-            "pageName": saucepan_mapper.page_name(raw),
-            "linkedAt": _utc_now_iso(),
-        }
+            "pageName": page_name,
+            "linkedAt": linked_at,
+        },
+        "datacat": _datacat_block(
+            card_id=card_id or None,
+            source_kind="saucepan",
+            creator_id=saucepan_mapper.creator_id(raw),
+            creator_name=profile.creator,
+            page_name=page_name,
+            linked_at=linked_at,
+        ),
     }
 
     return await _assemble_and_write(

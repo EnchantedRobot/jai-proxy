@@ -80,6 +80,7 @@ def test_eve_avatar_and_meta():
     assert m.page_name(raw) == "Eve | I Did Nothing Wrong"
     assert m.companion_id(raw) == "04a0c1ac-187b-4aa0-8f5b-885533be748d"
     assert m.is_open(raw) is True
+    assert m.creator_id(raw) == "cba8693b-3a04-42fe-883d-27df186ca711"
 
 
 # ---------------------------------------------------------------------------

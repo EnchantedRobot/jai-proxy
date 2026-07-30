@@ -234,6 +234,17 @@ def test_build_exports_open_card_png(tmp_path):
     assert jai["pageName"] == "The Girl in Every Yearbook | Akane Kujo"
     assert "linkedAt" in jai
 
+    # extensions.datacat rides alongside jai -- same provenance, datacat's own
+    # shape (sourceKind "janitor", creatorId from the JSON's creator_id) --
+    # so the card is CharacterLibrary/datacat-linkable straight off the wire.
+    datacat = data["extensions"]["datacat"]
+    assert datacat["id"] == "abc123"
+    assert datacat["sourceKind"] == "janitor"
+    assert datacat["creatorId"] == "866c0877-ea3d-4bc6-a906-13c5d9601f9d"
+    assert datacat["creatorName"] == "dezea"
+    assert datacat["pageName"] == jai["pageName"]
+    assert datacat["linkedAt"] == jai["linkedAt"]
+
     # A served card is CharacterLibrary-ready: it leaves with its own gallery id.
     gallery_id = data["extensions"]["gallery_id"]
     assert len(gallery_id) == 12 and gallery_id.isalnum()
@@ -284,6 +295,14 @@ def test_build_saucepan_exports_open_card_png(tmp_path):
     assert jai["source_url"] == "https://saucepan.ai/companion/04a0c1ac-187b-4aa0-8f5b-885533be748d"
     assert jai["creatorName"] == "desslok"
     assert jai["pageName"] == "Eve | I Did Nothing Wrong"
+
+    datacat = data["extensions"]["datacat"]
+    assert datacat["id"] == jai["id"]
+    assert datacat["sourceKind"] == "saucepan"
+    assert datacat["creatorId"] == "cba8693b-3a04-42fe-883d-27df186ca711"
+    assert datacat["creatorName"] == "desslok"
+    assert datacat["pageName"] == jai["pageName"]
+    assert datacat["linkedAt"] == jai["linkedAt"]
 
 
 def test_build_saucepan_response_formatting_lands_in_scenario(tmp_path):
