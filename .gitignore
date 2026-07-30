@@ -30,3 +30,6 @@ wheels/
 
 # pytest
 .pytest_cache/
+
+# node (userscript/tests/)
+node_modules/

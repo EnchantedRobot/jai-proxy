@@ -150,6 +150,23 @@ a missing field — hover the button for the full list), or `⚠️ <message>` i
 build request itself failed (the hidden-card gate reports its reason here;
 otherwise check the server logs).
 
+### Browsing (hiding what you already have)
+
+Any page that renders character tiles — the logged-in homepage, search, tag
+browse, a creator's profile — gets a **🙈 Hide saved** toggle above the export
+button. Turning it on folds away every tile that is either already saved to your
+cards folder or skipped by the include/exclude tag filter in
+`userscript/src_jai/config.js`, so what's left is the stuff you don't have and
+would actually want. The button then reads `👁 Show hidden (N)`; clicking it
+again puts everything back.
+
+Both verdicts come from the tile itself — the character id from its link, the
+tags from its own chips — so no extra listing requests are made and the toggle
+follows whatever segment/sort you've picked. "Already saved" is the same
+`_<id8>` filename check the bulk sweep uses, so it stays accurate no matter what
+you renamed the card to. Hiding is purely a CSS class on the tile; nothing on
+JanitorAI's side is touched.
+
 ### Importing cards (datacat & Chub.ai)
 
 Some sources hand you a PNG that already embeds a `chara`/`ccv3` character card.
@@ -208,7 +225,8 @@ make gallery-ids ARGS=--apply # mint and patch them in (pixels preserved)
 ## Tests
 
 ```bash
-uv run pytest
+uv run pytest        # server (proxy/)
+make test-js          # userscript (userscript/src_jai/)
 ```
 
 All server-side logic (JanitorAI-JSON→V3 mapper, system-prompt parser, macro
@@ -217,8 +235,17 @@ and Chub import mappers, and the FastAPI routes) is validated against **real
 captured fixtures** in `tests/fixtures/` (8 real `/hampter/characters/<id>`
 payloads in `tests/fixtures/hampter/`, 2 real datacat card exports in
 `tests/fixtures/datacat/`, a real Chub export in `tests/fixtures/chub/`) — see
-`tests/fixtures/README.md` for provenance. The userscript's in-page JSON/auth
-interaction has no automated tests; it's verified live.
+`tests/fixtures/README.md` for provenance.
+
+The userscript is authored as small modules under `userscript/src_jai/*.js`,
+concatenated into one IIFE at compile time (`scripts/compile_userscript_jai.py`).
+`userscript/tests/` (Node's built-in `node:test`, no dependencies) reproduces
+that same concatenation for just the module(s) a test needs — see
+`userscript/tests/helpers/load-src.js` — so pure logic can be unit-tested
+without a browser. So far this only covers the bulk-download tag filter
+(`bulk.tag-filter.test.js`) as a smoke test; the rest of the userscript's
+DOM/network/in-page JSON+auth interaction still has no automated coverage and
+is verified live.
 
 ## Status
 

@@ -1,4 +1,4 @@
-.PHONY: compile test run import gallery-ids check
+.PHONY: compile test test-js run import gallery-ids check
 
 # Every target reads .env (see .env.template) via proxy/config.py -- most
 # importantly JAI_PROXY_OUTPUT_DIR, the cards folder they all read and write.
@@ -12,6 +12,10 @@ compile:
 # Run the Python test suite
 test:
 	uv run python -m pytest -q
+
+# Run the userscript unit tests (node:test, no deps -- see userscript/tests/)
+test-js:
+	cd userscript && node --test
 
 run:
 	uv run python -m proxy.server
@@ -28,6 +32,9 @@ import:
 # `make gallery-ids ARGS=--apply` writes them in place.
 gallery-ids:
 	uv run python scripts/backfill_gallery_ids.py $(ARGS)
+
+datacat-ids:
+	uv run python scripts/backfill_datacat_ids.py $(ARGS)
 
 # Re-audit built cards against the current macro/formatting rules. Read-only;
 # `make check ARGS=--repair` rewrites the cards that would change.
