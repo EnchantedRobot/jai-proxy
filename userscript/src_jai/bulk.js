@@ -222,7 +222,7 @@
             pending.push(r);
           }
         }
-        const already = rows.length - pending.length;
+        let already = rows.length - pending.length;
         if (!pending.length) {
           this._setStatus(`all ${rows.length} card(s) already saved — nothing to do`);
           return;
@@ -262,7 +262,12 @@
               this._setRow(r.id, "⏳", "exporting…");
               const { result } = await buildCardById(r.id, { character });
               const warnings = (result && result.warnings) || [];
-              if (result && result.ok) {
+              if (result && result.ok && result.duplicate) {
+                // The pre-check above normally catches these; this covers the
+                // case where it failed soft (or a card landed on disk since).
+                already += 1;
+                this._setRow(r.id, "•", "already saved — skipped");
+              } else if (result && result.ok) {
                 done += 1;
                 built = true;
                 this._setRow(

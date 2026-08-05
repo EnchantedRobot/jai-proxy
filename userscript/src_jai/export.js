@@ -72,7 +72,13 @@
       // API JSON (chat_name) and saves the card under it.
       const { result } = await buildCardById(id, { url: location.href });
       const warnings = result.warnings || [];
-      if (result.ok) {
+      if (result.ok && result.duplicate) {
+        // Already on disk -- the server wrote nothing. Say so rather than "✓
+        // Saved", which would claim an export that didn't happen.
+        log("already saved:", result.path);
+        ExportStatus.show("• Already saved");
+        holdMs = 4000;
+      } else if (result.ok) {
         log("exported card ->", result.path, warnings);
         if (warnings.length) {
           const n = warnings.length;

@@ -141,6 +141,9 @@ class BuildRequest(BaseModel):
 
 class BuildResponse(BaseModel):
     ok: bool
+    # True when the card was already on disk and the build was skipped: `path`
+    # then points at the file that was already there, and nothing was written.
+    duplicate: bool = False
     path: str | None = None
     warnings: list[str] = Field(default_factory=list)
     fields_present: dict[str, bool] = Field(default_factory=dict)

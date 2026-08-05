@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+import logging
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -8,6 +9,7 @@ from PIL import Image
 
 import proxy.server as server_module
 from proxy.config import settings
+from proxy.dashboard import Dashboard
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -248,6 +250,59 @@ def test_build_exports_open_card_png(tmp_path):
     # A served card is CharacterLibrary-ready: it leaves with its own gallery id.
     gallery_id = data["extensions"]["gallery_id"]
     assert len(gallery_id) == 12 and gallery_id.isalnum()
+
+
+def test_rebuilding_a_saved_card_skips_the_write(tmp_path, caplog):
+    client = make_client(FakeMLXClient(), tmp_path)
+    payload = {
+        "character": {"name": "Akane Kujo", "id": "abc123"},
+        "character_json": _character("open_akane_kujo"),
+        "avatar_url": "https://ella.janitorai.com/bot-avatars/example.webp",
+    }
+
+    dashboard = Dashboard(title="jai-proxy", address="http://x")
+    server_module.DASHBOARD = dashboard
+    try:
+        with caplog.at_level(logging.INFO, logger="jai_proxy.server"):
+            first = client.post("/build", json=payload).json()
+            path = Path(first["path"])
+            stamped = path.read_bytes()
+            second = client.post("/build", json=payload).json()
+    finally:
+        server_module.DASHBOARD = None
+
+    assert first["duplicate"] is False
+    # Skipped, not overwritten: same path reported back, file untouched. Only by
+    # deleting it does a re-export happen.
+    assert second == {**first, "duplicate": True, "warnings": [], "fields_present": {}}
+    assert path.read_bytes() == stamped
+
+    saved, dup = list(dashboard.feed.rows)
+    assert (saved["duplicate"], dup["duplicate"]) == (False, True)
+    assert dup["filename"] == "Akane_Kujo_abc123.png"
+    assert (dashboard.feed.succeeded, dashboard.feed.duplicates) == (1, 1)
+
+    # The plain-log path (no TTY) says the same thing, and names the file so a
+    # card can be found on disk straight from the log line.
+    lines = [r.getMessage() for r in caplog.records if "card:" in r.getMessage()]
+    assert lines == [
+        "saved janitor card: Akane Kujo by dezea (Akane_Kujo_abc123.png)",
+        "already have janitor card: Akane Kujo by dezea (Akane_Kujo_abc123.png)",
+    ]
+
+
+def test_rebuilding_after_deleting_the_card_writes_it_again(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    payload = {
+        "character": {"name": "Akane Kujo", "id": "abc123"},
+        "character_json": _character("open_akane_kujo"),
+    }
+    path = Path(client.post("/build", json=payload).json()["path"])
+    path.unlink()
+
+    again = client.post("/build", json=payload).json()
+    assert again["duplicate"] is False
+    assert Path(again["path"]).exists()
 
 
 # ---------------------------------------------------------------------------

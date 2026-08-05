@@ -206,7 +206,10 @@ class PngWriter:
         # without collisions. That flat layout is the default because
         # SillyTavern reads its characters folder non-recursively; `nested` adds
         # back the original <creator>/ level. Re-exporting the same card yields
-        # the same path and overwrites, which is intended.
+        # the same path and overwrites -- note this is the low-level write: the
+        # build endpoints skip a card that's already on disk before they ever get
+        # here (see server._assemble_and_write), so reaching this with an
+        # existing file means a caller that means it (import backfill, repair).
         out_dir = out_dir or self._output_dir
         target_dir = out_dir
         if self._layout == "nested":
@@ -272,6 +275,17 @@ class PngWriter:
             if any(p not in ignore for p in out_dir.glob(f"**/*_{fragment}.png")):
                 found.add(card_id)
         return found
+
+    def find_by_id(self, card_id: str | None, out_dir: Path | None = None) -> list[Path]:
+        """On-disk card PNGs carrying this card's `_<id8>` fragment, whatever
+        name they were written (or renamed) under. `existing` answers the same
+        question in bulk as a set of ids; this hands back the actual file, which
+        is what a skipped build needs to report back."""
+        fragment = id_fragment(card_id)
+        if not fragment:
+            return []
+        out_dir = out_dir or self._output_dir
+        return sorted(out_dir.glob(f"**/*_{fragment}.png"))
 
     def find(self, name: str, card_id: str, out_dir: Path | None = None) -> list[Path]:
         """On-disk card PNGs whose filename matches this name *and* id fragment

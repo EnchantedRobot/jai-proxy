@@ -314,7 +314,13 @@
       ExportStatus.show("Building on server…");
       const res = await ServerClient.build({ character: export_ });
       const warnings = res.warnings || [];
-      if (res.ok) {
+      if (res.ok && res.duplicate) {
+        // Already on disk -- the server wrote nothing. Say so rather than "✓
+        // Saved", which would claim an export that didn't happen.
+        log("already saved:", res.path);
+        ExportStatus.show("• Already saved");
+        holdMs = 4000;
+      } else if (res.ok) {
         log("built:", res.path, "warnings:", warnings);
         if (warnings.length) {
           const n = warnings.length;

@@ -12,6 +12,7 @@ dependencies = [
     "tinycss2>=1.4",
     "pillow>=11.0",
     "pydantic-settings>=2.6",
+    "rich>=15.0.0",
 ]
 
 [project.scripts]

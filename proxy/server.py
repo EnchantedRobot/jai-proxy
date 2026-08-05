@@ -1,4 +1,6 @@
+import contextlib
 import logging
+import sys
 from datetime import datetime, timezone
 from typing import Any
 
@@ -7,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from proxy import dashboard as dashboard_mod
 from proxy import janitor_mapper, saucepan_mapper
 from proxy.avatar import AvatarFetcher
 from proxy.capture_store import CaptureStore
@@ -29,8 +32,11 @@ from proxy.models import (
 )
 from proxy.saucepan_mapper import SAUCEPAN_ORIGIN
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("jai_proxy.server")
+
+# Set by main() when the live dashboard is drawing; None means plain logging,
+# and every call site below is a no-op then (see _record_download).
+DASHBOARD: dashboard_mod.Dashboard | None = None
 
 app = FastAPI(title="jai-proxy")
 
@@ -105,6 +111,44 @@ def _first_message_of_role(messages: list[dict[str, Any]], role: str) -> str:
             return content if isinstance(content, str) else str(content)
     return ""
 
+
+def _record_download(
+    *,
+    source: str,
+    name: str,
+    creator: str,
+    ok: bool = True,
+    detail: str = "",
+    duplicate: bool = False,
+    filename: str = "",
+) -> None:
+    """Announce a card build on the dashboard's downloads column, and log the
+    same line so the plain-logging path (no TTY) still says what was written.
+
+    `duplicate` means the card was already on disk, so nothing was written at
+    all -- reported rather than silently dropped, since from the browser the
+    click looks identical to a real export."""
+    if ok:
+        logger.info(
+            "%s %s card: %s by %s%s",
+            "already have" if duplicate else "saved",
+            source,
+            name,
+            creator or "unknown",
+            f" ({filename})" if filename else "",
+        )
+    else:
+        logger.warning("%s card not saved: %s — %s", source, name, detail)
+    if DASHBOARD is not None:
+        DASHBOARD.feed.record(
+            source=source,
+            name=name,
+            creator=creator,
+            ok=ok,
+            detail=detail,
+            duplicate=duplicate,
+            filename=filename,
+        )
 
 
 @app.get("/health")
@@ -192,6 +236,7 @@ async def _assemble_and_write(
     card_id: str | None,
     character_version: str,
     extensions: dict[str, Any],
+    source: str,
     capture: CaptureRecord | None = None,
     warnings: list[str] | None = None,
 ) -> BuildResponse:
@@ -199,7 +244,23 @@ async def _assemble_and_write(
     neutral fields, stamp provenance, fetch the avatar, and write the PNG. Both
     /build (JanitorAI) and /build-saucepan differ only in how they produce the
     inputs (profile, greetings, book, avatar_url, extensions) -- everything from
-    here down is identical."""
+    here down is identical.
+
+    A card whose id is already on disk is left alone: the export stops here,
+    before the avatar fetch, and reports the file it found. Re-acquiring one
+    means deleting it first -- the same rule `make import` and the bulk sweep
+    follow, so a card edited in SillyTavern is never silently replaced."""
+    already = png_writer.find_by_id(card_id)
+    if already:
+        _record_download(
+            source=source,
+            name=profile.name,
+            creator=profile.creator or "",
+            duplicate=True,
+            filename=already[0].name,
+        )
+        return BuildResponse(ok=True, path=str(already[0]), duplicate=True)
+
     card, build_warnings = card_builder.build(
         profile, greetings, capture=capture, book=book, avatar_url=avatar_url
     )
@@ -210,6 +271,9 @@ async def _assemble_and_write(
 
     avatar_bytes = await avatar_fetcher.fetch(avatar_url, avatar_b64)
     path = png_writer.write(card, avatar_bytes, card_id=card_id)
+    _record_download(
+        source=source, name=card.name, creator=card.creator or "", filename=path.name
+    )
 
     fields_present = {
         "description": bool(card.description),
@@ -245,6 +309,13 @@ async def build(req: BuildRequest) -> BuildResponse:
         )
         has_primary = bool(captured)
         if not (has_system and has_primary):
+            _record_download(
+                source="janitor",
+                name=profile.name,
+                creator=profile.creator,
+                ok=False,
+                detail="hidden — no chat capture yet",
+            )
             return BuildResponse(
                 ok=False,
                 warnings=[
@@ -299,6 +370,7 @@ async def build(req: BuildRequest) -> BuildResponse:
         card_id=card_id,
         character_version=req.character.url or "jai-proxy",
         extensions=extensions,
+        source="janitor",
         capture=capture,
         warnings=lore_warnings,
     )
@@ -386,12 +458,48 @@ async def build_saucepan(req: SaucepanBuildRequest) -> BuildResponse:
         card_id=card_id or None,
         character_version=source_url or "jai-proxy",
         extensions=extensions,
+        source="saucepan",
         warnings=warnings,
     )
 
 
+def _stats_line() -> str:
+    return (
+        f"{capture_store.count} captures · "
+        f"{lorebook_cache.count} lorebooks cached · "
+        f"model {settings.mlx_model}"
+    )
+
+
+def _serve() -> None:
+    # log_config=None keeps uvicorn from installing its own stdout handlers, so
+    # its records propagate to the root logger we configured instead.
+    uvicorn.run(app, host=settings.host, port=settings.port, log_config=None)
+
+
 def main() -> None:
-    uvicorn.run(app, host=settings.host, port=settings.port)
+    global DASHBOARD
+
+    if not (settings.dashboard and sys.stdout.isatty()):
+        logging.basicConfig(level=logging.INFO)
+        _serve()
+        return
+
+    DASHBOARD = dashboard_mod.Dashboard(
+        title="jai-proxy",
+        address=f"http://{settings.host}:{settings.port}",
+        stats=_stats_line,
+    )
+    dashboard_mod.install_logging(DASHBOARD)
+    sink = dashboard_mod.StdoutSink(DASHBOARD.log)
+    try:
+        with dashboard_mod.live(DASHBOARD), contextlib.redirect_stdout(sink):
+            _serve()
+    except KeyboardInterrupt:  # pragma: no cover -- Ctrl-C is a clean exit
+        pass
+    finally:
+        dashboard_mod.replay_problems(DASHBOARD, sys.stderr)
+        DASHBOARD = None
 
 
 if __name__ == "__main__":

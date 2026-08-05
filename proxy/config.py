@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     # every later time. Purely a cache -- wipe/refresh via POST /clear-lorebooks.
     lorebook_cache_dir: Path = Path("./state/lorecache")
 
+    # Draw the live terminal dashboard (proxy/dashboard.py) instead of a plain
+    # scrolling log. Ignored -- and the plain log used -- when stdout is not a
+    # TTY, so piping the server or running it under a supervisor still yields
+    # ordinary line-by-line output.
+    dashboard: bool = True
+
     request_timeout: float = 120.0
     allowed_origins: list[str] = ["*"]
     user_names: list[str] = ["USER"]

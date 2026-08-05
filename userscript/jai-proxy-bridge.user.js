@@ -769,7 +769,13 @@
       // API JSON (chat_name) and saves the card under it.
       const { result } = await buildCardById(id, { url: location.href });
       const warnings = result.warnings || [];
-      if (result.ok) {
+      if (result.ok && result.duplicate) {
+        // Already on disk -- the server wrote nothing. Say so rather than "✓
+        // Saved", which would claim an export that didn't happen.
+        log("already saved:", result.path);
+        ExportStatus.show("• Already saved");
+        holdMs = 4000;
+      } else if (result.ok) {
         log("exported card ->", result.path, warnings);
         if (warnings.length) {
           const n = warnings.length;
@@ -1022,7 +1028,7 @@
             pending.push(r);
           }
         }
-        const already = rows.length - pending.length;
+        let already = rows.length - pending.length;
         if (!pending.length) {
           this._setStatus(`all ${rows.length} card(s) already saved — nothing to do`);
           return;
@@ -1062,7 +1068,12 @@
               this._setRow(r.id, "⏳", "exporting…");
               const { result } = await buildCardById(r.id, { character });
               const warnings = (result && result.warnings) || [];
-              if (result && result.ok) {
+              if (result && result.ok && result.duplicate) {
+                // The pre-check above normally catches these; this covers the
+                // case where it failed soft (or a card landed on disk since).
+                already += 1;
+                this._setRow(r.id, "•", "already saved — skipped");
+              } else if (result && result.ok) {
                 done += 1;
                 built = true;
                 this._setRow(

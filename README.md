@@ -35,6 +35,16 @@ uv run python -m proxy.server        # serves http://127.0.0.1:8000
 MLX must already be running separately with an OpenAI-compatible endpoint at
 `http://127.0.0.1:8011/v1` and a model loaded (default `Llama-3.2-3B-Instruct-4bit`).
 
+In a terminal the server draws a live dashboard (`proxy/dashboard.py`): a header
+band with the address, the server log on the left, and every character exported
+this run -- source, name, creator -- on the right. A card that was **already in
+the cards folder** (see [Re-exporting](#re-exporting)) is drawn in yellow and
+marked `dup`, and counted apart in the panel title (`downloads · 3 new · 1 dup`),
+so a wasted click is obvious at a glance. Piping the output, or setting
+`JAI_PROXY_DASHBOARD=false`, falls back to plain line-by-line logging -- which
+reports the same thing, naming the file either way (`saved janitor card: Emma by
+Theodrax (Emma_123456.png)` / `already have janitor card: …`).
+
 ### Configuration (`.env`)
 
 Defaults live in `proxy/config.py`; override them per-machine in a git-ignored
@@ -134,6 +144,20 @@ If you click Export to card on a hidden card before it's been captured, the buil
 writes a broken card. Everything else a hidden card needs (name, tags, creator
 notes, alternate greetings, avatar, lorebooks) still comes from the JSON.
 
+### Re-exporting
+
+A card whose id is already in the cards folder is **never rewritten**. Every
+build path stops on it: the export button reports `• Already saved`, the bulk
+sweep marks the row `• already saved — skipped`, and `make import` skips it too.
+The match is the `_<id8>` filename fragment, so it holds however the file was
+renamed since (as long as the fragment survives — SillyTavern's **Rename** drops
+it, and such a card is acquirable again).
+
+That makes the archive, and any edit you made to a card inside SillyTavern, safe
+from an accidental second click. To genuinely re-acquire a character — a creator
+updated the definition, or you first saved it before capturing its hidden
+definition or lorebooks — **delete the card file and export it again**.
+
 ### Clearing the cache
 
 Hidden cards are matched by character name against accumulated captures, so name
@@ -144,7 +168,9 @@ are not affected.
 
 ### Reading the result
 
-The status line above the button reports the outcome: `✓ Saved`, or
+The status line above the button reports the outcome: `✓ Saved`,
+`• Already saved` if you had the card already (nothing was written — see
+[Re-exporting](#re-exporting)), or
 `⚠️ Saved — N warning(s)` if something was degraded (e.g. an unresolved macro or
 a missing field — hover the button for the full list), or `⚠️ <message>` if the
 build request itself failed (the hidden-card gate reports its reason here;
