@@ -152,3 +152,22 @@ def test_empty_notes():
 def test_tame_is_idempotent(card):
     once = tame_html(card)
     assert tame_html(once) == once
+
+
+# ---------------------------------------------------------------------------
+# background images (as distinct from background palette)
+# ---------------------------------------------------------------------------
+
+
+def test_background_image_survives_as_content():
+    """`ravel` lays its header art in via `background: <gradient>, url(...)` on
+    a wrapping div rather than an <img> tag. The gradient is a dark tint --
+    palette, correctly dropped -- but the photo behind it is the actual
+    content and must not disappear along with it."""
+    ravel = load("ravel")
+    assert "files.kammii.org/8215126991339kt4/LdUsxxJAS3cBI0DU8Y.webp" in ravel
+    tamed = tame_html(ravel)
+    assert "files.kammii.org/8215126991339kt4/LdUsxxJAS3cBI0DU8Y.webp" in tamed
+    assert "background-image:url(" in tamed
+    assert "linear-gradient" not in tamed  # the tint itself is still palette
+    assert clean_creator_notes(ravel) == tamed

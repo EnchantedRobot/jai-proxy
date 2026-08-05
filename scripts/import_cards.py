@@ -51,6 +51,17 @@ only reaches cards written before the writer started stamping ids (or scanned by
 scripts/backfill_gallery_ids.py). To adopt a legacy export's id over one of ours,
 delete the on-disk card and re-run.
 
+A second pass then sweeps the *cards folder itself* for orphans: cards that were
+dropped in by hand (a fresh export saved straight into SillyTavern) and so never
+went through any of the above -- raw HTML creator_notes, unsanitized macros, an
+uncompressed avatar, no `_<id8>` in the filename. They're identified by the
+missing `extensions.jai` stamp every card we write carries, run through the very
+same import as if they'd been staged in ./import, and the original is then
+retired to `--orphan-dir` (or deleted with `--delete-orphans`) so the archive
+doesn't show the character twice. An orphan we can't classify is left strictly
+alone -- it may be a hand-made or SillyTavern-native card that was never ours.
+Disable the pass with `--no-orphans`.
+
 Offline batch -- it does not need the proxy server running.
 
     make import
@@ -60,6 +71,7 @@ Offline batch -- it does not need the proxy server running.
 from __future__ import annotations
 
 import argparse
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -232,6 +244,80 @@ def _adopt_on_disk_gallery_id(data: dict, card_id: str, cards_dir: Path) -> Any 
     return None
 
 
+def _classify(data: dict) -> tuple[str, str] | None:
+    """(source, card id) for a recognised export, or None if the embedded card
+    isn't one we know how to re-home."""
+    if chub_mapper.is_chub(data):
+        return "chub", chub_mapper.card_id(data)
+    if datacat_mapper.is_datacat(data):
+        return "datacat", datacat_mapper.card_id(data)
+    if jannyai_mapper.is_jannyai(data):
+        return "jannyai", jannyai_mapper.card_id(data)
+    return None
+
+
+def _is_processed(data: dict) -> bool:
+    """Whether this card came out of our pipeline. Every card we write -- native
+    retrieval or import, from any source -- carries an `extensions.jai`
+    provenance stamp, and nothing else does."""
+    return isinstance((data.get("extensions") or {}).get("jai"), dict)
+
+
+def _scan_orphans(cards_dir: Path, skip: Path | None = None) -> tuple[list[Path], list[Path]]:
+    """Split the cards folder into (unprocessed, misfiled).
+
+    *Unprocessed* is a card the pipeline never touched -- a fresh export saved
+    straight into SillyTavern's characters folder by hand. It shows up raw: HTML
+    creator_notes, unsanitized macros, an uncompressed avatar, no `_<id8>` in
+    its filename. The missing `extensions.jai` stamp is what identifies it, not
+    the filename: SillyTavern's own Rename drops the id fragment from a
+    perfectly good card, so keying on the name would drag those back through the
+    pipeline and rename them out from under the user.
+
+    *Misfiled* is the inverse -- stamped by us but no longer filed as
+    `<name>_<id8>.png` (that Rename, or a hand edit). Reported so the drift is
+    visible, never touched: the card itself is fine.
+    """
+    unprocessed: list[Path] = []
+    misfiled: list[Path] = []
+    # Retired originals must not be rediscovered as orphans on the next run,
+    # which they would be if --orphan-dir points inside the cards folder.
+    skip_at = skip.resolve() if skip is not None else None
+    for path in sorted(cards_dir.glob("**/*.png")):
+        if skip_at is not None and skip_at in path.resolve().parents:
+            continue
+        try:
+            data = pngtools.extract_embedded_card(path.read_bytes())
+        except OSError:
+            continue
+        if data is None:
+            continue  # a plain PNG in the folder is none of our business
+        if not _is_processed(data):
+            unprocessed.append(path)
+            continue
+        fragment = id_fragment((data["extensions"]["jai"] or {}).get("id") or "")
+        if fragment and not path.stem.endswith(f"_{fragment}"):
+            misfiled.append(path)
+    return unprocessed, misfiled
+
+
+def _retire(path: Path, orphan_dir: Path | None) -> Path | None:
+    """Take an orphan out of the cards folder now that its processed twin is on
+    disk, so the archive doesn't show the character twice. Moved into
+    `orphan_dir` (reversible -- and invisible to SillyTavern, which doesn't
+    recurse) unless that's None, which means delete. Returns the new location."""
+    if orphan_dir is None:
+        path.unlink(missing_ok=True)
+        return None
+    orphan_dir.mkdir(parents=True, exist_ok=True)
+    target = orphan_dir / path.name
+    counter = 1
+    while target.exists():
+        target = orphan_dir / f"{path.stem}.{counter}{path.suffix}"
+        counter += 1
+    return Path(shutil.move(str(path), target))
+
+
 def _stale_siblings(card_id: str, written: Path, cards_dir: Path) -> list[Path]:
     """Cards carrying this id fragment at some *other* path -- what an
     --overwrite re-import leaves behind when the character has been renamed
@@ -263,6 +349,26 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--no-orphans",
+        action="store_true",
+        help=(
+            "skip the orphan pass over the cards folder (on by default): cards "
+            "carrying no extensions.jai stamp are re-imported in place and the "
+            "originals retired to --orphan-dir"
+        ),
+    )
+    parser.add_argument(
+        "--orphan-dir",
+        type=Path,
+        default=Path("state/orphans"),
+        help="where retired orphan originals are moved (default: state/orphans)",
+    )
+    parser.add_argument(
+        "--delete-orphans",
+        action="store_true",
+        help="delete orphan originals once reprocessed instead of moving them to --orphan-dir",
+    )
+    parser.add_argument(
         "--fetch-datacat-images",
         action="store_true",
         help=(
@@ -282,34 +388,50 @@ def main() -> int:
     sanitizer = MacroSanitizer(user_names=settings.user_names)
     image_resolver = DatacatImageResolver() if args.fetch_datacat_images else None
 
+    orphan_dir = None if args.delete_orphans else args.orphan_dir
+
     # First pass: read + parse + classify every PNG (keeping the bytes for reuse
     # as the avatar), so a single existing() scan can pre-compute which ids are
     # already on disk before we write anything.
     pngs = sorted(p for p in args.import_dir.glob("*.png"))
+    orphans: list[Path] = []
+    misfiled: list[Path] = []
+    if not args.no_orphans:
+        orphans, misfiled = _scan_orphans(args.cards_dir, skip=orphan_dir)
+        orphans = [p for p in orphans if p not in set(pngs)]  # if import_dir sits inside cards_dir
+    orphan_paths = set(orphans)
+
     records: list[tuple[Path, bytes, str, dict, str]] = []
     skipped_unparsable = 0
-    for path in pngs:
+    for path in pngs + orphans:
         raw = path.read_bytes()
         data = pngtools.extract_embedded_card(raw)
         if data is None:
             print(f"  skip  {path.name}: no embedded character card")
             skipped_unparsable += 1
             continue
-        if chub_mapper.is_chub(data):
-            records.append((path, raw, "chub", data, chub_mapper.card_id(data)))
-        elif datacat_mapper.is_datacat(data):
-            records.append((path, raw, "datacat", data, datacat_mapper.card_id(data)))
-        elif jannyai_mapper.is_jannyai(data):
-            records.append((path, raw, "jannyai", data, jannyai_mapper.card_id(data)))
-        else:
-            print(f"  skip  {path.name}: unrecognized card (not datacat, JannyAI or Chub)")
+        classified = _classify(data)
+        if classified is None:
+            # An orphan we can't classify stays exactly where it is -- it may be
+            # a hand-made or SillyTavern-native card that was never ours.
+            where = " (in cards folder)" if path in orphan_paths else ""
+            print(f"  skip  {path.name}: unrecognized card (not datacat, JannyAI or Chub){where}")
             skipped_unparsable += 1
+            continue
+        source, cid = classified
+        records.append((path, raw, source, data, cid))
 
-    already = writer.existing([cid for *_, cid in records if cid])
+    for path in misfiled:
+        print(f"  note  {path.name}: filename no longer matches its card id (left as is)")
 
-    written = skipped_existing = errored = backfilled = pruned = 0
+    # Orphans are read out of the cards folder itself, so they must not count as
+    # their own "already on disk" match.
+    already = writer.existing([cid for *_, cid in records if cid], ignore=orphan_paths)
+
+    written = skipped_existing = errored = backfilled = pruned = retired = 0
     seen_ids: set[str] = set()
     for path, raw, source, data, cid in records:
+        orphan = path in orphan_paths
         if cid and cid in seen_ids:
             print(f"  skip  {path.name}: duplicate in this batch (id {cid})")
             skipped_existing += 1
@@ -320,6 +442,7 @@ def main() -> int:
             # that one field into the matching card(s), everything else untouched.
             gid = gallery.read_id(data)
             targets = writer.find(_source_name(source, data), cid, args.cards_dir) if gid else []
+            targets = [t for t in targets if t != path]
             added = 0
             for target in targets:
                 if _backfill_gallery_id(target, gid) == "added":
@@ -334,6 +457,13 @@ def main() -> int:
                 detail = "gallery_id already set" if gid and targets else "already in the cards folder"
                 print(f"  skip  {path.name}: {detail} (id {cid})")
             skipped_existing += 1
+            if orphan:
+                # A second copy of a card the archive already holds properly --
+                # retire it so it stops shadowing the real one (and stops being
+                # rediscovered as an orphan on every run).
+                moved = _retire(path, orphan_dir)
+                print(f"  retire {path.name} -> {moved if moved else 'deleted'} (duplicate)")
+                retired += 1
             continue
         if args.overwrite and cid and cid in already:
             _adopt_on_disk_gallery_id(data, cid, args.cards_dir)
@@ -351,8 +481,15 @@ def main() -> int:
         if cid:
             seen_ids.add(cid)
         suffix = f"  ({'; '.join(warnings)})" if warnings else ""
-        print(f"  write {path.name} [{source}] -> {out.relative_to(args.cards_dir)}{suffix}")
+        origin = f"orphan/{source}" if orphan else source
+        print(f"  write {path.name} [{origin}] -> {out.relative_to(args.cards_dir)}{suffix}")
         written += 1
+        # Retire before the stale-sibling prune below, so an orphan that already
+        # carried the right id fragment isn't unlinked out from under the move.
+        if orphan and out != path:
+            moved = _retire(path, orphan_dir)
+            print(f"  retire {path.name} -> {moved if moved else 'deleted'}")
+            retired += 1
         if args.overwrite and cid:
             for stale in _stale_siblings(cid, out, args.cards_dir):
                 stale.unlink()
@@ -362,11 +499,15 @@ def main() -> int:
     if image_resolver:
         image_resolver.close()
 
+    scanned = f"of {len(pngs)} PNGs in {args.import_dir}"
+    if orphans:
+        scanned += f" + {len(orphans)} orphans in {args.cards_dir}"
     print(
         f"\nimported {written}, skipped {skipped_existing} existing "
         f"({backfilled} gallery_id backfilled), {skipped_unparsable} unrecognized, "
-        f"{errored} errored (of {len(pngs)} PNGs in {args.import_dir})"
+        f"{errored} errored ({scanned})"
         + (f", pruned {pruned} renamed" if pruned else "")
+        + (f", retired {retired} orphan originals" if retired else "")
     )
     return 0
 

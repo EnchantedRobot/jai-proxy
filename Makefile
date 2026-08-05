@@ -22,8 +22,10 @@ run:
 
 # Bulk-import card PNGs from ./import into the cards folder -- datacat, JannyAI
 # and Chub.ai exports are auto-detected (see scripts/import_cards.py). Cards
-# already on disk are skipped, never overwritten. Extra flags pass through via
-# ARGS, e.g. `make import ARGS=--no-compress`.
+# already on disk are skipped, never overwritten. The same run also sweeps the
+# cards folder for orphans (cards dropped in by hand, with no extensions.jai
+# stamp), imports them in place and retires the originals to state/orphans.
+# Extra flags pass through via ARGS, e.g. `make import ARGS=--no-compress`.
 import:
 	uv run python scripts/import_cards.py $(ARGS) --fetch-datacat-images
 

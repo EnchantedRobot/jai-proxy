@@ -1,11 +1,19 @@
-"""Import-pipeline behaviour that isn't a mapper concern: the gallery_id
-backfill. A legacy export (datacat/Chub) is never allowed to overwrite an
-already-on-disk card, but if it carries an `extensions.gallery_id` the on-disk
-card lacks, that one field is patched into the existing card in place -- pixels
-and every other field untouched -- instead of the import simply being dropped.
+"""Import-pipeline behaviour that isn't a mapper concern.
+
+Two things:
+
+  * the gallery_id backfill -- a legacy export (datacat/Chub) is never allowed
+    to overwrite an already-on-disk card, but if it carries an
+    `extensions.gallery_id` the on-disk card lacks, that one field is patched
+    into the existing card in place (pixels and every other field untouched)
+    instead of the import simply being dropped.
+  * the orphan pass -- the sweep of the cards folder itself for cards that were
+    dropped in by hand and so never went through the pipeline, plus everything
+    it must *not* disturb while scanning the whole archive.
 
 Exercised end to end through `main()` (a real import dir + cards dir) plus unit
-coverage of the pieces (_gallery_id, PngWriter.find, _backfill_gallery_id).
+coverage of the pieces (_gallery_id, PngWriter.find, _backfill_gallery_id,
+_scan_orphans).
 """
 
 import base64
@@ -99,7 +107,14 @@ def _write_existing(cards_dir: Path, *, name: str, creator: str, cid: str, data:
     The writer stamps a gallery_id on everything it writes, so when `data` itself
     carries none the stamped id is peeled back off: a card with no gallery_id is
     now by definition a *legacy* one (written before ids existed), and those are
-    the only cards an import can still backfill into."""
+    the only cards an import can still backfill into.
+
+    An `extensions.jai` provenance block is stamped in for the same reason it's
+    on every real on-disk card: it's what marks a card as already processed (see
+    importer._is_processed), and without it the orphan pass would read the
+    fixture as a raw hand-dropped export and re-import it."""
+    data = json.loads(json.dumps(data))  # never mutate the caller's dict
+    data.setdefault("extensions", {}).setdefault("jai", {"sourceKind": "test", "id": cid})
     writer = PngWriter(output_dir=cards_dir, compress=False)
     source_had_id = gallery.read_id(data) is not None  # the write stamps one in place
     path = writer.write_payload(
@@ -122,6 +137,8 @@ def _pixel_chunks(png: bytes):
 
 
 def _run_import(import_dir: Path, cards_dir: Path, monkeypatch, *extra: str) -> int:
+    # --orphan-dir is always pinned under the test's tmp dir: it defaults to a
+    # CWD-relative state/orphans, which a test must never write into.
     monkeypatch.setattr(
         sys,
         "argv",
@@ -131,6 +148,8 @@ def _run_import(import_dir: Path, cards_dir: Path, monkeypatch, *extra: str) -> 
             str(import_dir),
             "--cards-dir",
             str(cards_dir),
+            "--orphan-dir",
+            str(cards_dir.parent / "orphans"),
             "--no-compress",
             *extra,
         ],
@@ -517,3 +536,195 @@ def test_overwrite_leaves_unrelated_cards_alone(tmp_path, monkeypatch):
 
     assert _run_import(imports, cards, monkeypatch, "--overwrite") == 0
     assert neighbour.exists()
+
+
+# ---------------------------------------------------------------------------
+# The orphan pass -- cards dropped into the cards folder by hand
+# ---------------------------------------------------------------------------
+#
+# SillyTavern's characters folder *is* the archive, so a card can arrive in it
+# without ever passing through this pipeline: downloaded and saved straight
+# there. Such a card is raw (HTML notes, unsanitized macros, no `_<id8>` in the
+# filename) and is spotted by the one thing every card we write carries and
+# nothing else does -- an `extensions.jai` stamp.
+
+
+def _drop_orphan(cards_dir: Path, filename: str, data: dict) -> Path:
+    """A hand-saved export sitting in the cards folder: a real embedded card,
+    but no extensions.jai stamp and whatever name the download gave it."""
+    cards_dir.mkdir(parents=True, exist_ok=True)
+    path = cards_dir / filename
+    path.write_bytes(_import_png(data))
+    return path
+
+
+def _empty_import_dir(tmp_path: Path) -> Path:
+    imports = tmp_path / "import"
+    imports.mkdir()
+    return imports
+
+
+def test_scan_orphans_splits_unprocessed_from_misfiled(tmp_path):
+    cards = tmp_path / "cards"
+    orphan = _drop_orphan(cards, "Abigail.png", _datacat_data())
+    processed = _write_existing(
+        cards, name="Tsuko", creator="SteakedGamer", cid="4937471", data=_chub_data()
+    )
+    renamed = processed.rename(cards / "Tsuko the Second.png")
+
+    unprocessed, misfiled = importer._scan_orphans(cards)
+
+    assert unprocessed == [orphan]  # only the unstamped card is re-importable
+    assert misfiled == [renamed]  # stamped but no longer filed under its id
+
+
+def test_scan_orphans_ignores_plain_pngs(tmp_path):
+    cards = tmp_path / "cards"
+    cards.mkdir()
+    (cards / "not-a-card.png").write_bytes(_png_bytes())
+    assert importer._scan_orphans(cards) == ([], [])
+
+
+def test_orphan_is_imported_in_place_and_the_original_retired(tmp_path, monkeypatch):
+    cards = tmp_path / "cards"
+    orphan = _drop_orphan(cards, "Abigail.png", _datacat_data())
+
+    assert _run_import(_empty_import_dir(tmp_path), cards, monkeypatch) == 0
+
+    # Refiled under `<name>_<id8>.png` and fully processed...
+    assert sorted(cards.glob("**/*.png")) == [cards / "Abigail_f901406d.png"]
+    data = _read_data(cards / "Abigail_f901406d.png")
+    assert data["extensions"]["jai"]["sourceKind"] == "datacat_import"
+    assert "<p>" not in data["creator_notes"]  # notes de-HTML'd on the way in
+    # ...and the original moved aside rather than left to shadow it.
+    assert not orphan.exists()
+    assert (tmp_path / "orphans" / "Abigail.png").exists()
+
+
+def test_orphan_can_be_deleted_instead_of_moved(tmp_path, monkeypatch):
+    cards = tmp_path / "cards"
+    orphan = _drop_orphan(cards, "Abigail.png", _datacat_data())
+
+    assert _run_import(_empty_import_dir(tmp_path), cards, monkeypatch, "--delete-orphans") == 0
+
+    assert not orphan.exists()
+    assert not (tmp_path / "orphans").exists()
+    assert sorted(cards.glob("**/*.png")) == [cards / "Abigail_f901406d.png"]
+
+
+def test_orphan_pass_leaves_processed_cards_untouched(tmp_path, monkeypatch):
+    """The whole archive is scanned every run -- a card we already wrote must
+    come out byte-identical, not silently re-compressed or renamed."""
+    cards = tmp_path / "cards"
+    existing = _write_existing(
+        cards, name="Tsuko", creator="SteakedGamer", cid="4937471", data=_chub_data()
+    )
+    before = existing.read_bytes()
+
+    assert _run_import(_empty_import_dir(tmp_path), cards, monkeypatch) == 0
+
+    assert existing.read_bytes() == before
+
+
+def test_misfiled_card_is_reported_but_never_touched(tmp_path, monkeypatch):
+    """SillyTavern's own Rename drops the id fragment. That card is still fully
+    processed, so the pass must not drag it back through and rename it."""
+    cards = tmp_path / "cards"
+    processed = _write_existing(
+        cards, name="Tsuko", creator="SteakedGamer", cid="4937471", data=_chub_data()
+    )
+    renamed = processed.rename(cards / "My Favourite Tsuko.png")
+    before = renamed.read_bytes()
+
+    assert _run_import(_empty_import_dir(tmp_path), cards, monkeypatch) == 0
+
+    assert sorted(cards.glob("**/*.png")) == [renamed]
+    assert renamed.read_bytes() == before
+
+
+def test_orphan_already_holding_the_archive_slot_is_reprocessed_not_skipped(tmp_path, monkeypatch):
+    """An orphan whose filename already carries the right id fragment is the
+    *only* card at that path -- it must not match itself in the already-on-disk
+    check and get skipped forever, and having overwritten itself there's nothing
+    left to retire."""
+    cards = tmp_path / "cards"
+    orphan = _drop_orphan(cards, "Abigail_f901406d.png", _datacat_data())
+
+    assert _run_import(_empty_import_dir(tmp_path), cards, monkeypatch) == 0
+
+    assert sorted(cards.glob("**/*.png")) == [orphan]
+    assert _read_data(orphan)["extensions"]["jai"]["sourceKind"] == "datacat_import"
+    assert not (tmp_path / "orphans").exists()  # nothing to move aside
+
+
+def test_orphan_duplicating_an_archived_card_is_retired_not_imported(tmp_path, monkeypatch):
+    """A second download of a character the archive already holds properly:
+    the good card wins untouched, the stray copy is moved aside."""
+    cards = tmp_path / "cards"
+    cid = _datacat_data()["extensions"]["datacat"]["id"]
+    existing = _write_existing(
+        cards, name="Abigail", creator="toraval", cid=cid, data=_datacat_data()
+    )
+    before = existing.read_bytes()
+    orphan = _drop_orphan(cards, "Abigail (1).png", _datacat_data())
+
+    assert _run_import(_empty_import_dir(tmp_path), cards, monkeypatch) == 0
+
+    assert sorted(cards.glob("**/*.png")) == [existing]
+    assert existing.read_bytes() == before
+    assert not orphan.exists()
+    assert (tmp_path / "orphans" / "Abigail (1).png").exists()
+
+
+def test_unrecognized_orphan_is_left_alone(tmp_path, monkeypatch):
+    """A hand-made or SillyTavern-native card we can't classify was never ours
+    to re-home -- it stays exactly where it is."""
+    cards = tmp_path / "cards"
+    homemade = _drop_orphan(cards, "Homemade.png", {"name": "Homemade", "description": "mine"})
+    before = homemade.read_bytes()
+
+    assert _run_import(_empty_import_dir(tmp_path), cards, monkeypatch) == 0
+
+    assert sorted(cards.glob("**/*.png")) == [homemade]
+    assert homemade.read_bytes() == before
+
+
+def test_no_orphans_flag_skips_the_pass(tmp_path, monkeypatch):
+    cards = tmp_path / "cards"
+    orphan = _drop_orphan(cards, "Abigail.png", _datacat_data())
+    before = orphan.read_bytes()
+
+    assert _run_import(_empty_import_dir(tmp_path), cards, monkeypatch, "--no-orphans") == 0
+
+    assert sorted(cards.glob("**/*.png")) == [orphan]
+    assert orphan.read_bytes() == before
+
+
+def test_orphan_dir_inside_the_cards_folder_is_not_rescanned(tmp_path, monkeypatch):
+    """Retiring into the cards folder is legal (SillyTavern doesn't recurse), so
+    the scan has to exclude it -- otherwise every retired original comes straight
+    back as an orphan on the next run."""
+    cards = tmp_path / "cards"
+    _drop_orphan(cards, "Abigail.png", _datacat_data())
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "import_cards.py",
+            "--import-dir",
+            str(_empty_import_dir(tmp_path)),
+            "--cards-dir",
+            str(cards),
+            "--orphan-dir",
+            str(cards / "processed"),
+            "--no-compress",
+        ],
+    )
+
+    assert importer.main() == 0
+    assert (cards / "processed" / "Abigail.png").exists()
+
+    # Second run: the retired original is invisible, so nothing changes.
+    assert importer.main() == 0
+    assert sorted(p.name for p in (cards / "processed").glob("*.png")) == ["Abigail.png"]
+    assert sorted(cards.glob("*.png")) == [cards / "Abigail_f901406d.png"]

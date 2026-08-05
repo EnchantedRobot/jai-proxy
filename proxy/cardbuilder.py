@@ -5,7 +5,7 @@ import io
 import json
 import re
 import shutil
-from collections.abc import Iterable
+from collections.abc import Container, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -244,7 +244,12 @@ class PngWriter:
         path.write_bytes(image_bytes)
         return path
 
-    def existing(self, card_ids: Iterable[str], out_dir: Path | None = None) -> set[str]:
+    def existing(
+        self,
+        card_ids: Iterable[str],
+        out_dir: Path | None = None,
+        ignore: Container[Path] = (),
+    ) -> set[str]:
         """The subset of card_ids whose card PNG is already on disk.
 
         Matches on the id fragment -- the `_<id8>` disambiguator every card
@@ -252,14 +257,19 @@ class PngWriter:
         before the real character name is (the name comes from a per-card
         fetch, the id doesn't). So a bulk export can drop cards already saved
         without fetching them. Ids with no usable fragment never match (we
-        can't key on a name we don't have here), so they're re-exported."""
+        can't key on a name we don't have here), so they're re-exported.
+
+        `ignore` excludes paths from counting as a match -- for the orphan pass
+        in scripts/import_cards.py, whose inputs *live in* out_dir: an orphan
+        that already happens to be named `<name>_<id8>.png` would otherwise
+        match itself and be skipped as "already imported" forever."""
         out_dir = out_dir or self._output_dir
         found: set[str] = set()
         for card_id in card_ids:
             fragment = id_fragment(card_id)
             if not fragment:
                 continue
-            if next(out_dir.glob(f"**/*_{fragment}.png"), None) is not None:
+            if any(p not in ignore for p in out_dir.glob(f"**/*_{fragment}.png")):
                 found.add(card_id)
         return found
 

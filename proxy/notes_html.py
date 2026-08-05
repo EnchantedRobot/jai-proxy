@@ -97,6 +97,8 @@ _UNINLINABLE = re.compile(
 )
 
 _URL_RE = re.compile(r"url\(", re.IGNORECASE)
+_BG_URL_RE = re.compile(r"url\(\s*(['\"]?)([^'\")]+)\1\s*\)", re.IGNORECASE)
+_BG_AUX_PROPS = ("background-size", "background-position", "background-repeat", "background-attachment")
 _WORD_RE = re.compile(r"\w")
 _LAYOUT_HINT_RE = re.compile(r"display\s*:\s*(grid|flex)|grid-template", re.IGNORECASE)
 
@@ -224,6 +226,20 @@ def _parse_decls(style: str) -> list[tuple[str, str]]:
     return out
 
 
+def _background_image_url(decls: list[tuple[str, str]]) -> str | None:
+    """The literal image behind a `background`/`background-image` declaration,
+    if any. A gradient or flat colour is palette and gets dropped, but Chub
+    blurbs also use this shorthand to lay in an actual character image (see
+    the "FULL WIDTH WRAPPER WITH BACKGROUND IMAGE" pattern) -- that is content,
+    not decoration, and must survive alongside the panel border."""
+    url = None
+    for name, value in decls:
+        if name in ("background", "background-image"):
+            if m := _BG_URL_RE.search(value):
+                url = m.group(2)
+    return url
+
+
 def _panel_style(decls: list[tuple[str, str]]) -> str:
     """The theme-neutral stand-in for whatever made this element a distinct
     block, or "" when nothing did."""
@@ -254,6 +270,12 @@ def _filter_style(style: str, *, allow_media: bool) -> tuple[str, bool]:
 
     if panel := _panel_style(decls):
         kept.append(panel)
+
+    if allow_media and (bg_url := _background_image_url(decls)):
+        kept.append(f"background-image:url({bg_url})")
+        for name, value in decls:
+            if name in _BG_AUX_PROPS:
+                kept.append(f"{name}:{value}")
 
     for name, value in decls:
         if name == "position":
@@ -286,6 +308,8 @@ def _is_decorative(tag: Tag, *, out_of_flow: bool = False) -> bool:
     if tag.name in ("img", "br", "hr"):
         return False
     if tag.find("img") is not None:
+        return False
+    if _background_image_url(_parse_decls(tag.get("style") or "")):
         return False
     text = tag.get_text(strip=True)
     return not _WORD_RE.search(text) if out_of_flow else not text
