@@ -161,16 +161,6 @@ async function initModuleSystem() {
     }
 
     try {
-        loadModuleCSS('./lorebook-manager.css');
-        const lorebookModule = await import('./lorebook-manager.js');
-        ModuleLoader.register('lorebook-manager', lorebookModule.default);
-
-        window.openLorebookManager = lorebookModule.openModal;
-    } catch (err) {
-        console.warn('[ModuleLoader] Could not load lorebook-manager module:', err);
-    }
-
-    try {
         loadModuleCSS('./media-download-queue.css');
         const mediaQueueModule = await import('./media-download-queue.js');
         ModuleLoader.register('media-download-queue', mediaQueueModule.default);

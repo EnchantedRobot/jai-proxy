@@ -6898,88 +6898,25 @@ async function migrateCharacterImagesToUniqueFolder(char) {
 }
 
 /**
- * Handle gallery folder rename when a character's name changes
- * Moves all files from OldName_UUID folder to NewName_UUID folder
- * @param {object} char - Character object
- * @param {string} oldName - The old character name
- * @param {string} newName - The new character name  
- * @param {string} galleryId - The character's gallery_id (UUID)
+ * Kept as a no-op so a name change has an obvious place to hook if a gallery
+ * ever does need moving. It does not need moving here -- see the body.
  * @returns {Promise<{success: boolean, moved: number, errors: number}>}
  */
 async function handleGalleryFolderRename(char, oldName, newName, galleryId) {
-    const result = { success: false, moved: 0, errors: 0 };
-    
-    // Build old and new folder names
-    const safeOldName = oldName.replace(/[<>:"/\\|?*]/g, '_').trim();
-    const safeNewName = newName.replace(/[<>:"/\\|?*]/g, '_').trim();
-    const oldFolderName = `${safeOldName}_${galleryId}`;
-    const newFolderName = `${safeNewName}_${galleryId}`;
-    
-    if (oldFolderName === newFolderName) {
-        result.success = true;
-        return result;
-    }
-    
-    debugLog(`[GalleryRename] Renaming folder: "${oldFolderName}" -> "${newFolderName}"`);
-    
-    try {
-        const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: oldFolderName, type: 7 });
-        
-        if (!response.ok) {
-            debugLog(`[GalleryRename] Old folder "${oldFolderName}" doesn't exist or is empty`);
-            result.success = true;
-            return result;
-        }
-
-        const files = await response.json();
-
-        if (!files || files.length === 0) {
-            debugLog(`[GalleryRename] Old folder "${oldFolderName}" is empty`);
-            result.success = true;
-            return result;
-        }
-
-        const mediaExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v'];
-        const mediaFiles = files.filter(f => {
-            const fileName = typeof f === 'string' ? f : f.name;
-            if (!fileName) return false;
-            const ext = fileName.toLowerCase().substring(fileName.lastIndexOf('.'));
-            return mediaExtensions.includes(ext);
-        });
-
-        if (mediaFiles.length === 0) {
-            debugLog(`[GalleryRename] No media files to move`);
-            result.success = true;
-            return result;
-        }
-
-        debugLog(`[GalleryRename] Moving ${mediaFiles.length} files from "${oldFolderName}" to "${newFolderName}"`);
-
-        for (const file of mediaFiles) {
-            const fileName = typeof file === 'string' ? file : file.name;
-            const moveResult = await moveImageToFolder(oldFolderName, newFolderName, fileName, true);
-
-            if (moveResult.success) {
-                result.moved++;
-            } else {
-                result.errors++;
-                console.warn(`[GalleryRename] Failed to move "${fileName}":`, moveResult.error);
-            }
-        }
-
-        result.success = result.errors === 0;
-        debugLog(`[GalleryRename] Complete: ${result.moved} moved, ${result.errors} errors`);
-        
-        if (result.moved > 0) {
-            showToast(`Gallery folder renamed: ${result.moved} files moved`, 'success');
-        }
-        
-    } catch (error) {
-        debugError(`[GalleryRename] Error:`, error);
-        result.errors++;
-    }
-    
-    return result;
+    // ARCHIVE FORK: nothing to do, and the whole body went with it.
+    //
+    // The archive resolves a gallery folder by its `_<gallery_id>` tail rather
+    // than by the character's current name, so a renamed card keeps finding its
+    // images exactly where they already are. Upstream had to physically move
+    // them because SillyTavern rebuilds the folder name from the character name
+    // every time it looks -- which is what orphaned 262 folders here before the
+    // archive stopped doing that.
+    //
+    // What was deleted: list the old folder, then download and re-upload every
+    // file into a new one, one request pair at a time, deleting each source
+    // after. On a 400-image gallery that was 800 requests to achieve nothing.
+    // Callers still await this and read `.success`, so the shape stays.
+    return { success: true, moved: 0, errors: 0 };
 }
 
 // Init
@@ -12446,25 +12383,9 @@ function initSectionExpandButtons() {
         });
     }
 
-    // "Manage": jump to this world in the Lorebook Manager. Close the detail modal first
-    // (respecting the unsaved-edits guard); since the manager is layered underneath when the
-    // detail modal was opened from it, closing reveals the manager focused on this world. If
-    // the manager wasn't already open (char opened from the grid), openLorebookManager opens it.
-    const openLinkedBtn = document.getElementById('openLinkedLorebookBtn');
-    if (openLinkedBtn) {
-        openLinkedBtn.addEventListener('click', async (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const worldName = activeChar?.data?.extensions?.world;
-            if (!worldName) return;
-            if (isCharModalDirty()) {
-                const ok = await confirmDiscardCharModalEdits();
-                if (!ok) return;
-            }
-            closeModal();
-            window.openLorebookManager?.(worldName);
-        });
-    }
+    // ARCHIVE FORK: the "Manage" button and its handler are gone with the
+    // Lorebook Manager -- see the world-file helpers below for why the archive
+    // has nothing to manage.
 
     // Unlink the external world from this character (clears data.extensions.world).
     const unlinkLbBtn = document.getElementById('unlinkLorebookBtn');
@@ -15124,7 +15045,6 @@ function populateLorebookEditor(characterBook) {
         const metaEl = document.getElementById('linkedLorebookEditMeta');
         const tileEl = document.getElementById('linkedLorebookTile');
         const linkLabel = document.getElementById('linkLorebookBtnLabel');
-        const manageBtn = document.getElementById('openLinkedLorebookBtn');
         const unlinkBtn = document.getElementById('unlinkLorebookBtn');
         if (linkedWorld) {
             if (nameEl) { nameEl.textContent = linkedWorld; nameEl.title = linkedWorld; nameEl.classList.remove('is-unlinked'); }
@@ -15141,14 +15061,12 @@ function populateLorebookEditor(characterBook) {
                 }).catch(() => { /* count stays off the meta line */ });
             }
             if (linkLabel) linkLabel.textContent = 'Change';
-            manageBtn?.classList.remove('hidden');
             unlinkBtn?.classList.remove('hidden');
         } else {
             if (nameEl) { nameEl.textContent = 'No lorebook linked'; nameEl.title = ''; nameEl.classList.add('is-unlinked'); }
             tileEl?.classList.add('is-unlinked');
             if (metaEl) { metaEl.textContent = 'Link a standalone lorebook file'; delete metaEl.dataset.world; }
             if (linkLabel) linkLabel.textContent = 'Link';
-            manageBtn?.classList.add('hidden');
             unlinkBtn?.classList.add('hidden');
         }
         populateAuxLorebooksRow();
@@ -19558,7 +19476,6 @@ async function applyBulkAutoLinks() {
 // Event handlers for Bulk Auto-Link
 window.openBulkAutoLinkModal = openBulkAutoLinkModal;
 document.getElementById('bulkAutoLinkBtn')?.addEventListener('click', openBulkAutoLinkModal);
-document.getElementById('lorebooksBtn')?.addEventListener('click', () => window.openLorebookManager?.());
 document.getElementById('closeBulkAutoLinkModal')?.addEventListener('click', () => {
     // Just set abort flag and close - state is preserved for resuming
     bulkAutoLinkAborted = true;
@@ -26749,129 +26666,57 @@ window.getCharacterWorldName = function(avatar) {
         || null;
 };
 
-/**
- * Fetch world info data from ST's /api/worldinfo/get endpoint
- * @param {string} worldName - The world name to fetch
- * @returns {Promise<Object|null>} World info data { entries: {uid: entry, ...}, ...meta } or null
+/*
+ * ARCHIVE FORK: the standalone world-file helpers, answered locally.
+ *
+ * These six wrapped SillyTavern's `/api/worldinfo/{get,edit,list,delete}`, which
+ * read and wrote `.json` files in ST's `worlds/` directory. The archive has no
+ * such directory and will not grow one: a standalone World Info file is a
+ * SillyTavern concept, and this archive's lorebooks live *inside* their cards as
+ * `character_book`, edited through the card modal and written by the card write
+ * path. That is a format the archive owns; a sidecar file store beside it is
+ * host compatibility, which is the thing this migration exists to cut.
+ *
+ * So they answer without a request rather than posting into a 501. The callers
+ * that remain -- the link picker, the linked-lorebook box, the bundle
+ * exporter's dangling-world check -- all handle "there are none" already, and
+ * this way they get that answer quietly instead of through a console error per
+ * call. The `/api/worldinfo/` route in archive-api.js stays as the backstop for
+ * anything that reaches for the endpoint directly.
+ *
+ * The Lorebook Manager module (a full-screen editor for these files, plus the
+ * only remaining consumer of the shared LLM client, whose AI features posted to
+ * SillyTavern's own generate endpoint) was deleted with them.
  */
-window.getWorldInfoData = async function(worldName) {
-    if (!worldName) return null;
-    try {
-        const response = await apiRequest('/worldinfo/get', 'POST', { name: worldName });
-        if (response.ok) {
-            return await response.json();
-        }
-        console.error('[getWorldInfoData] API error:', response.status);
-        return null;
-    } catch (error) {
-        console.error('[getWorldInfoData] Error:', error);
-        return null;
-    }
+
+/** @returns {Promise<Object|null>} Always null: the archive stores no world files. */
+window.getWorldInfoData = async function() {
+    return null;
 };
 
-/**
- * Save world info data via ST's /api/worldinfo/edit endpoint
- * @param {string} worldName - The world name to save
- * @param {Object} data - World info data object
- * @returns {Promise<boolean>} Success
- */
-window.saveWorldInfoData = async function(worldName, data) {
-    if (!worldName || !data) return false;
-    try {
-        const response = await apiRequest('/worldinfo/edit', 'POST', {
-            name: worldName,
-            data: data
-        });
-        // Any write to a world invalidates the detail-modal's rendered-box cache for it.
-        if (response.ok) window.invalidateLinkedWorldRenderCache?.(worldName);
-        return response.ok;
-    } catch (error) {
-        console.error('[saveWorldInfoData] Error:', error);
-        return false;
-    }
+/** @returns {Promise<boolean>} Always false: there is nowhere to write a world file. */
+window.saveWorldInfoData = async function() {
+    return false;
 };
 
-/**
- * List all world info files available on the server.
- * ST's only enumerator is POST /api/worldinfo/list -> [{file_id, name, extensions}].
- * file_id is the on-disk filename (no .json); name is the in-file title (falls back to file_id).
- * @returns {Promise<Array<{file_id: string, name: string, extensions: Object}>>}
- */
+/** @returns {Promise<Array>} Always empty: the archive has no world files to list. */
 window.listWorldInfoFiles = async function() {
-    try {
-        const response = await apiRequest('/worldinfo/list', 'POST', {});
-        if (response.ok) {
-            const data = await response.json();
-            if (Array.isArray(data)) {
-                return data.map(item => {
-                    if (typeof item === 'string') {
-                        const id = item.replace(/\.json$/i, '');
-                        return { file_id: id, name: id, extensions: {} };
-                    }
-                    const id = String(item.file_id ?? item.name ?? '').replace(/\.json$/i, '');
-                    return { file_id: id, name: item.name || id, extensions: item.extensions || {} };
-                }).filter(e => e.file_id);
-            }
-        }
-        console.error('[listWorldInfoFiles] API error:', response.status);
-    } catch (error) {
-        console.error('[listWorldInfoFiles] Error:', error);
-    }
     return [];
 };
 
-/**
- * Create a new (empty) world info file. ST has no dedicated create route;
- * /worldinfo/edit with an empty entries object both creates and overwrites.
- * @param {string} worldName
- * @returns {Promise<boolean>} Success
- */
-window.createWorldInfo = async function(worldName) {
-    if (!worldName) return false;
-    return window.saveWorldInfoData(worldName, { entries: {} });
+/** @returns {Promise<boolean>} Always false. */
+window.createWorldInfo = async function() {
+    return false;
 };
 
-/**
- * Delete a world info file via ST's /api/worldinfo/delete.
- * @param {string} worldName
- * @returns {Promise<boolean>} Success
- */
-window.deleteWorldInfo = async function(worldName) {
-    if (!worldName) return false;
-    try {
-        const response = await apiRequest('/worldinfo/delete', 'POST', { name: worldName });
-        if (response.ok) window.invalidateLinkedWorldRenderCache?.(worldName);
-        return response.ok;
-    } catch (error) {
-        console.error('[deleteWorldInfo] Error:', error);
-        return false;
-    }
+/** @returns {Promise<boolean>} Always false. */
+window.deleteWorldInfo = async function() {
+    return false;
 };
 
-/**
- * Rename a world file. ST has no rename route, so this is copy-new + delete-old,
- * mirroring ST's own renameWorldInfo (save then delete). The new file gets the
- * in-file `name` updated to match so /list shows the new title too.
- * @param {string} oldName
- * @param {string} newName
- * @returns {Promise<boolean>} Success
- */
-window.renameWorldInfo = async function(oldName, newName) {
-    if (!oldName || !newName || oldName === newName) return false;
-    // Refuse to clobber a different existing world. The /worldinfo/edit write is an
-    // unconditional overwrite, so without this guard a rename onto an existing name
-    // would destroy that world (the UI guards too, but this is the load-bearing check).
-    const existing = await window.listWorldInfoFiles();
-    if (existing.some(w => w.file_id.toLowerCase() === newName.toLowerCase())) return false;
-    const data = await window.getWorldInfoData(oldName);
-    if (!data) return false;
-    if (data.name !== undefined) data.name = newName;
-    const saved = await window.saveWorldInfoData(newName, data);
-    if (!saved) return false;
-    // Best-effort cleanup of the old file; the new copy already landed so a delete
-    // failure leaves a harmless duplicate rather than data loss.
-    await window.deleteWorldInfo(oldName);
-    return true;
+/** @returns {Promise<boolean>} Always false. */
+window.renameWorldInfo = async function() {
+    return false;
 };
 
 // ========================================

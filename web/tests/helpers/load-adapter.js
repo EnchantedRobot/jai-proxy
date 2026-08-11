@@ -28,12 +28,22 @@ const ORIGIN = "http://archive.test";
  */
 function loadAdapter(responses = {}) {
   const calls = [];
+  // The same requests as `calls`, with the method and body kept. Writes are the
+  // reason: a route that translates a POST into a PUT or a DELETE is only
+  // half-tested by asserting the URL, and a body sent as multipart has to be
+  // inspected to know the right part names went out.
+  const requests = [];
   const store = new Map();
 
-  const nativeFetch = async (input) => {
+  const nativeFetch = async (input, init) => {
     const url = typeof input === "string" ? input : input.url;
     const relative = url.startsWith(ORIGIN) ? url.slice(ORIGIN.length) : url;
     calls.push(relative);
+    requests.push({
+      url: relative,
+      method: (init?.method || "GET").toUpperCase(),
+      body: init?.body,
+    });
     const canned = responses[relative];
     if (canned === undefined) {
       return new Response(JSON.stringify({ error: `unstubbed: ${relative}` }), {
@@ -85,6 +95,13 @@ function loadAdapter(responses = {}) {
     Headers,
     URL,
     TextDecoder,
+    // The write routes build multipart bodies: replacing an avatar forwards the
+    // File it was handed, and a gallery upload turns the frontend's base64 back
+    // into bytes. Node's own WHATWG classes, same as the browser's.
+    FormData,
+    Blob,
+    File,
+    Uint8Array,
     setTimeout,
     clearTimeout,
     atob: (b64) => Buffer.from(b64, "base64").toString("binary"),
@@ -98,7 +115,7 @@ function loadAdapter(responses = {}) {
     for (const fn of listeners[target][event] || []) fn();
   };
 
-  return { fetch: window.fetch, calls, store, origin: ORIGIN, fire, document, errors };
+  return { fetch: window.fetch, calls, requests, store, origin: ORIGIN, fire, document, errors };
 }
 
 /** POST the way library.js's apiRequest() does: JSON body, JSON content type. */

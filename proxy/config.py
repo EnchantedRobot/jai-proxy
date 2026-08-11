@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     # CharacterLibrary's cl_thumbs (keyed by <Name>_<gallery_id>). Pure cache --
     # deletable, regenerated on miss.
     thumbs_dir: Path = ROOT / "data" / "cache" / "thumbs"
+    # Where deleted cards, gallery folders and gallery files go. Never scanned,
+    # indexed or exported -- the same contract as `data/_quarantine/`. A delete
+    # is the one archive operation with no undo and no second copy anywhere, so
+    # it moves the file rather than unlinking it; emptying this directory is a
+    # deliberate act, and the only one that actually destroys anything.
+    trash_dir: Path = ROOT / "data" / ".trash"
     # The browser UI's own settings -- provider credentials, followed creators,
     # display preferences. Under `data/` with the cards rather than in `state/`
     # because it is user data, not a cache: it is the only copy of the Chub and

@@ -6,6 +6,10 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.115",
+    # Multipart request parsing, which FastAPI needs (and refuses to start
+    # without) for the two write endpoints that take a file rather than JSON:
+    # replacing a card's avatar and adding a gallery image.
+    "python-multipart>=0.0.20",
     "uvicorn[standard]>=0.32",
     "httpx>=0.27",
     "beautifulsoup4>=4.12",

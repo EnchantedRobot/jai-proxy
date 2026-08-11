@@ -29,9 +29,20 @@ decided during the trim: `custom-css` + the theme customizer,
 `gallery-sync` (it flags cards missing a `gallery_id`, but the archive stamps one
 at write time, so it could never fire).
 
+`lorebook-manager` followed in Phase 3 (6,773 lines) once the write path made
+the decision unavoidable: it is a full-screen editor for standalone World Info
+*files*, which are a SillyTavern concept. This archive's lorebooks live inside
+their cards as `character_book`, edited in the detail modal and written by the
+card write path — a format the archive owns. A sidecar file store beside it
+would be host compatibility, which is the thing being cut. Its six world-file
+helpers in `library.js` now answer locally (`null` / `[]` / `false`) instead of
+posting into a refusal, so the callers that remain get "there are none" quietly.
+Dropping it also removed the last live consumer of the shared LLM client, which
+is now dead code awaiting the next trim.
+
 Each removal is the module file, its CSS, its loader block, its `index.html`
 markup, its `library.js` call sites, its settings rows and its Help & Tips
-section. `lorebook-manager` was **deferred, not dropped**, and stays.
+section.
 
 ### The mobile layer
 
@@ -76,6 +87,13 @@ frontend:
   and read `getProvider('janitorai')`; both gone.
 
 ### Still there, and known
+
+The **linked-lorebook** surface — linking a card to an external world by name
+(`extensions.world`), the link picker and Bulk Auto-Link — was left in place
+even though the manager went. It is interwoven with the *embedded* lorebook
+editor in the same modal, so cutting it is a diffuse edit of its own rather
+than a line item in a write-path phase. It degrades to "no lorebooks
+available", which is true.
 
 `getHostWindow()` / `getSTContext()` and their guarded call sites
 (`notifySTCharacterEdited`, `notifySTCharacterAdded`, persona name, the
@@ -160,6 +178,16 @@ Every edit is marked in place with a comment beginning `ARCHIVE FORK`, so
    reads. **This one is load-bearing for data safety on the receiving end** and
    is explained under "Settings"; do not restore it to upstream without a real
    additional-lorebook store.
+7. **`handleGalleryFolderRename()`** — body deleted, returns success. The
+   archive resolves galleries by `gallery_id`, so there is nothing to move. See
+   "Writes".
+8. **The six world-file helpers** (`getWorldInfoData`, `saveWorldInfoData`,
+   `listWorldInfoFiles`, `createWorldInfo`, `deleteWorldInfo`,
+   `renameWorldInfo`) — answer locally instead of posting to `/worldinfo/*`.
+   The archive stores no standalone world files; see "The trim".
+
+`modules/batch-tagging.js` carries one too: `applyBatchTags()` posts the whole
+selection to `/api/v1/characters/tags` in a single request.
 
 ### `modules/gallery-viewer.js`
 
@@ -269,19 +297,74 @@ fit. Moving the writer server-side (`zipfile`, streamed off disk) is the fix
 when bulk export becomes a real workflow; it was not worth a second
 implementation of a format the client already writes correctly.
 
+## Writes
+
+Phase 3 made the archive writable. The vendored frontend still calls
+SillyTavern's endpoints and `archive-api.js` translates them, exactly as it does
+for reads:
+
+| the frontend calls | the archive gets |
+| --- | --- |
+| `POST /api/characters/merge-attributes` | `PUT /api/v1/characters/<id>` — the whole card |
+| `POST /api/characters/edit-avatar` | `PUT /api/v1/characters/<id>/avatar` — multipart |
+| `POST /api/characters/delete` | `DELETE /api/v1/characters/<id>?gallery=keep` |
+| `POST /api/images/upload` | `POST /api/v1/galleries/<folder>/files` — multipart |
+| `POST /api/images/delete` | `DELETE /api/v1/galleries/<folder>/files/<name>` |
+
+Three things are worth knowing before touching any of it.
+
+**A card edit never re-encodes the image.** `pngtools.embed_card` rewrites only
+the tEXt chunks and copies every other chunk byte for byte, so a
+pngquant-compressed avatar survives an edit exactly. Verified on a real 5.4 MB
+palette-quantized card with a 221-entry lorebook: pixel chunks identical.
+`tests/test_api_writes.py` pins it, and that is the test to keep working.
+
+An edit does normalize the embedded JSON to this repo's serialization, which is
+a **one-time** size change for the ~15% of cards that were imported with compact
+JSON (that 5.4 MB card grew 63 KB on its first edit, then stayed byte-stable
+across every later one). The other 85% were written here and do not move at all.
+
+**A rename moves nothing.** Not the card file — `char.avatar` is the key the
+grid, the DOM, the thumbnail cache and every URL hold, and the filename is a
+derived `<slug(name)>_<id8>` label that already diverges for any name with
+punctuation. Not the gallery folder either: the archive resolves a gallery by
+its `_<gallery_id>` tail rather than by the card's current name
+(`proxy/gallery.py:resolve_folder`), which is the same rule the dedupe check
+uses — *the id, never the name*. That makes renames free and orphaned folders
+structurally impossible, and it is why `handleGalleryFolderRename()` in
+`library.js` is now a no-op: upstream moved a gallery by downloading and
+re-uploading every file one at a time, which on a 400-image gallery was 800
+requests to achieve nothing.
+
+**Nothing is unlinked.** Deleted cards, gallery folders and gallery files move
+to `data/.trash/<date>/`, which is never scanned, indexed or exported — the same
+contract as `data/_quarantine/`. Emptying it is the only operation here that
+actually destroys anything.
+
+Two smaller notes. Card writes accept `If-Match` and answer **412** on a stale
+ETag; two tabs on one card is the ordinary case and a whole-document replace has
+no partial overlap to soften the loss. And **batch tagging goes straight to
+`/api/v1/characters/tags`**, bypassing the adapter — there is no ST endpoint for
+it, and inventing a URL to translate would be pretending otherwise. It replaced
+a per-card loop that hydrated and wrote each character separately: 1,000 round
+trips for a 500-card selection, against one request now.
+
 ## Known gaps
 
 - **Search does not match creator notes.** The list endpoint carries no prose;
   notes alone are 13.3 MB across the archive, which would more than double the
   boot payload for one search field. Name, creator, page title, filename and
   tags all match. Adding it means an `include=notes` on the list endpoint.
-- **Every write refuses with 501.** Card edits, deletes, imports, gallery
-  uploads and world info all answer with a message the UI shows in a toast. The
-  archive API is read-only through Phase 1 — this is what Phase 3 addresses.
-- **`lorebook-manager`'s AI features do not work.** It is the last live consumer
-  of the shared LLM client, which posts to SillyTavern's
-  `/backends/chat-completions/generate`. The module was deferred rather than
-  dropped, so this is pending a decision, not a bug.
+- **Acquiring a card still refuses with 501.** `characters/create`,
+  `characters/import` and `content/importURL` answer with a message the UI shows
+  in a toast. An import has to run the intake pipeline — macro sanitize, avatar
+  crop and resize, pngquant, provenance stamping — rather than storing whatever
+  the browser embedded, so it is the next slice of work rather than an omission.
+  Editing, deleting, replacing an image and gallery writes all work; see
+  "Writes" below.
+- **The shared LLM client is dead code.** `lorebook-manager` was its last live
+  consumer and went in Phase 3. ~250 lines in `library.js`, still exported
+  through `core-api.js`, reachable by nothing.
 - **Some frontend state still lives in `localStorage`.** Filter presets, the
   media-dedup ledger, playlists — everything the frontend stores as a file under
   `user/files/`. The settings blob has moved to `data/settings.json` (above);

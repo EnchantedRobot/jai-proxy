@@ -236,47 +236,54 @@ async function applyBatchTags() {
     
     let successCount = 0;
     let errorCount = 0;
-    
-    for (const char of selected) {
-        try {
-            let currentTags = getCharacterTags(char);
-            
-            const tagsToRemoveLower = tagsToRemove.map(t => t.toLowerCase());
-            currentTags = currentTags.filter(t => !tagsToRemoveLower.includes(t.toLowerCase()));
-            
-            const currentTagsLower = currentTags.map(t => t.toLowerCase());
-            for (const tag of tagsToAdd) {
-                if (!currentTagsLower.includes(tag.toLowerCase())) {
-                    currentTags.push(tag);
-                    currentTagsLower.push(tag.toLowerCase());
-                }
-            }
-            
-            // Route through applyCardFieldUpdates: hydrate + preflight + merge + in-memory sync (handles char.tags root mirror + char.data.tags + allCharacters entry).
-            const success = await CoreAPI.applyCardFieldUpdates(char.avatar, {
-                tags: currentTags,
-            });
-            if (success) {
-                successCount++;
-            } else {
-                console.error('[BatchTagging] Failed to update', char.name);
-                errorCount++;
-            }
-        } catch (err) {
-            console.error('[BatchTagging] Error updating', char.name, err);
-            errorCount++;
+
+    // ARCHIVE FORK: one request for the whole selection, straight to the archive
+    // API rather than through the ST-shaped adapter -- there is no SillyTavern
+    // endpoint for this, and inventing a URL to translate would be pretending
+    // otherwise.
+    //
+    // What this replaces: a loop of applyCardFieldUpdates, which hydrates each
+    // character (a GET) and then writes it (a POST). Tagging a 500-card
+    // selection was 1,000 round trips and 500 client-side card rebuilds; the
+    // server already has every card on disk and rewrites only the tEXt chunk.
+    // Bulk tag cleanup is one of the archive's five jobs and the only one that
+    // is inherently plural, so it gets the endpoint it deserves.
+    try {
+        const resp = await fetch('/api/v1/characters/tags', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ids: selected.map(c => c.avatar),
+                add: tagsToAdd,
+                remove: tagsToRemove,
+            }),
+        });
+        if (!resp.ok) {
+            const detail = await resp.text().catch(() => '');
+            throw new Error(detail || `HTTP ${resp.status}`);
         }
+        const result = await resp.json();
+        // A card that already carried every tag counts as done, not failed --
+        // the user asked for a state, and it is in that state.
+        successCount = result.changed + result.unchanged;
+        errorCount = Object.keys(result.failed || {}).length;
+        for (const [id, reason] of Object.entries(result.failed || {})) {
+            console.error('[BatchTagging] Failed to update', id, reason);
+        }
+    } catch (err) {
+        console.error('[BatchTagging] Batch tag write failed:', err);
+        errorCount = selected.length;
     }
-    
+
     applyBtn.disabled = false;
     applyBtn.innerHTML = originalHtml;
-    
+
     if (errorCount === 0) {
         CoreAPI.showToast(`Updated tags for ${successCount} character(s)`, 'success');
     } else {
         CoreAPI.showToast(`Updated ${successCount}, failed ${errorCount}`, 'warning');
     }
-    
+
     closeModal();
     await CoreAPI.refreshCharacters();
     CoreAPI.clearSelection();

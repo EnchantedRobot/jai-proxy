@@ -112,3 +112,50 @@ def test_no_gallery_id_means_no_folder():
     """Rather than a name every id-less card would collide on."""
     assert gallery.folder_name("Abbie", None) == ""
     assert gallery.folder_name("Abbie", "") == ""
+
+
+# --- resolving a folder by its id -------------------------------------------
+#
+# Folder names are derived from the card's *current* name, so a rename used to
+# orphan the images. Resolution matches on the `_<gallery_id>` tail instead --
+# the same rule the archive already uses for its duplicate checks: the id alone,
+# never the name.
+
+
+def test_id_of_reads_the_tail(tmp_path):
+    assert gallery.id_of("Abbie_kzbYR2QbpncC") == "kzbYR2QbpncC"
+    # Underscores in the name are not a problem: only the last one counts.
+    assert gallery.id_of("A_D_A_kzbYR2QbpncC") == "kzbYR2QbpncC"
+
+
+def test_id_of_rejects_a_word_that_is_only_a_name():
+    """`Marcus_Wright` must not register itself under the id 'Wright'."""
+    assert gallery.id_of("Marcus_Wright") == ""
+    assert gallery.id_of("Abbie") == ""
+    assert gallery.id_of("") == ""
+
+
+def test_resolve_prefers_an_exact_match(tmp_path):
+    (tmp_path / "Abbie_kzbYR2QbpncC").mkdir()
+    assert gallery.resolve_folder(tmp_path, "Abbie_kzbYR2QbpncC") == "Abbie_kzbYR2QbpncC"
+
+
+def test_resolve_finds_a_folder_left_behind_by_a_rename(tmp_path):
+    (tmp_path / "Abbie_kzbYR2QbpncC").mkdir()
+    assert gallery.resolve_folder(tmp_path, "Abigail_kzbYR2QbpncC") == "Abbie_kzbYR2QbpncC"
+
+
+def test_resolve_gives_up_on_an_id_nothing_carries(tmp_path):
+    (tmp_path / "Abbie_kzbYR2QbpncC").mkdir()
+    assert gallery.resolve_folder(tmp_path, "Cleo_CCCCCCCCCCCC") is None
+    assert gallery.resolve_folder(tmp_path, "") is None
+    assert gallery.resolve_folder(tmp_path, "NoIdHere") is None
+
+
+def test_resolve_picks_up_a_folder_added_after_the_first_lookup(tmp_path):
+    """The map is cached on the directory's mtime, so a gallery created between
+    two requests has to invalidate it -- a stale miss here reads as 'this card
+    has no images' right after its first image was downloaded."""
+    assert gallery.resolve_folder(tmp_path, "Abbie_kzbYR2QbpncC") is None
+    (tmp_path / "Abbie_kzbYR2QbpncC").mkdir()
+    assert gallery.resolve_folder(tmp_path, "Abigail_kzbYR2QbpncC") == "Abbie_kzbYR2QbpncC"

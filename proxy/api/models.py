@@ -136,6 +136,75 @@ class CardDetailOut(CardOut):
     gallery: GalleryOut
 
 
+class CardWriteIn(BaseModel):
+    """A replacement card body.
+
+    `card` is the V3 `data` object whole -- name, prose, greetings, tags,
+    lorebook, extensions -- not a patch. A client holds the complete card and
+    treats itself as its owner, and a partial update could never express a
+    *cleared* field, which clearing a scenario is. The two extension keys the
+    archive owns (`gallery_id` and `jai`) are carried over when the payload
+    omits them; see `proxy.cardwrite.merge_card`.
+
+    Nothing here is re-sanitized. Intake cleans a card once on the way in; a
+    human typing `{{char}}` into an edit box means it, and rewriting what they
+    just confirmed in a diff would make that diff a lie.
+    """
+
+    card: dict[str, Any] = Field(description="The card's `data` object, complete.")
+
+
+class BulkTagsIn(BaseModel):
+    """A tag change applied across many cards in one pass.
+
+    Bulk because it is one of the archive's five jobs and the only one that is
+    inherently plural: doing it as N single-card writes re-reads and rewrites N
+    PNGs from the client, one round trip each, with no way to report a partial
+    failure coherently.
+    """
+
+    ids: list[str] = Field(description="Card filenames, as `/characters` reports them.")
+    add: list[str] = Field(default=[], description="Tags to add, skipped where already present.")
+    remove: list[str] = Field(default=[], description="Tags to remove, matched case-insensitively.")
+
+
+class BulkTagsOut(BaseModel):
+    """What a bulk tag pass did. `changed` counts cards actually rewritten --
+    a card that already carried every tag being added is `unchanged`, not
+    failed, and is not rewritten just to bump its mtime."""
+
+    changed: int
+    unchanged: int
+    failed: dict[str, str] = Field(
+        default={},
+        description="Card id to the reason it could not be written. Partial success is normal and reported rather than rolled back: the cards that worked stay worked.",
+    )
+
+
+class DeletedOut(BaseModel):
+    """Where a delete put things. Paths, not booleans, because the whole point
+    of binning rather than unlinking is that someone can go and get it back."""
+
+    id: str
+    card: str = Field(description="Where the card PNG landed under the bin.")
+    gallery: str | None = Field(
+        default=None,
+        description="Where the gallery folder landed, or null when it was kept or was not there.",
+    )
+
+
+class GalleryFileWrittenOut(BaseModel):
+    """One uploaded gallery file. `path` is in SillyTavern's `user/images/...`
+    shape because that is what the frontend's uploaders read back out of the
+    reply and store as a local media path."""
+
+    folder: str
+    name: str
+    size: int
+    path: str
+    url: str
+
+
 class FacetValue(BaseModel):
     value: str
     count: int

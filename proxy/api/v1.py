@@ -1,11 +1,18 @@
-"""`/api/v1` -- read-only browse and download over the card archive.
+"""`/api/v1` -- browse, download and edit over the card archive.
 
 Every endpoint here is a plain `def`, not `async def`, on purpose: they all touch
 the filesystem, and FastAPI runs sync handlers in a threadpool where blocking is
 harmless. Declaring them `async` would block the event loop for the duration of a
 stat sweep or a 1.2 MB read, which is precisely the workload this API is made of.
 
-Read-only is the whole of Phase 1. Nothing here mutates a card.
+This is the archive's own contract, deliberately not SillyTavern's. Teaching it
+to answer `/characters/edit-attribute` would relocate the compatibility burden
+rather than end it; the translation lives in `web/archive-api.js`, on the client,
+in one deletable file.
+
+The write half is Phase 3, and its mechanics live in `proxy/cardwrite.py` -- read
+that module's docstring before changing anything here that mutates: a field edit
+must never re-encode pixels, every write is atomic, and nothing is ever unlinked.
 """
 
 from __future__ import annotations
@@ -18,18 +25,23 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, File, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 
-from proxy import archive, gallery, pngtools, settings_store, thumbs
+from proxy import archive, cardwrite, gallery, pngtools, settings_store, thumbs
 from proxy.api.models import (
+    BulkTagsIn,
+    BulkTagsOut,
     CardDetailOut,
     CardListOut,
     CardOut,
+    CardWriteIn,
+    DeletedOut,
     FacetsOut,
     FacetValue,
     GalleryFileOut,
     GalleryFilesOut,
+    GalleryFileWrittenOut,
     GalleryFolderOut,
     GalleryOut,
     IndexStatsOut,
@@ -127,8 +139,13 @@ def _card_out(record: archive.CardSummary, *, extensions: bool = False) -> CardO
 
 def _gallery_out(record: archive.CardSummary) -> GalleryOut:
     """A card's gallery, measured on disk. One `scandir` of one directory, so it
-    belongs on the detail view and not on a list of thousands."""
-    folder = gallery.folder_name(record.name, record.gallery_id)
+    belongs on the detail view and not on a list of thousands.
+
+    `folder` reports the directory that actually holds the images, which after a
+    rename is not the name the card's own fields would compute -- see
+    `gallery.resolve_folder`."""
+    wanted = gallery.folder_name(record.name, record.gallery_id)
+    folder = gallery.resolve_folder(settings.galleries_dir, wanted) or wanted
     out = GalleryOut(
         gallery_id=record.gallery_id, folder=folder, exists=False, images=0, bytes=0
     )
@@ -397,23 +414,41 @@ def _safe_child(root: Path, *parts: str) -> Path:
     return candidate
 
 
+def _gallery_dir(folder: str, *, create: bool = False) -> Path:
+    """The directory a client's gallery folder name refers to.
+
+    Validation first (the name is a path traversal until proven otherwise), then
+    resolution by gallery id, so a card renamed after its images were downloaded
+    still finds them. `create` is for uploads, which are allowed to bring a
+    gallery into existence; every other caller wants the miss.
+    """
+    checked = _safe_child(settings.galleries_dir, folder)
+    resolved = gallery.resolve_folder(settings.galleries_dir, folder)
+    if resolved is not None:
+        return settings.galleries_dir / resolved
+    if create:
+        checked.mkdir(parents=True, exist_ok=True)
+    return checked
+
+
 @router.get("/galleries", response_model=list[GalleryFolderOut], summary="Gallery folders on disk")
 def list_galleries() -> list[GalleryFolderOut]:
     """Every folder in the galleries directory, each paired with the card that
-    claims it. A folder with `card_id: null` is orphaned -- the card was renamed
-    and nothing computes that folder name any more."""
+    claims it.
+
+    Claimed by gallery *id*, not by folder name: the name is derived from the
+    card's current name and drifts the moment a card is renamed, whereas the id
+    is the actual link. So `card_id: null` now means a folder no card carries the
+    id for -- genuinely orphaned -- rather than merely misnamed.
+    """
     idx = _index()
-    claimed = {
-        gallery.folder_name(r.name, r.gallery_id): r.filename
-        for r in idx.cards()
-        if r.gallery_id
-    }
+    claimed = {r.gallery_id: r.filename for r in idx.cards() if r.gallery_id}
     try:
         with os.scandir(settings.galleries_dir) as entries:
             folders = sorted(e.name for e in entries if e.is_dir() and not e.name.startswith("."))
     except OSError:
         return []
-    return [GalleryFolderOut(folder=f, card_id=claimed.get(f)) for f in folders]
+    return [GalleryFolderOut(folder=f, card_id=claimed.get(gallery.id_of(f))) for f in folders]
 
 
 @router.get("/galleries/{folder}", response_model=GalleryFilesOut, summary="Files in one gallery")
@@ -422,7 +457,7 @@ def list_gallery_files(folder: str) -> GalleryFilesOut:
     SillyTavern's `/api/images/list`, which creates the directory as a side
     effect of being asked about it, so the frontend could never tell an empty
     gallery from a missing one."""
-    path = _safe_child(settings.galleries_dir, folder)
+    path = _gallery_dir(folder)
     try:
         with os.scandir(path) as entries:
             files = sorted(
@@ -456,7 +491,7 @@ def list_gallery_files(folder: str) -> GalleryFilesOut:
 
 @router.get("/galleries/{folder}/files/{filename}", summary="One gallery image")
 def get_gallery_file(folder: str, filename: str, request: Request) -> Response:
-    path = _safe_child(settings.galleries_dir, folder, filename)
+    path = _safe_child(_gallery_dir(folder), filename)
     return _serve_file(
         path,
         media_type=thumbs.media_type_of(path),
@@ -478,10 +513,14 @@ def get_gallery_thumb(
     a gallery page asks for 100 of these at once, and answering a failure with a
     4 MB source is how one unrenderable file takes the page down with it.
     """
-    source = _safe_child(settings.galleries_dir, folder, filename)
+    directory = _gallery_dir(folder)
+    source = _safe_child(directory, filename)
     if not source.is_file():
         raise HTTPException(status_code=404, detail=f"no file {filename!r} in gallery {folder!r}")
-    thumb = thumbnail_store.gallery(source, folder, filename, size)
+    # Cached under the folder's name *on disk*, not the one the client asked by,
+    # so a renamed card keeps hitting the 3,446 inherited thumb folders instead
+    # of re-rendering the lot under a second name.
+    thumb = thumbnail_store.gallery(source, directory.name, filename, size)
     if thumb is None:
         raise HTTPException(status_code=415, detail=f"{filename!r} cannot be thumbnailed")
     return _serve_file(
@@ -518,6 +557,269 @@ def get_character(card_id: str) -> CardDetailOut:
         card=data,
         gallery=_gallery_out(record),
     )
+
+
+def _etag_of(path: Path) -> str:
+    """The validator `_serve_file` hands out, recomputed for a write's
+    precondition check. Same (mtime_ns, size) pair the index invalidates on, so
+    a client that has read a card can prove it is writing over what it read."""
+    st = path.stat()
+    return f'"{st.st_mtime_ns:x}-{st.st_size:x}"'
+
+
+def _check_precondition(path: Path, if_match: str | None) -> None:
+    """Enforce `If-Match` when the client sent one.
+
+    Optional, and worth having even so. Two tabs open on the same card is the
+    ordinary case here, and the loser of that race silently reverts the winner's
+    edit -- with a whole-document replace there is no partial overlap to soften
+    it. A client that sends the ETag it read gets told (412) instead.
+    """
+    if not if_match or if_match == "*":
+        return
+    current = _etag_of(path)
+    if current not in [t.strip() for t in if_match.split(",")]:
+        raise HTTPException(
+            status_code=412,
+            detail="the card changed since you read it; reload before saving over it",
+        )
+
+
+def _write_error(exc: cardwrite.WriteError) -> HTTPException:
+    return HTTPException(status_code=422, detail=str(exc))
+
+
+@router.put("/characters/{card_id}", response_model=CardDetailOut, summary="Replace a card's contents")
+def put_character(
+    card_id: str,
+    body: CardWriteIn,
+    if_match: str | None = Header(None, alias="If-Match"),
+) -> CardDetailOut:
+    """Rewrite the card embedded in this PNG, leaving its pixels untouched.
+
+    The card is re-embedded through `pngtools.embed_card`, which rewrites only
+    the tEXt chunks -- so a pngquant-compressed avatar survives an edit byte for
+    byte, and a card edited here is shaped exactly like a freshly built one.
+
+    The filename does not change when the name does. It is `<slug(name)>_<id8>`,
+    a derived label rather than the name itself, and it is what the frontend,
+    the DOM, the thumbnail cache and every URL key on; moving it mid-edit would
+    404 the card the user is looking at. It already diverges for every card with
+    punctuation in its name, and the id8 fragment -- which is the archive's
+    dedupe key, on its own, never the name -- is unaffected either way.
+    """
+    idx = _index()
+    record = _require(idx, card_id)
+    path = idx.root / record.filename
+    _check_precondition(path, if_match)
+
+    incoming = body.card
+    name = incoming.get("name")
+    if not isinstance(name, str) or not name.strip():
+        # The name is the one field with no sane default: it is what the card is
+        # called everywhere, and an empty one turns a card into an unfindable
+        # blank in the grid.
+        raise HTTPException(status_code=422, detail="the card must have a non-empty `name`")
+
+    try:
+        _, existing = cardwrite.read_card(path)
+        cardwrite.patch_card(path, cardwrite.merge_card(existing, incoming))
+    except cardwrite.WriteError as exc:
+        raise _write_error(exc) from exc
+
+    # The client is about to read its own write, and the index would otherwise
+    # sit behind its two-second debounce.
+    archive.index().refresh(force=True)
+    return get_character(record.filename)
+
+
+@router.delete("/characters/{card_id}", response_model=DeletedOut, summary="Bin a card")
+def delete_character(
+    card_id: str,
+    gallery_action: Literal["keep", "delete"] = Query(
+        "keep",
+        alias="gallery",
+        description="`delete` bins the card's gallery folder along with it. Default keeps it -- images are often the expensive half and are not always re-downloadable.",
+    ),
+) -> DeletedOut:
+    """Move a card into the bin. Nothing here unlinks anything.
+
+    See `proxy.cardwrite` for why: this is the one archive operation with no undo
+    and no second copy, and `data/.trash/` costs disk where the alternative costs
+    the card. Emptying the bin is a separate, deliberate act.
+    """
+    idx = _index()
+    record = _require(idx, card_id)
+    path = idx.root / record.filename
+
+    try:
+        binned_gallery = (
+            cardwrite.trash_gallery(record.name, record.gallery_id)
+            if gallery_action == "delete"
+            else None
+        )
+        binned_card = cardwrite.to_trash(path)
+    except cardwrite.WriteError as exc:
+        raise _write_error(exc) from exc
+
+    # A freed filename can be taken by a future card, and the avatar cache has no
+    # staleness check -- leaving the thumb behind would show the deleted card's
+    # face on its replacement.
+    thumbnail_store.forget(record.filename)
+    if binned_gallery is not None:
+        thumbnail_store.forget_gallery(binned_gallery[0])
+    archive.index().refresh(force=True)
+
+    return DeletedOut(
+        id=record.filename,
+        card=str(binned_card),
+        gallery=str(binned_gallery[1]) if binned_gallery else None,
+    )
+
+
+@router.put("/characters/{card_id}/avatar", response_model=CardDetailOut, summary="Replace a card's image")
+def put_character_avatar(
+    card_id: str,
+    image: UploadFile = File(description="The new image. Anything Pillow opens -- png, jpeg, webp."),
+    if_match: str | None = Header(None, alias="If-Match"),
+) -> CardDetailOut:
+    """Give a card new pixels, keeping every field of the embedded card.
+
+    The only write that re-encodes, and it runs intake's pipeline -- normalize,
+    crop a detected panel stack, cap the longest side, quantize -- so a card
+    whose image was replaced is indistinguishable from one that arrived that way.
+    """
+    idx = _index()
+    record = _require(idx, card_id)
+    path = idx.root / record.filename
+    _check_precondition(path, if_match)
+
+    payload = image.file.read()
+    if not payload:
+        raise HTTPException(status_code=422, detail="the uploaded image is empty")
+    try:
+        cardwrite.replace_avatar(path, payload)
+    except cardwrite.WriteError as exc:
+        raise _write_error(exc) from exc
+
+    # Same filename, different pixels: without this the cached thumb is the old
+    # face, served indefinitely, since the avatar cache has no staleness check.
+    thumbnail_store.forget(record.filename)
+    archive.index().refresh(force=True)
+    return get_character(record.filename)
+
+
+@router.post("/characters/tags", response_model=BulkTagsOut, summary="Add and remove tags across many cards")
+def bulk_tags(body: BulkTagsIn) -> BulkTagsOut:
+    """Apply one tag change to a selection, in a single pass.
+
+    Removals are matched case-insensitively and additions preserve the case they
+    arrive in, which is how the archive's tags actually behave -- `Female` and
+    `female` are the same tag written twice, and a bulk cleanup exists largely to
+    collapse pairs like that.
+
+    Partial success is reported, not rolled back. There is no transaction across
+    3,000 PNG rewrites, and pretending otherwise by unwinding the ones that
+    worked would turn one unreadable card into a no-op for the other 2,999.
+    """
+    if not body.add and not body.remove:
+        raise HTTPException(status_code=422, detail="give at least one tag to add or remove")
+
+    idx = _index()
+    drop = {t.casefold() for t in body.remove if t.strip()}
+    add = [t.strip() for t in body.add if t.strip()]
+
+    changed = unchanged = 0
+    failed: dict[str, str] = {}
+    for card_id in body.ids:
+        record = idx.get(card_id)
+        if record is None:
+            failed[card_id] = "no such card in the archive"
+            continue
+        path = idx.root / record.filename
+        try:
+            _, data = cardwrite.read_card(path)
+            current = [t for t in data.get("tags", []) if isinstance(t, str)]
+            kept = [t for t in current if t.casefold() not in drop]
+            present = {t.casefold() for t in kept}
+            for tag in add:
+                if tag.casefold() not in present:
+                    kept.append(tag)
+                    present.add(tag.casefold())
+            if kept == current:
+                unchanged += 1
+                continue
+            data["tags"] = kept
+            cardwrite.patch_card(path, data)
+            changed += 1
+        except cardwrite.WriteError as exc:
+            failed[record.filename] = str(exc)
+
+    if changed:
+        archive.index().refresh(force=True)
+    return BulkTagsOut(changed=changed, unchanged=unchanged, failed=failed)
+
+
+@router.post(
+    "/galleries/{folder}/files",
+    response_model=GalleryFileWrittenOut,
+    status_code=201,
+    summary="Add a file to a gallery",
+)
+def upload_gallery_file(
+    folder: str,
+    file: UploadFile = File(description="The image, video or audio file to store."),
+) -> GalleryFileWrittenOut:
+    """Store one file in a gallery, creating the folder if it is not there yet.
+
+    Multipart rather than the base64-in-JSON shape SillyTavern used: these are
+    multi-megabyte binaries, and base64 inflates them by a third for the whole
+    round trip. The adapter converts on the client side, where the frontend's
+    encoded copy already exists.
+    """
+    directory = _gallery_dir(folder, create=True)
+    name = Path(file.filename or "").name
+    if not name:
+        raise HTTPException(status_code=422, detail="the upload has no filename")
+    target = _safe_child(directory, name)
+    payload = file.file.read()
+    if not payload:
+        raise HTTPException(status_code=422, detail=f"{name} is empty")
+
+    try:
+        cardwrite.write_atomic(target, payload)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"cannot write {name}: {exc}") from exc
+
+    # An overwrite reuses the name, and gallery thumbs are keyed on it.
+    thumbnail_store.forget_gallery(directory.name, name)
+    quoted_folder = quote(directory.name, safe="")
+    quoted_name = quote(name, safe="")
+    return GalleryFileWrittenOut(
+        folder=directory.name,
+        name=name,
+        size=len(payload),
+        path=f"user/images/{directory.name}/{name}",
+        # Must match what `list_gallery_files` builds -- the `/files/` segment is
+        # part of the route, and dropping it yields a URL that 404s.
+        url=f"{router.prefix}/galleries/{quoted_folder}/files/{quoted_name}",
+    )
+
+
+@router.delete("/galleries/{folder}/files/{filename}", status_code=204, summary="Bin a gallery file")
+def delete_gallery_file(folder: str, filename: str) -> Response:
+    """Move one gallery file to the bin. Binned rather than unlinked for the same
+    reason cards are -- see `proxy.cardwrite`."""
+    directory = _gallery_dir(folder)
+    path = _safe_child(directory, filename)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"no file {filename!r} in gallery {folder!r}")
+    try:
+        cardwrite.to_trash(path)
+    except cardwrite.WriteError as exc:
+        raise _write_error(exc) from exc
+    thumbnail_store.forget_gallery(directory.name, filename)
+    return Response(status_code=204)
 
 
 @router.get("/characters/{card_id}/png", summary="Download the card PNG")

@@ -213,25 +213,171 @@ test("a blob with non-ASCII text survives base64 as UTF-8, not as bytes", async 
   assert.equal(back.name, "A Mother’s Claim — café");
 });
 
-test("every write refuses with 501 and an explanation", async () => {
+test("the writes the archive does not do still refuse with 501", async () => {
   const { fetch, calls } = loadAdapter({});
-  const writes = [
-    "/api/characters/edit-attribute",
-    "/api/characters/delete",
+  const refused = [
+    // Acquiring a card has to run the intake pipeline rather than storing what
+    // the browser embedded, so it is still refused rather than half-done.
+    "/api/characters/create",
     "/api/characters/import",
-    "/api/characters/merge-attributes",
-    "/api/images/upload",
-    "/api/images/delete",
+    "/api/content/importURL",
+    // Standalone World Info files are a SillyTavern concept; this archive's
+    // lorebooks live inside their cards.
     "/api/worldinfo/edit",
   ];
-  for (const path of writes) {
+  for (const path of refused) {
     const resp = await post(fetch, path, {});
     assert.equal(resp.status, 501, `${path} should refuse`);
     // 501 not 404: the route was recognised, the capability is absent. A user
-    // clicking Delete in a read-only build gets told which.
+    // clicking it gets told which.
     assert.match((await resp.json()).error, /not supported/);
   }
   assert.deepEqual(calls, [], "a refused write must never reach the server");
+});
+
+test("saving a card becomes a PUT of the whole card body", async () => {
+  const { fetch, requests } = loadAdapter({
+    "/api/v1/characters/Abbie_0d162f5f.png": { ok: true },
+  });
+  const data = { name: "Abbie", description: "rewritten", tags: ["Female"] };
+  const resp = await post(fetch, "/api/characters/merge-attributes", {
+    avatar: "Abbie_0d162f5f.png",
+    // ST's payload mirrors the card at the root as well; only `data` is the
+    // card, and only `data` should travel.
+    name: "Abbie",
+    description: "rewritten",
+    data,
+  });
+
+  assert.equal(resp.status, 200);
+  const sent = requests.at(-1);
+  assert.equal(sent.method, "PUT");
+  assert.equal(sent.url, "/api/v1/characters/Abbie_0d162f5f.png");
+  assert.deepEqual(JSON.parse(sent.body), { card: data });
+});
+
+test("a card write that the archive rejects comes back as that rejection", async () => {
+  // The frontend puts the body text in a toast, so "the card must have a
+  // non-empty name" has to survive the hop rather than becoming a bare failure.
+  const { fetch } = loadAdapter({
+    "/api/v1/characters/Abbie_0d162f5f.png": new Response(
+      JSON.stringify({ detail: "the card must have a non-empty `name`" }),
+      { status: 422, headers: { "Content-Type": "application/json" } },
+    ),
+  });
+  const resp = await post(fetch, "/api/characters/merge-attributes", {
+    avatar: "Abbie_0d162f5f.png",
+    data: { name: "" },
+  });
+  assert.equal(resp.status, 422);
+  assert.match((await resp.json()).error, /non-empty/);
+});
+
+test("a card write needs both the avatar and the card", async () => {
+  const { fetch, calls } = loadAdapter({});
+  assert.equal((await post(fetch, "/api/characters/merge-attributes", { data: {} })).status, 400);
+  assert.equal(
+    (await post(fetch, "/api/characters/merge-attributes", { avatar: "x.png" })).status,
+    400,
+  );
+  assert.deepEqual(calls, [], "an incomplete write must not reach the server");
+});
+
+test("deleting a card keeps its gallery", async () => {
+  // The delete modal removes the images itself, file by file, when the user
+  // ticks that box -- so the card delete must not take them as well.
+  const { fetch, requests } = loadAdapter({
+    "/api/v1/characters/Abbie_0d162f5f.png?gallery=keep": { id: "Abbie_0d162f5f.png" },
+  });
+  const resp = await post(fetch, "/api/characters/delete", {
+    avatar_url: "Abbie_0d162f5f.png",
+    delete_chats: false,
+  });
+
+  assert.equal(resp.status, 200);
+  assert.equal(requests.at(-1).method, "DELETE");
+  assert.match(requests.at(-1).url, /gallery=keep$/);
+});
+
+test("replacing an avatar forwards the file as multipart", async () => {
+  const { fetch, requests } = loadAdapter({
+    "/api/v1/characters/Abbie_0d162f5f.png/avatar": { ok: true },
+  });
+  const form = new FormData();
+  form.append("avatar", new File([new Uint8Array([1, 2, 3])], "avatar.png", { type: "image/png" }));
+  form.append("avatar_url", "Abbie_0d162f5f.png");
+
+  const resp = await fetch("/api/characters/edit-avatar", { method: "POST", body: form });
+
+  assert.equal(resp.status, 200);
+  const sent = requests.at(-1);
+  assert.equal(sent.method, "PUT");
+  assert.equal(sent.url, "/api/v1/characters/Abbie_0d162f5f.png/avatar");
+  // The archive names the part `image`; ST named it `avatar`.
+  assert.ok(sent.body instanceof FormData);
+  assert.ok(sent.body.get("image"), "the image part should be present");
+});
+
+test("a gallery upload turns base64 back into bytes", async () => {
+  const { fetch, requests } = loadAdapter({
+    "/api/v1/galleries/Abbie_kzbYR2QbpncC/files": { path: "user/images/Abbie_kzbYR2QbpncC/x.png" },
+  });
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+  const resp = await post(fetch, "/api/images/upload", {
+    image: bytes.toString("base64"),
+    filename: "x",
+    format: "png",
+    ch_name: "Abbie_kzbYR2QbpncC",
+  });
+
+  assert.equal(resp.status, 200);
+  // Callers read `path` back and store it as the local media path.
+  assert.equal((await resp.json()).path, "user/images/Abbie_kzbYR2QbpncC/x.png");
+
+  const sent = requests.at(-1);
+  assert.equal(sent.method, "POST");
+  const part = sent.body.get("file");
+  assert.equal(part.name, "x.png");
+  assert.deepEqual(Buffer.from(await part.arrayBuffer()), bytes, "the bytes should survive");
+});
+
+test("a gallery upload tolerates a data: URL prefix on the base64", async () => {
+  const { fetch, requests } = loadAdapter({
+    "/api/v1/galleries/G_kzbYR2QbpncC/files": { path: "user/images/G_kzbYR2QbpncC/x.png" },
+  });
+  await post(fetch, "/api/images/upload", {
+    image: `data:image/png;base64,${Buffer.from([1, 2]).toString("base64")}`,
+    filename: "x",
+    format: "png",
+    ch_name: "G_kzbYR2QbpncC",
+  });
+  const part = requests.at(-1).body.get("file");
+  assert.deepEqual(Buffer.from(await part.arrayBuffer()), Buffer.from([1, 2]));
+});
+
+test("deleting a gallery image splits the ST path into folder and file", async () => {
+  const { fetch, requests } = loadAdapter({
+    "/api/v1/galleries/Abbie_kzbYR2QbpncC/files/one.jpg": new Response(null, { status: 204 }),
+  });
+  const resp = await post(fetch, "/api/images/delete", {
+    path: "/user/images/Abbie_kzbYR2QbpncC/one.jpg",
+  });
+
+  assert.equal(resp.status, 200);
+  assert.equal(requests.at(-1).method, "DELETE");
+  assert.equal(requests.at(-1).url, "/api/v1/galleries/Abbie_kzbYR2QbpncC/files/one.jpg");
+});
+
+test("deleting a gallery image that is already gone is a success", async () => {
+  // The dedup and gallery passes both work from lists that go stale mid-run;
+  // failing them on a file someone else already removed is noise.
+  const { fetch } = loadAdapter({
+    "/api/v1/galleries/Abbie_kzbYR2QbpncC/files/gone.jpg": new Response(null, { status: 404 }),
+  });
+  const resp = await post(fetch, "/api/images/delete", {
+    path: "user/images/Abbie_kzbYR2QbpncC/gone.jpg",
+  });
+  assert.equal(resp.status, 200);
 });
 
 test("a character's chat list is empty, not unreadable", async () => {

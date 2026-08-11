@@ -25,10 +25,22 @@
  * why unmapped ST endpoints fail loudly (see NOT_IMPLEMENTED) instead of
  * quietly reaching a server that isn't there.
  *
- * WHAT IS DELIBERATELY NOT HERE
- * Phase 1 of the archive is read-only. Every mutating ST endpoint -- card edits,
- * deletes, imports, gallery uploads, world info -- answers 501 with a message
- * the UI can show. A write that silently no-ops is how an archive loses data.
+ * WRITES
+ * Card edits, deletes, avatar replacement and gallery writes map onto the
+ * archive's own write endpoints (see the WRITES section below). What is still
+ * refused -- acquiring a card from a provider, importing from a URL, standalone
+ * world-info files -- answers 501 with a message the UI can show, because a
+ * write that silently no-ops is how an archive loses data.
+ *
+ * Two ST behaviours deliberately do NOT survive the translation:
+ *
+ *   - **A rename does not move the card file.** SillyTavern never renamed an
+ *     avatar on a field write either, and the filename is what the frontend, the
+ *     DOM and the thumbnail cache all key on. See the PUT endpoint's docstring.
+ *   - **A rename does not move the gallery folder.** The archive resolves a
+ *     gallery by its `gallery_id`, not by the folder's name, so the frontend's
+ *     file-by-file folder rename has nothing left to do and is short-circuited
+ *     in library.js.
  */
 (function () {
     'use strict';
@@ -64,8 +76,39 @@
      * instead of watching nothing happen.
      */
     function notImplemented(what) {
-        console.warn(`[archive-api] ${what} is not available: the archive API is read-only.`);
+        // The status goes in the message on purpose: this is the one console
+        // line the app emits that is *expected*, and the smoke test filters it
+        // by that "501" so a genuine warning stays visible next to it.
+        console.warn(`[archive-api] 501 ${what}: not supported by the character archive.`);
         return json({ error: `${what} is not supported by the character archive yet.` }, 501);
+    }
+
+    /**
+     * Pass an archive-side failure back in the shape the frontend reads.
+     *
+     * The vendored code checks `response.ok` and puts the body text in a toast,
+     * so a 422 explaining that a card lost its name has to arrive as a 422 with
+     * that sentence in it -- not as a generic failure, and not as a 200 the
+     * caller then treats as a successful save.
+     */
+    async function relayError(resp, what) {
+        let detail = '';
+        try {
+            const body = await resp.clone().json();
+            detail = body?.detail || body?.error || '';
+        } catch {
+            detail = await resp.clone().text().catch(() => '');
+        }
+        console.error(`[archive-api] ${what} failed (HTTP ${resp.status}):`, detail);
+        return json({ error: detail || `${what} failed (HTTP ${resp.status})` }, resp.status);
+    }
+
+    /** base64 -> Blob, without inflating the string through a data: URL. */
+    function base64ToBlob(b64, type) {
+        const binary = atob(b64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        return new Blob([bytes], { type });
     }
 
     // ========================================
@@ -507,19 +550,139 @@
             },
         },
 
-        // ---- writes, deliberately refused ------------------------------------
-        { path: '/api/characters/edit-attribute', handler: () => notImplemented('Editing a card') },
-        { path: '/api/characters/edit-avatar', handler: () => notImplemented('Replacing an avatar') },
-        { path: '/api/characters/merge-attributes', handler: () => notImplemented('Editing a card') },
+        // ---- WRITES ----------------------------------------------------------
+        {
+            // The frontend's one card-write path. It sends the *whole* `data`
+            // object every time (writeCardFields hydrates first precisely so it
+            // can), which is why the archive endpoint is a replace rather than a
+            // patch -- there is nothing partial to express.
+            //
+            // No renaming happens here. ST never renamed an avatar file on a
+            // field write either, and `char.avatar` is the key the grid, the DOM
+            // and every URL in the app hold; moving it mid-save would 404 the
+            // card the user is looking at.
+            path: '/api/characters/merge-attributes',
+            async handler({ body }) {
+                const id = body?.avatar;
+                const card = body?.data;
+                if (!id) return json({ error: 'avatar is required' }, 400);
+                if (!card || typeof card !== 'object') {
+                    return json({ error: 'data must be the card object' }, 400);
+                }
+                const resp = await nativeFetch(`${API}/characters/${encodeURIComponent(id)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ card }),
+                });
+                if (!resp.ok) return relayError(resp, 'Saving the card');
+                return json({ ok: true });
+            },
+        },
+        {
+            // Multipart in, multipart on: `avatar` is the new image and
+            // `avatar_url` names the card. The archive re-runs intake's pixel
+            // pipeline and puts the existing card back on top, so nothing but
+            // the image changes.
+            path: '/api/characters/edit-avatar',
+            async handler({ form }) {
+                const id = form?.get('avatar_url');
+                const file = form?.get('avatar');
+                if (!id || !file) return json({ error: 'avatar and avatar_url are required' }, 400);
+                const payload = new FormData();
+                payload.append('image', file);
+                const resp = await nativeFetch(
+                    `${API}/characters/${encodeURIComponent(id)}/avatar`,
+                    { method: 'PUT', body: payload }
+                );
+                if (!resp.ok) return relayError(resp, 'Replacing the image');
+                return json({ ok: true });
+            },
+        },
+        {
+            // `delete_chats` is ignored: the archive stores none. The gallery is
+            // kept, matching what the caller expects -- the delete modal deletes
+            // the images itself first, one call per file, when the user asks it
+            // to.
+            path: '/api/characters/delete',
+            async handler({ body }) {
+                const id = body?.avatar_url;
+                if (!id) return json({ error: 'avatar_url is required' }, 400);
+                const resp = await nativeFetch(
+                    `${API}/characters/${encodeURIComponent(id)}?gallery=keep`,
+                    { method: 'DELETE' }
+                );
+                if (!resp.ok) return relayError(resp, 'Deleting the card');
+                return json({ ok: true });
+            },
+        },
+        {
+            // base64 in, multipart out. The frontend encodes every upload as
+            // base64 JSON because that is what SillyTavern took; the archive
+            // takes the bytes, so the inflation is undone here rather than
+            // carried through the API contract.
+            path: '/api/images/upload',
+            async handler({ body }) {
+                const folder = body?.ch_name;
+                if (!folder) return json({ error: 'ch_name is required' }, 400);
+                const format = String(body?.format || 'png').replace(/^\./, '');
+                const name = `${body?.filename || 'image'}.${format}`;
+                let blob;
+                try {
+                    // A data: URL prefix rides along on some of the extractor
+                    // paths; strip it rather than letting atob throw on the comma.
+                    const raw = String(body?.image || '').replace(/^data:[^,]*,/, '');
+                    blob = base64ToBlob(raw, `image/${format}`);
+                } catch (e) {
+                    return json({ error: `image is not valid base64: ${e.message}` }, 400);
+                }
+                const payload = new FormData();
+                payload.append('file', blob, name);
+                const resp = await nativeFetch(
+                    `${API}/galleries/${encodeURIComponent(folder)}/files`,
+                    { method: 'POST', body: payload }
+                );
+                if (!resp.ok) return relayError(resp, 'Uploading the file');
+                // Callers read `path` back and store it as the local media path.
+                const written = await resp.json();
+                return json({ path: written.path });
+            },
+        },
+        {
+            path: '/api/images/delete',
+            async handler({ body }) {
+                const parts = String(body?.path || '').replace(/^\/?user\/images\//, '');
+                const slash = parts.indexOf('/');
+                if (slash < 0) return json({ error: 'expected user/images/<folder>/<file>' }, 400);
+                const folder = encodeURIComponent(parts.slice(0, slash));
+                const file = encodeURIComponent(parts.slice(slash + 1));
+                const resp = await nativeFetch(`${API}/galleries/${folder}/files/${file}`, {
+                    method: 'DELETE',
+                });
+                // Already gone is the outcome the caller wanted. The dedup and
+                // gallery-rename passes both retry over lists that can go stale
+                // mid-run, and failing those is noise, not information.
+                if (!resp.ok && resp.status !== 404) return relayError(resp, 'Deleting the file');
+                return json({ ok: true });
+            },
+        },
+
+        // ---- writes the archive does not do ----------------------------------
+        //
+        // Acquiring a card is deliberately still refused: an import has to run
+        // the intake pipeline (macro sanitize, avatar crop and resize, pngquant,
+        // provenance stamping) rather than storing whatever the browser embedded,
+        // and that is the next slice of work rather than this one.
         { path: '/api/characters/create', handler: () => notImplemented('Creating a card') },
-        { path: '/api/characters/delete', handler: () => notImplemented('Deleting a card') },
         { path: '/api/characters/import', handler: () => notImplemented('Importing a card') },
         { path: '/api/content/importURL', handler: () => notImplemented('Importing from a URL') },
-        { path: '/api/images/upload', handler: () => notImplemented('Uploading a gallery image') },
-        { path: '/api/images/delete', handler: () => notImplemented('Deleting a gallery image') },
         {
+            // Standalone World Info *files* are a SillyTavern concept and the
+            // archive has no store for them -- its lorebooks live inside cards,
+            // as `character_book`, and are edited through the card write above.
+            // Kept as a route so it stays a clear refusal rather than a 404 that
+            // reads like a typo.
             match: (path) => path.startsWith('/api/worldinfo/'),
-            handler: () => notImplemented('Editing lorebooks'),
+            handler: () => notImplemented('Standalone lorebook files'),
         },
         {
             // Listing a character's chats. The archive stores none, so the
@@ -581,6 +744,7 @@
         const method = (init?.method || request?.method || 'GET').toUpperCase();
 
         let body = null;
+        let form = null;
         const rawBody = init?.body;
         if (typeof rawBody === 'string' && rawBody) {
             try {
@@ -588,6 +752,12 @@
             } catch {
                 body = null;
             }
+        } else if (typeof FormData !== 'undefined' && rawBody instanceof FormData) {
+            // Avatar replacement is the one multipart caller. Handed over as-is
+            // rather than parsed: the parts are Files, and re-reading a File
+            // into memory only to hand it straight back would double the peak
+            // for a large image.
+            form = rawBody;
         } else if (request && !init?.body) {
             try {
                 body = await request.clone().json();
@@ -597,7 +767,7 @@
         }
 
         try {
-            return await route.handler({ url, method, body, request, init });
+            return await route.handler({ url, method, body, form, request, init });
         } catch (e) {
             console.error(`[archive-api] ${url.pathname} failed:`, e);
             return json({ error: String(e?.message || e) }, 500);

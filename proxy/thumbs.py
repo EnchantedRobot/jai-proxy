@@ -37,8 +37,10 @@ data.
 
 from __future__ import annotations
 
+import glob
 import io
 import logging
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -207,6 +209,48 @@ class ThumbnailStore:
         return ThumbFile(path, sniff_media_type(data))
 
     # --- maintenance ---------------------------------------------------------
+
+    def forget(self, filename: str) -> int:
+        """Drop every cached avatar thumb for a card, at every size. Returns how
+        many files went.
+
+        Not housekeeping -- correctness. The avatar cache is keyed on the card
+        filename and has no staleness check against the card's mtime, because a
+        card's pixels never used to change. They do now: replacing an avatar
+        rewrites the same filename with different pixels, and deleting a card
+        frees its filename for a future card to reuse. Either way a thumb left
+        behind is served in place of the real image indefinitely.
+        """
+        removed = 0
+        for directory in sorted(self.root.glob("avatar*")):
+            if not directory.is_dir():
+                continue
+            candidate = directory / filename
+            try:
+                candidate.unlink()
+                removed += 1
+            except OSError:
+                continue
+        return removed
+
+    def forget_gallery(self, folder: str, filename: str | None = None) -> int:
+        """Drop cached gallery thumbs -- one image's, at every size, or the whole
+        folder's when `filename` is None."""
+        directory = self.gallery_dir / folder
+        if not directory.is_dir():
+            return 0
+        if filename is None:
+            shutil.rmtree(directory, ignore_errors=True)
+            return 1
+        removed = 0
+        # `<image>_<size>.jpg`, so one image has as many thumbs as sizes asked for.
+        for candidate in directory.glob(f"{glob.escape(filename)}_*.jpg"):
+            try:
+                candidate.unlink()
+                removed += 1
+            except OSError:
+                continue
+        return removed
 
     def missing(self, filenames: list[str]) -> list[str]:
         """Which of these cards have no avatar thumb yet."""
