@@ -499,8 +499,6 @@ function setupSettingsModal() {
     const toggleTokenVisibility = document.getElementById('toggleChubTokenVisibility');
     const datacatTokenInput = document.getElementById('settingsDatacatToken');
     const toggleDatacatTokenVisibility = document.getElementById('toggleDatacatTokenVisibility');
-    const datacatPluginBanner = document.getElementById('datacatPluginBanner');
-    const datacatSettingsFields = document.getElementById('datacatSettingsFields');
     const datacatSessionStatus = document.getElementById('datacatSessionStatus');
     const minScoreSlider = document.getElementById('settingsMinScore');
     const minScoreValue = document.getElementById('minScoreValue');
@@ -1480,21 +1478,17 @@ function setupSettingsModal() {
         const galleryThumbsClHelperBanner = document.getElementById('galleryThumbsClHelperBanner');
         const galleryThumbsClHelperFields = document.getElementById('galleryThumbsClHelperFields');
         checkClHelperPlugin(
-            datacatPluginBanner, datacatSettingsFields,
             gridThumbsClHelperBanner, settingsGridThumbClHelperFields,
             galleryThumbsClHelperBanner, galleryThumbsClHelperFields,
-        ).then(available => {
-            if (datacatSessionStatus) {
-                if (!available) {
-                    datacatSessionStatus.className = 'settings-status-badge inactive';
-                    datacatSessionStatus.innerHTML = '<i class="fa-solid fa-circle"></i> Plugin missing';
-                } else {
-                    datacatSessionStatus.className = 'settings-status-badge inactive';
-                    datacatSessionStatus.innerHTML = '<i class="fa-solid fa-circle"></i> Checking...';
-                    updateDatacatSessionStatus();
-                }
-            }
-        });
+        );
+        // DataCat's own session transport lives in the archive server now, not
+        // behind cl-helper (see docs/PHASE_3B_PLAN.md S2) -- its status badge no
+        // longer waits on that probe.
+        if (datacatSessionStatus) {
+            datacatSessionStatus.className = 'settings-status-badge inactive';
+            datacatSessionStatus.innerHTML = '<i class="fa-solid fa-circle"></i> Checking...';
+            updateDatacatSessionStatus();
+        }
         
         const minScore = getSetting('duplicateMinScore') || 35;
         minScoreSlider.value = minScore;

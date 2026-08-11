@@ -4007,16 +4007,18 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
             renderSkeletonGrid(grid);
         }
 
-        // Check cl-helper, auto-init session (with persistence), then load
+        // DataCat's session transport lives in the archive server itself now
+        // (proxy/api/datacat.py, see docs/PHASE_3B_PLAN.md) -- checkDcPluginAvailable()
+        // just confirms that server is reachable, not a separate plugin. Auto-init
+        // the session (with persistence), then load.
         checkDcPluginAvailable().then(async ok => {
             if (!ok) {
                 const g = document.getElementById('datacatGrid');
                 if (g) g.innerHTML = `
                     <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
                         <i class="fa-solid fa-plug-circle-xmark" style="font-size: 2rem; color: var(--cl-warning-bright-darker);"></i>
-                        <p style="margin-top: 12px;">The <strong>cl-helper</strong> server plugin is required for DataCat browsing.</p>
-                        <p style="margin-top: 8px; font-size: 0.85em;">Copy the <code>extras/cl-helper</code> folder into your SillyTavern <code>plugins/</code> directory and restart ST.</p>
-                        <p style="margin-top: 8px;"><a href="https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary#cl-helper-plugin-not-detected" target="_blank" style="color: var(--accent);">Setup instructions</a></p>
+                        <p style="margin-top: 12px;">Could not reach the archive server's DataCat endpoint.</p>
+                        <p style="margin-top: 8px; font-size: 0.85em;">Check that the server is running and try again.</p>
                     </div>
                 `;
                 return;

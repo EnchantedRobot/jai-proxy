@@ -6,7 +6,7 @@
 
 import { ProviderBase } from '../provider-interface.js';
 import CoreAPI from '../../core-api.js';
-import { assignGalleryId, importFromPng, fetchWithProxy } from '../provider-utils.js';
+import { postCapture } from '../provider-utils.js';
 import datacatBrowseView from './datacat-browse.js';
 import { initJanitorBridge } from '../janitor-bridge.js';
 import './datacat-avatar-restore.js';
@@ -15,7 +15,6 @@ import {
     resolveDatacatAvatarUrl,
     setApiRequest,
     setSavedTokenGetter,
-    slugify,
     stripHtml,
     resolveTagNames,
     fetchDatacatCharacter,
@@ -53,7 +52,6 @@ class DatacatProvider extends ProviderBase {
     get beta() { return true; }
     get disabledByDefault() { return true; }
     get enableWarning() { return 'DataCat is an experimental source. Its API is barebones and some features (creator listings, search) may return incomplete or unavailable results. Expect rough edges.'; }
-    get minClHelperVersion() { return '1.0.0'; }
     get browseView() { return datacatBrowseView; }
 
     get linkStatFields() {
@@ -446,7 +444,11 @@ class DatacatProvider extends ProviderBase {
     get supportsImport() { return true; }
 
     /**
-     * Import a character from DataCat.
+     * Phase 3B capture layer (see docs/PHASE_3B_PLAN.md): fetch the raw
+     * character detail (+ /download payload when available, + hydrated
+     * lorebook scripts) and POST them to /build-datacat, which maps/cleans/
+     * writes the card server-side (datacat_mapper). No card assembly or PNG
+     * embedding happens in the browser anymore.
      * @param {string} identifier - character UUID
      * @param {Object} [hitData] - Optional pre-fetched character data
      */
@@ -461,66 +463,39 @@ class DatacatProvider extends ProviderBase {
             const characterName = character.chat_name || character.chatName || character.name || 'Unnamed';
 
             // Download-first for the best V2 mapping; the sourceKind hint keeps freshly-extracted chars from 404ing into the metadata fallback.
-            let characterCard;
             const sourceKind = character.primary_content_source_kind
                 ? (character.primary_content_source_kind === 'saucepan' ? 'saucepan' : 'janitor')
                 : null;
             const downloadData = await fetchDatacatDownload(charId, sourceKind);
-            // Listing-shaped hits carry no body source at all; the metadata build needs the full row.
+            // Listing-shaped hits carry no body source at all; the server-side build needs the full row.
             if (!downloadData?.data && !character.chara_card_v2_json && !character.content_variants && !character.personality) {
                 character = await fetchDatacatCharacter(charId, sourceKind) || character;
             }
-            // Lorebook content moved behind a per-script hampter fetch; hydrate before building.
+            // Lorebook content moved behind a per-script hampter fetch; hydrate before capture --
+            // kept browser-side (the hampter endpoint only accepts browser TLS fingerprints, so
+            // the server can't fetch it itself; see hydrateDatacatScripts's own docstring).
             await hydrateDatacatScripts(character);
-            if (downloadData?.data) {
-                characterCard = buildV2FromDownload(downloadData, character);
-            } else {
-                characterCard = buildV2FromDatacat(character);
-            }
 
-            if (!characterCard?.data) throw new Error('Failed to build character card');
-
-            // Ensure datacat extension is set. sourceKind persists normalized ('janitor'/'saucepan', the API hint values), not the raw row kind.
-            if (!characterCard.data.extensions) characterCard.data.extensions = {};
-            characterCard.data.extensions.datacat = {
-                ...(characterCard.data.extensions.datacat || {}),
-                id: charId,
-                sourceKind: sourceKind || characterCard.data.extensions.datacat?.sourceKind || null,
-                creatorId: character.creator_id || character.creatorId || null,
-                creatorName: character.creator_name || character.creatorName || null,
-                pageName: this.getListingName(character),
-                linkedAt: new Date().toISOString()
-            };
-
-            assignGalleryId(characterCard, options, api);
-
-            // Download avatar. Listing rows top out at datacat's resized variants (640 card /
-            // 768 hero); only the detail payload's embedded V2 json points at the untouched
-            // original, so upgrade before resolving. Best-effort: keep the row on failure.
+            // Avatar. Listing rows top out at datacat's resized variants (640 card / 768 hero);
+            // only the detail payload's embedded V2 json points at the untouched original, so
+            // upgrade before resolving. Best-effort: keep the row on failure.
             if (!character.chara_card_v2_json && !character.content_variants) {
                 character = await fetchDatacatCharacter(charId, sourceKind) || character;
             }
             const avatarUrl = resolveDatacatAvatarUrl(character, { preferOriginal: true });
-            let imageBuffer = null;
 
-            if (avatarUrl) {
-                try {
-                    const resp = await fetchWithProxy(avatarUrl);
-                    imageBuffer = await resp.arrayBuffer();
-                } catch (e) {
-                    console.warn('[DatacatProvider] Avatar download failed:', e.message);
-                }
-            }
-
-            return await importFromPng({
-                characterCard, imageBuffer,
-                fileName: `datacat_${slugify(characterName)}.png`,
+            return await postCapture('/build-datacat', {
+                character,
+                download: downloadData?.data ? downloadData : null,
+                avatar_url: avatarUrl || null,
+                gallery_id: options?.inheritedGalleryId || null,
+            }, {
                 characterName,
                 hasGallery: false,
                 providerCharId: charId,
                 fullPath: charId,
                 avatarUrl: avatarUrl || null,
-                api
+                api,
             });
         } catch (error) {
             console.error(`[DatacatProvider] importCharacter failed for ${identifier}:`, error);

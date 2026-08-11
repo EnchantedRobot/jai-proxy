@@ -81,29 +81,16 @@ The two keys that matter most:
 
 | key | default | what it does |
 | --- | --- | --- |
-| `JAI_PROXY_OUTPUT_DIR` | `./data/characters` | where a build drops its card |
+| `JAI_PROXY_ARCHIVE_DIR` | `./data/characters` | the archive: what the browse API reads and what a build writes into |
 | `JAI_PROXY_CARD_LAYOUT` | `flat` | `flat` = `<name>_<id8>.png`; `nested` = `<creator>/<name>_<id8>.png` |
 
-`OUTPUT_DIR` defaults to **the archive itself** (`ARCHIVE_DIR`), so a retrieved
-card is in the archive the moment it's written and there is no sync step and no
-second copy to reconcile. `flat` is what keeps that workable: names stay unique
-across creators via the `_<id8>` fragment, and nothing is lost, since the creator
-is on the card (`extensions.jai.creatorName`).
-
-Pointing `OUTPUT_DIR` at **SillyTavern's characters folder** (typically
-`…/SillyTavern/data/default-user/characters`) is still supported — it used to be
-the recommended setup, when SillyTavern *was* the archive. It no longer is: the
-browse API always reads `ARCHIVE_DIR`, so a build sent to SillyTavern lands
-outside the archive. Two things to know if you do share a folder with it:
-
-- SillyTavern re-encodes a card's PNG whenever you save an edit to it, so that
-  card loses its pngquant compression (the data — including `extensions.jai`,
-  `gallery_id` and the lorebook — round-trips intact; it seeds its write from
-  the card's original JSON).
-- SillyTavern's explicit **Rename** action renames the file to `<Name>.png`,
-  dropping the `_<id8>` fragment that marks a card as already-acquired. Ordinary
-  saves keep the filename; renames don't. A renamed card can be retrieved again
-  as a duplicate.
+A build writes into `ARCHIVE_DIR` directly, so a retrieved card is in the
+archive the moment it's written — one directory, no sync step, no second copy
+to reconcile. `flat` is what keeps that workable: names stay unique across
+creators via the `_<id8>` fragment, and nothing is lost, since the creator is
+on the card (`extensions.jai.creatorName`). To relocate the archive (e.g. in a
+container), mount something else at `data/characters` rather than pointing
+builds at a separate folder — there is no "build elsewhere" knob anymore.
 
 Working state (`data/state/captures`, `data/state/lorecache`) sits beside the
 archive rather than inside it — under the one directory that has to be mounted

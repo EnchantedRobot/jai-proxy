@@ -54,7 +54,7 @@
     async build(payload) {
       const { text } = await this._request({
         method: "POST",
-        path: "/build",
+        path: "/build-jai",
         body: payload,
         timeout: 60000,
       });

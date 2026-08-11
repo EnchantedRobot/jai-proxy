@@ -3,6 +3,22 @@
 
   * abigail       -- single greeting, no alternates (toraval)
   * alt_greetings -- Aoi, a first_mes plus 5 alternates (AlissaOne)
+
+The browser-capture V2 builder (Phase 3B, see docs/PHASE_3B_PLAN.md) is
+validated separately, further down, against a real live capture:
+
+  * raw_api_character_abbie -- GET /api/characters/{id} for JanitorAI's
+    "Offer You Can't Refuse | Abbie" (KornyPony), captured live 2026-08-11
+    through the archive server's own /api/v1/datacat/dc-proxy -- the same
+    card this archive already has via the native /build-jai path
+    (data/characters/Abbie_0d162f5f.png), so the mapped fields can be
+    checked against that real twin, not just asserted in isolation.
+  * raw_api_download_abbie_turnstile_blocked -- the /download response for
+    the same character, captured the same way. DataCat gates /download
+    behind Cloudflare Turnstile; an anonymous session (no browser-solved
+    challenge) gets refused with no `data` -- real evidence that
+    build_v2_from_download must return None here so /build-datacat falls
+    back to build_v2_from_character, not a hypothetical edge case.
 """
 
 import base64
@@ -146,3 +162,77 @@ def test_builds_card_with_macros_intact_and_no_book():
     assert card.character_book is None  # datacat carries no lorebook
     assert "{{user}}" in card.scenario  # sanitizer preserves real macros
     assert "no first_mes" not in " ".join(warnings)
+
+
+# ---------------------------------------------------------------------------
+# Browser-capture V2 builder (Phase 3B): buildV2FromDatacat/buildV2FromDownload
+# ports, validated against the real Abbie capture described in the module
+# docstring -- and, where the field survives untouched, against the archive's
+# own native-JanitorAI twin of the same character.
+# ---------------------------------------------------------------------------
+
+
+def load_raw(name: str) -> dict:
+    return json.loads((FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def test_normalized_source_kind_collapses_datacat_row_kinds():
+    # The real trap this fixture caught: a JanitorAI row's own
+    # primary_content_source_kind is "janitor_core", not the bare "janitor"
+    # extensions.datacat.sourceKind expects everywhere else in this project.
+    character = load_raw("raw_api_character_abbie")["character"]
+    assert character["primary_content_source_kind"] == "janitor_core"
+    assert mapper.normalized_source_kind(character) == "janitor"
+    assert mapper.normalized_source_kind({"primary_content_source_kind": "saucepan"}) == "saucepan"
+    assert mapper.normalized_source_kind({}) == "janitor"
+
+
+def test_build_v2_from_character_matches_the_archived_native_twin():
+    character = load_raw("raw_api_character_abbie")["character"]
+
+    v2 = mapper.build_v2_from_character(character)
+    data = v2["data"]
+
+    # This exact character is also in the archive via the native /build-jai path
+    # (data/characters/Abbie_0d162f5f.png, extensions.jai.sourceKind
+    # "janitor_core") -- these fields must match it byte for byte.
+    assert data["name"] == "Abbie"
+    assert data["creator"] == "KornyPony"
+    assert data["first_mes"].startswith('"Fuck... Fuck, fuck, fuck!"')
+    assert len(data["alternate_greetings"]) == 2
+    assert data["scenario"]
+    assert len(data["description"]) == 6715  # matches the archived twin exactly
+    # No scripts on this row -- no lorebook, same as the archived twin (a
+    # native /build-jai retrieval that just happens to carry none either).
+    assert data["character_book"] is None
+
+    profile = mapper.to_profile_fields(data)
+    assert profile.name == "Abbie"
+    greetings = mapper.greetings(data)
+    assert len(greetings) == 3  # first_mes + 2 alternates
+
+
+def test_resolve_avatar_url_prefers_the_untouched_janitorai_original():
+    # DataCat's own top-level `avatar` is a re-hosted media.datacat.run copy;
+    # the embedded V2 json still points at the untouched ella.janitorai.com
+    # original -- the same URL the archive's native /build-jai retrieval used for
+    # this exact card (verified against the real archived twin).
+    character = load_raw("raw_api_character_abbie")["character"]
+    assert character["avatar"].startswith("https://media.datacat.run/")
+    assert mapper.resolve_avatar_url(character) == (
+        "https://ella.janitorai.com/bot-avatars/RlgBeHp4QSVxOoA9Ic1nx.webp"
+    )
+
+
+def test_build_v2_from_download_returns_none_when_turnstile_blocks_it():
+    """Real evidence (not a hypothetical): DataCat gates /download behind
+    Cloudflare Turnstile, and an anonymous dc-proxy session gets refused with
+    no `data` key at all. /build-datacat's fallback to
+    build_v2_from_character for exactly this response is what keeps a live
+    import working despite it."""
+    download = load_raw("raw_api_download_abbie_turnstile_blocked")
+    assert download["success"] is False
+    assert "data" not in download
+
+    character = load_raw("raw_api_character_abbie")["character"]
+    assert mapper.build_v2_from_download(download, character) is None

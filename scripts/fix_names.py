@@ -112,9 +112,9 @@ def _already_imported(cards_dir: Path, findings: list) -> list:
     which is what SillyTavern actually reads, is untouched. This has already
     cost one full pass of duplicated work, so it is now called out up front.
     """
-    if cards_dir.resolve() == Path(settings.output_dir).resolve():
+    if cards_dir.resolve() == Path(settings.archive_dir).resolve():
         return []
-    archive = Path(settings.output_dir)
+    archive = Path(settings.archive_dir)
     if not archive.is_dir():
         return []
     known = set()
@@ -616,7 +616,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--dir", type=Path, default=settings.output_dir, help="folder to scan")
+    parser.add_argument("--dir", type=Path, default=settings.archive_dir, help="folder to scan")
     parser.add_argument(
         "--verdict",
         choices=_VERDICT_ORDER,
@@ -714,7 +714,7 @@ def main() -> int:
     stale = _already_imported(args.dir, findings)
     if stale:
         print(f"\n!! {len(stale)} of these {len(findings)} card(s) are ALREADY in the archive")
-        print(f"!! ({settings.output_dir}).")
+        print(f"!! ({settings.archive_dir}).")
         print("!! `make import` skips cards it has already taken and leaves the staged PNG")
         print("!! behind, so renaming here edits a dead copy -- SillyTavern reads the archive.")
         print("!! Scan the archive instead:  make names ARGS=--interactive")

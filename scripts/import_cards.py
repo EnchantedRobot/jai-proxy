@@ -3,7 +3,7 @@
 Two kinds of already-embedded PNG export are recognised when dropped into
 `./import`, both re-homed into the configured cards folder as
 `<name>_<id>.png` -- the exact layout and naming the native retriever produces
-(see JAI_PROXY_OUTPUT_DIR / JAI_PROXY_CARD_LAYOUT in .env.template) -- so a
+(see JAI_PROXY_ARCHIVE_DIR / JAI_PROXY_CARD_LAYOUT in .env.template) -- so a
 landed card shows as acquired on the next scan (which keys off the `_<id>`
 filename fragment):
 
@@ -88,7 +88,7 @@ def _utc_now_iso() -> str:
 
 
 def _datacat_extensions(data: dict, creator: str) -> dict:
-    """Provenance mirroring the native /build extensions, but flagged
+    """Provenance mirroring the native /build-jai extensions, but flagged
     `datacat_import` and carrying datacat's own block so it's always clear a
     card came in via import (and may therefore lack a lorebook). A source
     `gallery_id` is carried over so a fresh import keeps it (Chub passes its
@@ -327,7 +327,7 @@ def _stale_siblings(card_id: str, written: Path, cards_dir: Path) -> list[Path]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--import-dir", type=Path, default=Path("import"))
-    parser.add_argument("--cards-dir", type=Path, default=settings.output_dir)
+    parser.add_argument("--cards-dir", type=Path, default=settings.archive_dir)
     parser.add_argument(
         "--no-compress",
         action="store_true",

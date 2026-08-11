@@ -57,7 +57,7 @@ userscript export of hidden card ──POST──> proxy  /build-saucepan
 ```
 
 Reference template already in the repo: the JanitorAI path — `server.py` `/v1/chat/completions`
-capture block (L94-116) + `/build` hidden merge (L179-246), `proxy/prompt_parser.py`
+capture block (L94-116) + `/build-jai` hidden merge (L179-246), `proxy/prompt_parser.py`
 `SystemPromptParser`, `proxy/capture_store.py`, `proxy/macros.py` `MacroSanitizer.reverse_names`.
 
 ## 4. The validated parse mapping
@@ -150,7 +150,7 @@ form `[ Label ]` on their own line, then the user persona. Line-anchored split o
 - **Read `proxy/cardbuilder.py` `build()` first** to confirm how `capture=` vs `profile` merge for
   hidden cards (the `_pick` logic). Simplest robust approach: fill the fields directly on `profile`
   as above and continue to pass `capture=None` (or pass the capture and ensure it wins). Mirror
-  whatever the JanitorAI `/build` hidden path does at L190-215 for consistency.
+  whatever the JanitorAI `/build-jai` hidden path does at L190-215 for consistency.
 
 ### Phase 4 — public host + auth gate
 - **Named Cloudflare tunnel** on Matt's domain (he owns a CF domain+account) → stable hostname,

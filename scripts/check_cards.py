@@ -112,7 +112,7 @@ def _diff_snippet(before: str, after: str, ctx: int = 40) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--cards-dir", type=Path, default=settings.output_dir)
+    parser.add_argument("--cards-dir", type=Path, default=settings.archive_dir)
     parser.add_argument(
         "--repair",
         action="store_true",

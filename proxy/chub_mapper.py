@@ -98,6 +98,58 @@ def source_url(data: dict[str, Any]) -> str | None:
     return f"{_CHUB_CHARACTER_BASE}{full_path}" if full_path else None
 
 
+def build_v2_from_chub(
+    node: dict[str, Any], linked_lorebook: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Build the V2 `data` object clean_card() consumes, straight from the raw
+    Chub API node (GET /api/characters/{fullPath}?full=true) -- the same shape
+    the browser's importCharacter posts to /build-chub. `linked_lorebook` is
+    the raw response of GET /api/v4/projects/{id}/repository/files/raw%252Fcard.json/raw
+    (the linked-project lorebook resolved via the git API), or None when the
+    card has no `related_lorebooks`.
+
+    Port of chub-api.js:buildCharacterCardFromChub -- field-for-field, keep
+    the two in sync. `node.definition.extensions.chub` already carries `id`/
+    `full_path` (Chub bakes its own provenance into every export), so no
+    extra id-stamping is needed here; the caller only layers `extensions.jai`
+    on top, same as every other source."""
+    definition = node.get("definition") or {}
+
+    character_book = definition.get("embedded_lorebook")
+    if linked_lorebook:
+        book = linked_lorebook.get("character_book")
+        if not book:
+            book = (linked_lorebook.get("data") or {}).get("character_book")
+        if isinstance(book, dict) and book.get("entries"):
+            character_book = book
+
+    def_extensions = definition.get("extensions") or {}
+    chub_ext = {
+        **(def_extensions.get("chub") or {}),
+        "tagline": node.get("tagline") or definition.get("tagline") or "",
+    }
+
+    full_path = node.get("fullPath") or ""
+
+    return {
+        "name": definition.get("name") or node.get("name") or "Unknown",
+        "description": definition.get("personality") or "",
+        "personality": definition.get("tavern_personality") or "",
+        "scenario": definition.get("scenario") or "",
+        "first_mes": definition.get("first_message") or "",
+        "mes_example": definition.get("example_dialogs") or "",
+        "creator_notes": definition.get("description") or "",
+        "system_prompt": definition.get("system_prompt") or "",
+        "post_history_instructions": definition.get("post_history_instructions") or "",
+        "alternate_greetings": definition.get("alternate_greetings") or [],
+        "tags": node.get("topics") or [],
+        "creator": full_path.split("/")[0] if full_path else "",
+        "character_version": definition.get("character_version") or "",
+        "extensions": {**def_extensions, "chub": chub_ext},
+        "character_book": character_book,
+    }
+
+
 def clean_card(
     data: dict[str, Any], sanitizer: MacroSanitizer
 ) -> tuple[dict[str, Any], list[str]]:

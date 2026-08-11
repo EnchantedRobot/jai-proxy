@@ -22,21 +22,14 @@ def test_settings_defaults():
     assert defaults.lorebook_cache_dir == ROOT / "data" / "state" / "lorecache"
 
 
-def test_builds_land_in_the_archive_by_default():
-    # A build writes into the archive the browse API reads: one directory, no
-    # sync step. The equality is the design, not a coincidence.
-    defaults = Settings(_env_file=None)
-    assert defaults.output_dir == defaults.archive_dir
-
-
 def test_settings_read_env_file(tmp_path):
     env = tmp_path / ".env"
     env.write_text(
-        "JAI_PROXY_OUTPUT_DIR=/tmp/characters\nJAI_PROXY_CARD_LAYOUT=nested\n",
+        "JAI_PROXY_ARCHIVE_DIR=/tmp/characters\nJAI_PROXY_CARD_LAYOUT=nested\n",
         encoding="utf-8",
     )
     configured = Settings(_env_file=env)
-    assert configured.output_dir == Path("/tmp/characters")
+    assert configured.archive_dir == Path("/tmp/characters")
     assert configured.card_layout == "nested"
 
 

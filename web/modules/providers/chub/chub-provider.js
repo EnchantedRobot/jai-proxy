@@ -5,7 +5,7 @@
 
 import { ProviderBase } from '../provider-interface.js';
 import CoreAPI from '../../core-api.js';
-import { assignGalleryId, importFromPng, slugify, proxyEncode } from '../provider-utils.js';
+import { postCapture, proxyEncode } from '../provider-utils.js';
 import chubBrowseView, { openChubTokenModal } from './chub-browse.js';
 import {
     initChubApi,
@@ -688,66 +688,52 @@ class ChubProvider extends ProviderBase {
 
     get supportsImport() { return true; }
 
+    /**
+     * Phase 3B capture layer: fetch the raw Chub node (+ linked lorebook, both
+     * CORS-open) and POST them to /build-chub, which maps/cleans/writes the
+     * card server-side (chub_mapper). No card assembly or PNG embedding
+     * happens in the browser anymore -- see docs/PHASE_3B_PLAN.md.
+     */
     async importCharacter(fullPath, hitData, options = {}) {
         try {
-            let metadata = await this.fetchMetadata(fullPath);
+            const metadata = await this.fetchMetadata(fullPath);
             if (!metadata || !metadata.definition) {
                 throw new Error('Could not fetch character data from API');
             }
 
             const hasGallery = metadata.hasGallery || false;
             const characterName = metadata.definition?.name || metadata.name || fullPath.split('/').pop();
-            const characterCard = await this._buildCardFromMetadata(metadata);
-
             const metadataId = metadata.id || null;
-            const metadataTagline = metadata.tagline || metadata.definition?.tagline || '';
-            const metadataListingName = this.getListingName(metadata);
             const metadataMaxResUrl = metadata.max_res_url || null;
             const metadataAvatarUrl = metadata.avatar_url || null;
-            metadata = null;
 
-            if (!characterCard.data.extensions) characterCard.data.extensions = {};
-            const existingChub = characterCard.data.extensions.chub || {};
-            characterCard.data.extensions.chub = {
-                ...existingChub,
-                id: metadataId || existingChub.id || null,
-                full_path: fullPath,
-                tagline: metadataTagline || existingChub.tagline || '',
-                pageName: metadataListingName || existingChub.pageName || null,
-                linkedAt: new Date().toISOString()
-            };
-
-            assignGalleryId(characterCard, options, api);
-
-            // Avatar download - priority chain
-            const imageUrls = [];
-            if (metadataMaxResUrl) imageUrls.push(metadataMaxResUrl);
-            if (hitData?.avatar_url) imageUrls.push(hitData.avatar_url);
-            if (metadataAvatarUrl) imageUrls.push(metadataAvatarUrl);
-            imageUrls.push(`${CHUB_AVATAR_BASE}${fullPath}/avatar.webp`);
-            imageUrls.push(`${CHUB_AVATAR_BASE}${fullPath}/avatar.png`);
-            imageUrls.push(`${CHUB_AVATAR_BASE}${fullPath}/chara_card_v2.png`);
-            const uniqueUrls = [...new Set(imageUrls)];
-
-            let imageBuffer = null;
-            for (const url of uniqueUrls) {
+            let linkedLorebook = null;
+            if (metadata.related_lorebooks?.length > 0 && metadata.id) {
                 try {
-                    const resp = await fetchWithProxy(url);
-                    imageBuffer = await resp.arrayBuffer();
-                    break;
-                } catch { /* try next */ }
+                    const book = await fetchChubLinkedLorebook(metadata.id);
+                    if (book?.entries?.length > 0) linkedLorebook = { character_book: book };
+                } catch (e) {
+                    console.warn('[ChubProvider] Failed to fetch linked lorebook for', fullPath, e);
+                }
             }
+
+            const avatarUrl = metadataMaxResUrl || hitData?.avatar_url || metadataAvatarUrl
+                || `${CHUB_AVATAR_BASE}${fullPath}/avatar.webp`;
 
             chubMetadataCache.delete(fullPath);
 
-            return await importFromPng({
-                characterCard, imageBuffer,
-                fileName: `chub_${slugify(characterName)}.png`,
-                characterName, hasGallery,
+            return await postCapture('/build-chub', {
+                node: metadata,
+                linked_lorebook: linkedLorebook,
+                avatar_url: avatarUrl,
+                gallery_id: options?.inheritedGalleryId || null,
+            }, {
+                characterName,
+                hasGallery,
                 providerCharId: metadataId,
                 fullPath,
-                avatarUrl: `${CHUB_AVATAR_BASE}${fullPath}/avatar.webp`,
-                api
+                avatarUrl,
+                api,
             });
         } catch (error) {
             console.error(`[ChubProvider] importCharacter failed for ${fullPath}:`, error);

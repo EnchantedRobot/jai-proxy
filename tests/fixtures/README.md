@@ -139,7 +139,7 @@ lorebook-specific facet of that same real capture set.
   confirmed via a browser console dump made while probing JanitorAI's `/hampter/*`
   endpoints — which confirms the real endpoint is `/hampter/script/<id>` singular, not
   `/hampter/scripts/<id>` or `/hampter/lorebooks/<id>` (both 404 there). This is the fixture
-  `LorebookMapper.map()` tests actually feed in, since it's the shape a real `/build`
+  `LorebookMapper.map()` tests actually feed in, since it's the shape a real `/build-jai`
   `lorebooks[].raw` payload has.
 
 **Do NOT confuse with `saucepan/lorebook_chapter*.json`** — a different, obfuscated shape

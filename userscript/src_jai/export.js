@@ -1,6 +1,6 @@
   // ---------------------------------------------------------------------------
   // Export — the whole card export is now: fetch the character JSON, fetch its
-  // public lorebooks, POST /build. No DOM scraping, no greeting carousel walk.
+  // public lorebooks, POST /build-jai. No DOM scraping, no greeting carousel walk.
   // Hidden cards work the same way: their definition + primary greeting are
   // already captured server-side from the chat relay, and the server merges
   // them with the JSON's alternate greetings / metadata.
@@ -33,7 +33,7 @@
   }
 
   // The reusable core of a card export: resolve the character JSON (unless one
-  // is supplied), fetch its public lorebooks, POST /build. Shared by the single
+  // is supplied), fetch its public lorebooks, POST /build-jai. Shared by the single
   // Export-card button and the bulk "download all open cards" panel. The card
   // name is no longer sent from here — the server derives the real character
   // name from the API JSON (chat_name), so there's nothing to guess or prompt

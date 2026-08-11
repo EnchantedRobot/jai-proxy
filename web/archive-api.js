@@ -528,23 +528,7 @@
 
         // ---- gone with SillyTavern -------------------------------------------
         {
-            // The helper plugin lived inside SillyTavern's process. Its status
-            // probes are all optional-chained in the frontend, which renders a
-            // "helper not installed" state -- accurate, so a 404 is the right
-            // answer and not an error.
-            match: (path) => path.startsWith('/api/plugins/cl-helper/'),
-            handler() {
-                return new Response(null, { status: 404 });
-            },
-        },
-        {
             path: '/api/extensions/version',
-            handler() {
-                return new Response(null, { status: 404 });
-            },
-        },
-        {
-            match: (path) => path.startsWith('/extras/cl-helper/'),
             handler() {
                 return new Response(null, { status: 404 });
             },

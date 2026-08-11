@@ -19,7 +19,7 @@ logs/
 proxy/pngquant
 
 # Local configuration. Correctness, not size -- config.py reads ROOT/.env, and
-# a developer's .env points OUTPUT_DIR at their SillyTavern install.
+# a developer's .env may set an ARCHIVE_DIR override.
 .env
 
 # The image is the server only; tests, scripts and the userscript sources stay

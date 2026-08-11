@@ -363,11 +363,15 @@ trips for a 500-card selection, against one request now.
   notes alone are 13.3 MB across the archive, which would more than double the
   boot payload for one search field. Name, creator, page title, filename and
   tags all match. Adding it means an `include=notes` on the list endpoint.
-- **Acquiring a card still refuses with 501.** `characters/create`,
-  `characters/import` and `content/importURL` answer with a message the UI shows
-  in a toast. An import has to run the intake pipeline — macro sanitize, avatar
-  crop and resize, pngquant, provenance stamping — rather than storing whatever
-  the browser embedded, so it is the next slice of work rather than an omission.
+- **Acquiring a card from Chub or DataCat now works** (Phase 3B, see
+  `docs/PHASE_3B_PLAN.md`): the provider is a pure capture layer — it fetches
+  the raw provider JSON and POSTs it to `/build-chub` / `/build-datacat`,
+  which run the full intake pipeline server-side (macro sanitize, avatar crop
+  and resize, pngquant, provenance stamping) instead of storing whatever the
+  browser embedded. `characters/create`, `characters/import` and
+  `content/importURL` still refuse with 501 — they back the local-PNG-file
+  and URL-import modal (a different, still-unbuilt feature) and
+  `web/modules/batch-transfer.js`, unrelated to provider acquisition.
   Editing, deleting, replacing an image and gallery writes all work; see
   "Writes" below.
 - **The shared LLM client is dead code.** `lorebook-manager` was its last live

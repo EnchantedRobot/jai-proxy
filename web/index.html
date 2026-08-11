@@ -1384,7 +1384,6 @@ https://jannyai.com/characters/uuid_slug
                             <p>Cloudflare's pass expires on a fixed timer rather than on idleness, so it lapses often. The managed browser handles that itself; userscript <strong>v1.2.1+</strong> renews it by briefly opening the site in a background tab. On mobile, a userscript-capable browser such as Firefox for Android works.</p>
                             <p><strong>Across all modes:</strong> Pasting a <strong>JanitorAI character URL</strong> into the search bar will look up the character on DataCat. If it's found, the preview opens directly. If not, an extraction panel appears letting you request the character from DataCat's cloud service.</p>
                             <p><strong>Extraction:</strong> When a character only exists on JanitorAI and hasn't been indexed by DataCat yet, the Import button changes to <strong>Extract</strong>. This sends a request to DataCat's cloud service, which visits the JanitorAI page and retrieves the full character definition. You can also paste a JanitorAI URL directly into the search bar to look up and extract specific characters.</p>
-                            <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> DataCat requires the cl-helper server plugin. Install it from Settings → Online → DataCat.</p>
                             <p class="info-tip"><i class="fa-solid fa-arrows-rotate"></i> <strong>Re-extract on update checks:</strong> Toggle in Settings → Online → DataCat to force DataCat to pull fresh data from JanitorAI before each update check. Slower, but avoids comparisons against stale cached data on DataCat's side.</p>
                         </div>
                     </div>
@@ -2158,13 +2157,6 @@ https://jannyai.com/characters/uuid_slug
                                 <i class="fa-solid fa-chevron-right provider-chevron"></i>
                             </summary>
                             <div class="settings-provider-body">
-                                <div class="cl-helper-banner cl-hidden" id="datacatPluginBanner">
-                                    <i class="fa-solid fa-puzzle-piece"></i>
-                                    <div>
-                                        <strong>cl-helper plugin required</strong>
-                                        <span>DataCat requires the cl-helper server plugin for API proxying. <a href="#" class="cl-goto-info">Open cl-helper status &rarr;</a></span>
-                                    </div>
-                                </div>
                                 <div class="settings-group" id="datacatSettingsFields">
                                     <div class="settings-group-title"><i class="fa-solid fa-key"></i> Session</div>
                                     <div class="settings-row">

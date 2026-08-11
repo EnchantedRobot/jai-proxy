@@ -156,7 +156,7 @@ class PngWriter:
         pngquant_bin: Path | None = None,
         layout: str | None = None,
     ) -> None:
-        self._output_dir = output_dir or settings.output_dir
+        self._output_dir = output_dir or settings.archive_dir
         self._compress = settings.compress if compress is None else compress
         self._pngquant_bin = self._resolve_pngquant(pngquant_bin or settings.pngquant_bin)
         self._layout = layout or settings.card_layout

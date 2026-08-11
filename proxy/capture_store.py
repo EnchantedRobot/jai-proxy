@@ -29,7 +29,7 @@ class CaptureStore:
     always kept even if parsing fails) AND parses each prompt via
     SystemPromptParser into a CaptureRecord upserted by normalize(name),
     persisted as `{captures_dir}/{slug}.json` and held in memory so
-    CardBuilder can merge the hidden definition into a `/build` (get()).
+    CardBuilder can merge the hidden definition into a `/build-jai` (get()).
     """
 
     def __init__(
@@ -91,7 +91,7 @@ class CaptureStore:
         # already folds that trailing text into `scenario` rather than
         # fabricate a structured LoreEntry with invented keys (see its
         # comment). The real, keyed source of lore is the /hampter/script
-        # fetch path (lorebook.LorebookMapper.map(), wired in via /build's
+        # fetch path (lorebook.LorebookMapper.map(), wired in via /build-jai's
         # `lorebooks` payload) -- that's what populates character_book.
         record = CaptureRecord(
             name=parsed.name,
@@ -136,7 +136,7 @@ class CaptureStore:
     def clear(self) -> int:
         """Wipe all captured state: in-memory records/raw prompts and every
         file under captures_dir (.txt raw prompts + .json records). PNGs
-        live under output_dir, a sibling directory, so they're untouched.
+        live under archive_dir, a sibling directory, so they're untouched.
         """
         removed = 0
         for path in self._captures_dir.glob("*"):

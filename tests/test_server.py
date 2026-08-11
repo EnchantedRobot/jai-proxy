@@ -183,7 +183,7 @@ def test_chat_completions_capture_error_does_not_block_forward(monkeypatch, tmp_
 
 
 # ---------------------------------------------------------------------------
-# /build -- open card export end-to-end (JSON API path).
+# /build-jai -- open card export end-to-end (JSON API path).
 # ---------------------------------------------------------------------------
 
 
@@ -192,7 +192,7 @@ def test_build_exports_open_card_png(tmp_path):
     akane = _character("open_akane_kujo")
 
     resp = client.post(
-        "/build",
+        "/build-jai",
         json={
             "character": {
                 "name": "Akane Kujo",
@@ -266,10 +266,10 @@ def test_rebuilding_a_saved_card_skips_the_write(tmp_path, caplog):
     server_module.DASHBOARD = dashboard
     try:
         with caplog.at_level(logging.INFO, logger="jai_proxy.server"):
-            first = client.post("/build", json=payload).json()
+            first = client.post("/build-jai", json=payload).json()
             path = Path(first["path"])
             stamped = path.read_bytes()
-            second = client.post("/build", json=payload).json()
+            second = client.post("/build-jai", json=payload).json()
     finally:
         server_module.DASHBOARD = None
 
@@ -299,17 +299,17 @@ def test_rebuilding_after_deleting_the_card_writes_it_again(tmp_path):
         "character": {"name": "Akane Kujo", "id": "abc123"},
         "character_json": _character("open_akane_kujo"),
     }
-    path = Path(client.post("/build", json=payload).json()["path"])
+    path = Path(client.post("/build-jai", json=payload).json()["path"])
     path.unlink()
 
-    again = client.post("/build", json=payload).json()
+    again = client.post("/build-jai", json=payload).json()
     assert again["duplicate"] is False
     assert Path(again["path"]).exists()
 
 
 # ---------------------------------------------------------------------------
 # /build-saucepan -- open card export end-to-end (saucepan JSON API path). Same
-# assemble/write tail as /build; differs only in the source mapper.
+# assemble/write tail as /build-jai; differs only in the source mapper.
 # ---------------------------------------------------------------------------
 
 
@@ -396,6 +396,84 @@ def test_build_saucepan_hidden_card_warns_but_exports_public_fields(tmp_path):
     assert data["creator"] == "GreatN"
     assert data["extensions"]["jai"]["sourceKind"] == "saucepan_core"
     assert data["mes_example"] == ""
+
+
+def _chub_node(name: str) -> dict:
+    return json.loads((FIXTURES / "chub" / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def test_build_chub_exports_open_card_png_from_real_capture(tmp_path):
+    # Phase 3B: the browser posts the raw Chub API node + linked lorebook it
+    # captured (both captured live 2026-08-11, see PHASE_3B_PLAN.md Step 0);
+    # the server maps/cleans/writes -- same acceptance bar as /build-saucepan.
+    client = make_client(FakeResponder(), tmp_path)
+    node = _chub_node("raw_api_full_your_bully")
+    linked = _chub_node("raw_linked_lorebook_your_bully")
+
+    resp = client.post("/build-chub", json={"node": node, "linked_lorebook": linked})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["fields_present"]["description"] is True
+    assert body["fields_present"]["first_mes"] is True
+    assert body["fields_present"]["alternate_greetings"] is True
+    assert body["fields_present"]["character_book"] is True
+    assert body["filename"] == "Autumn_7547962.png"
+    assert body["card"]["data"]["name"] == "Autumn"
+
+    path = Path(body["path"])
+    assert path.name == "Autumn_7547962.png"
+
+    data = _decode(path)
+    assert data["name"] == "Autumn"
+    assert data["creator"] == "RelicGuy"
+    assert len(data["alternate_greetings"]) == 11
+    assert len(data["character_book"]["entries"]) == 4
+    # Raw-dict passthrough: pydantic-only fields never touched this data.
+    entry = data["character_book"]["entries"][0]
+    assert "probability" in entry
+    assert "selectiveLogic" in entry
+
+    jai = data["extensions"]["jai"]
+    assert jai["sourceKind"] == "chub_core"
+    assert jai["id"] == "7547962"
+    assert jai["creatorName"] == "RelicGuy"
+    assert jai["pageName"] == "Autumn"
+    # Chub's own provenance block (baked in by Chub itself) survives untouched.
+    assert data["extensions"]["chub"]["id"] == 7547962
+    assert data["extensions"]["chub"]["full_path"] == node["fullPath"]
+    # No datacat block -- Chub isn't a datacat source.
+    assert "datacat" not in data["extensions"]
+
+
+def test_build_chub_skips_rewrite_when_already_on_disk(tmp_path):
+    client = make_client(FakeResponder(), tmp_path)
+    node = _chub_node("raw_api_full_your_bully")
+    linked = _chub_node("raw_linked_lorebook_your_bully")
+    body = {"node": node, "linked_lorebook": linked}
+
+    first = client.post("/build-chub", json=body).json()
+    second = client.post("/build-chub", json=body).json()
+
+    assert first["duplicate"] is False
+    assert second["duplicate"] is True
+    assert second["path"] == first["path"]
+    assert second["filename"] is None  # not populated on the duplicate branch
+
+
+def test_build_chub_honors_explicit_gallery_id_on_replace(tmp_path):
+    client = make_client(FakeResponder(), tmp_path)
+    node = _chub_node("raw_api_full_your_bully")
+    linked = _chub_node("raw_linked_lorebook_your_bully")
+
+    resp = client.post(
+        "/build-chub",
+        json={"node": node, "linked_lorebook": linked, "gallery_id": "kept-id-123"},
+    )
+
+    data = _decode(resp.json()["path"])
+    assert data["extensions"]["gallery_id"] == "kept-id-123"
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +574,7 @@ def test_existing_reports_only_ids_already_on_disk(tmp_path):
 
     # Save one card, then ask about its id plus one we never built.
     client.post(
-        "/build",
+        "/build-jai",
         json={
             "character": {"name": "Akane Kujo", "id": "abc123"},
             "character_json": akane,
@@ -515,7 +593,7 @@ def test_existing_matches_on_id_fragment_regardless_of_name(tmp_path):
     # no idea what name it was saved under.
     client = make_client(FakeResponder(), tmp_path)
     client.post(
-        "/build",
+        "/build-jai",
         json={
             "character": {"name": "Whoever", "id": "deadbeef-1111-2222-3333-444455556666"},
             "character_json": {"chat_name": "Whoever", "creator_name": "acreator"},
@@ -539,7 +617,7 @@ def test_existing_empty_request_returns_empty(tmp_path):
 def test_build_falls_back_to_character_name_without_character_json(tmp_path):
     client = make_client(FakeResponder(), tmp_path)
 
-    resp = client.post("/build", json={"character": {"name": "No Profile Card"}})
+    resp = client.post("/build-jai", json={"character": {"name": "No Profile Card"}})
 
     assert resp.status_code == 200
     body = resp.json()
@@ -558,7 +636,7 @@ def test_build_names_card_from_chat_name_not_title_blurb(tmp_path):
     client = make_client(FakeResponder(), tmp_path)
 
     resp = client.post(
-        "/build",
+        "/build-jai",
         json={
             "character": {"id": "deadbeef-1234-5678-9abc-def012345678"},
             "character_json": {
@@ -581,7 +659,7 @@ def test_build_names_card_from_chat_name_not_title_blurb(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# /build -- hidden-card merge: definition + primary greeting from the chat
+# /build-jai -- hidden-card merge: definition + primary greeting from the chat
 # capture, everything else from the JSON.
 # ---------------------------------------------------------------------------
 
@@ -620,7 +698,7 @@ def test_build_hidden_card_with_no_capture_fails(tmp_path):
     client = make_client(FakeResponder(), tmp_path)
 
     resp = client.post(
-        "/build",
+        "/build-jai",
         json={"character": {"name": "Ari"}, "character_json": _hidden_ari_json()},
     )
 
@@ -634,7 +712,7 @@ def test_build_hidden_card_with_definition_but_no_greeting_fails(tmp_path):
     _capture_ari(client, greeting=None)  # system captured, no assistant greeting
 
     resp = client.post(
-        "/build",
+        "/build-jai",
         json={"character": {"name": "Ari"}, "character_json": _hidden_ari_json()},
     )
 
@@ -648,7 +726,7 @@ def test_build_hidden_card_merges_capture_and_json(tmp_path):
     _capture_ari(client, greeting="Hello there, USER")
 
     resp = client.post(
-        "/build",
+        "/build-jai",
         json={"character": {"name": "Ari"}, "character_json": _hidden_ari_json()},
     )
 
@@ -676,7 +754,7 @@ def test_build_hidden_card_merges_capture_and_json(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# /build -- lorebook mapping from the lorebooks payload.
+# /build-jai -- lorebook mapping from the lorebooks payload.
 # ---------------------------------------------------------------------------
 
 
@@ -685,7 +763,7 @@ def test_build_populates_character_book_from_lorebooks_payload(tmp_path):
     raw_script = json.loads((FIXTURES / "hampter_script_kamii_university.json").read_text(encoding="utf-8"))
 
     resp = client.post(
-        "/build",
+        "/build-jai",
         json={
             "character": {"name": "Akane Kujo"},
             "character_json": {"chat_name": "Akane Kujo", "first_messages": ["hi"]},
@@ -708,7 +786,7 @@ def test_build_with_no_lorebooks_has_no_character_book(tmp_path):
     client = make_client(FakeResponder(), tmp_path)
 
     resp = client.post(
-        "/build",
+        "/build-jai",
         json={"character": {"name": "No Lore"}, "character_json": {"chat_name": "No Lore"}},
     )
 
@@ -719,7 +797,7 @@ def test_build_surfaces_lorebook_mapping_warnings(tmp_path):
     client = make_client(FakeResponder(), tmp_path)
 
     resp = client.post(
-        "/build",
+        "/build-jai",
         json={
             "character": {"name": "Broken Script Owner"},
             "character_json": {"chat_name": "Broken Script Owner"},
@@ -756,7 +834,7 @@ def test_clear_captures_wipes_state_but_leaves_pngs(tmp_path):
 
     _capture_ari(client, greeting="Hi USER")
     resp = client.post(
-        "/build",
+        "/build-jai",
         json={"character": {"name": "Ari"}, "character_json": _hidden_ari_json()},
     )
     assert resp.json()["ok"] is True

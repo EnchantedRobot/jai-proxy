@@ -147,7 +147,7 @@ def test_literal_backslash_n_is_converted_to_real_newlines(parser):
 # chat_names containing '/' -- e.g. "Celeste // Brightstar". JanitorAI wraps
 # the definition in `<{chat_name}'s Persona>...`, so the persona tag name
 # itself carries the slash. The parser's name MUST come back equal to the
-# chat_name, because CaptureStore keys the record by it and /build resolves
+# chat_name, because CaptureStore keys the record by it and /build-jai resolves
 # the capture by chat_name -- a mismatch silently drops the hidden export.
 # ---------------------------------------------------------------------------
 
@@ -175,7 +175,7 @@ def test_slash_in_name_is_parsed_from_persona_tag(parser):
 
 def test_slash_name_key_matches_chat_name_end_to_end(parser):
     # The whole point of the fix: normalize(parsed.name) must equal the key a
-    # /build derives from chat_name, or capture_store.get() returns None.
+    # /build-jai derives from chat_name, or capture_store.get() returns None.
     from proxy.capture_store import normalize
 
     raw = "<A / B's Persona>body</A / B's Persona>"

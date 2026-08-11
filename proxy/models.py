@@ -111,7 +111,7 @@ class CaptureRecord(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# /build
+# /build-jai
 # ---------------------------------------------------------------------------
 
 
@@ -147,6 +147,14 @@ class BuildResponse(BaseModel):
     path: str | None = None
     warnings: list[str] = Field(default_factory=list)
     fields_present: dict[str, bool] = Field(default_factory=dict)
+    # filename/card: populated by /build-chub and /build-datacat, whose browser
+    # callers no longer assemble the card themselves (they only capture raw
+    # provider JSON) and so need it handed back -- filename to target post-import
+    # steps at the right card, card to feed findCharacterMediaUrls/
+    # findCharacterGalleryUrls for the import-summary modal. Unpopulated (None)
+    # on /build and /build-saucepan, which predate this need.
+    filename: str | None = None
+    card: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +169,51 @@ class SaucepanBuildRequest(BaseModel):
     character: dict[str, Any] = Field(default_factory=dict)
     avatar_url: str | None = None
     avatar_b64: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# /build-chub -- the Chub peer of /build-saucepan. The browser posts the raw
+# Chub API node (GET /api/characters/{fullPath}?full=true, CORS-open, fetched
+# client-side same as browse) plus its linked lorebook JSON if the card has
+# one (also fetched client-side via the git API). The server builds + cleans
+# + writes through chub_mapper -- never through CardBuilder/pydantic, per its
+# raw-dict-passthrough rule.
+# ---------------------------------------------------------------------------
+
+
+class ChubBuildRequest(BaseModel):
+    node: dict[str, Any] = Field(default_factory=dict)
+    linked_lorebook: dict[str, Any] | None = None
+    avatar_url: str | None = None
+    avatar_b64: str | None = None
+    # Set only on a "Replace Existing" duplicate-resolution import: the
+    # gallery_id read off the card being replaced (before it's deleted), so
+    # the archive's gallery folder link survives the swap instead of orphaning
+    # under a freshly minted id.
+    gallery_id: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# /build-datacat -- the DataCat peer of /build-chub. The browser posts the raw
+# /api/characters/:id detail payload (character), optionally the /download
+# response (download) for cards where it fills in fields the detail payload
+# leaves empty, and hydrated `character.scripts[]` lorebook content. The
+# server ports buildV2FromDatacat/buildV2FromDownload (datacat_mapper) to a
+# neutral V2 dict, then goes through CardBuilder like /build-jai and
+# /build-saucepan -- unlike Chub, a datacat character carries no
+# priority/probability/selectiveLogic or int position to lose in the
+# pydantic round-trip.
+# ---------------------------------------------------------------------------
+
+
+class DatacatBuildRequest(BaseModel):
+    character: dict[str, Any] = Field(default_factory=dict)
+    download: dict[str, Any] | None = None
+    avatar_url: str | None = None
+    avatar_b64: str | None = None
+    # Set only on a "Replace Existing" duplicate-resolution import -- see
+    # ChubBuildRequest.gallery_id.
+    gallery_id: str | None = None
 
 
 # ---------------------------------------------------------------------------

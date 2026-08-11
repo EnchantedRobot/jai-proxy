@@ -28,14 +28,7 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8000
 
-    # Where built cards land: the archive itself (see archive_dir below), so a
-    # freshly retrieved card is in the archive the moment it is written and
-    # there is no second directory to reconcile. Point it elsewhere -- e.g. at
-    # SillyTavern's characters folder -- only if you want builds to land outside
-    # the archive; the browse API always reads archive_dir.
-    output_dir: Path = ROOT / "data" / "characters"
-
-    # How cards are foldered under output_dir:
+    # How cards are foldered under archive_dir:
     #   flat   -- <name>_<id8>.png, everything in one directory. Required by
     #             SillyTavern, which does not recurse into subfolders.
     #   nested -- <creator>/<name>_<id8>.png, the original layout. The creator
@@ -45,13 +38,14 @@ class Settings(BaseSettings):
     card_layout: Literal["flat", "nested"] = "flat"
 
     # --- The archive ----------------------------------------------------------
-    # The character archive this server browses and exports from -- and, by
-    # default, the same directory builds land in (output_dir above). These
-    # default under the repo's own `data/`, which is gitignored, so the layout a
-    # developer sees is byte-for-byte the layout the container sees at its
-    # volume mount and no code has to branch on environment. Absolute (via ROOT)
-    # rather than cwd-relative so `uv run python -m proxy.server` works from any
-    # directory.
+    # The character archive this server browses, builds land in, and exports
+    # from -- one directory, no second copy to reconcile. Defaults under the
+    # repo's own `data/`, which is gitignored, so the layout a developer sees
+    # is byte-for-byte the layout the container sees at its volume mount and no
+    # code has to branch on environment. To relocate it, mount something else
+    # at `data/` (or override JAI_PROXY_ARCHIVE_DIR) -- there is no separate
+    # "build elsewhere" knob. Absolute (via ROOT) rather than cwd-relative so
+    # `uv run python -m proxy.server` works from any directory.
     archive_dir: Path = ROOT / "data" / "characters"
     galleries_dir: Path = ROOT / "data" / "galleries"
     # Thumbnail caches, both inherited at cutover: `avatar/` from SillyTavern's
@@ -113,7 +107,6 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-settings.output_dir.mkdir(parents=True, exist_ok=True)
 settings.archive_dir.mkdir(parents=True, exist_ok=True)
 settings.galleries_dir.mkdir(parents=True, exist_ok=True)
 settings.thumbs_dir.mkdir(parents=True, exist_ok=True)

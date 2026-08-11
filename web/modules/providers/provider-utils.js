@@ -11,7 +11,13 @@ import CoreAPI from '../core-api.js';
 
 export const IMG_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/%3E";
 
-export const CL_HELPER_PLUGIN_BASE = '/plugins/cl-helper';
+// Was '/plugins/cl-helper', SillyTavern-CharacterLibrary's server plugin --
+// gone with SillyTavern (Phase 3B S2, see docs/PHASE_3B_PLAN.md). DataCat's
+// session transport now lives in the archive server itself, at
+// proxy/api/datacat.py; apiRequest() prefixes `/api`, so this constant
+// resolves through to /api/v1/datacat/* -- a real backend route, not an
+// archive-api.js translation, so it needs no entry in that table.
+export const CL_HELPER_PLUGIN_BASE = '/v1/datacat';
 
 // Live mobile-mode check for handlers that branch per mode (html.cl-mobile, owned by the boot
 // policy + the library-mobile lifecycle). Always evaluate at event time, never at listener-attach
@@ -497,104 +503,6 @@ export function formatNumber(num) {
     return String(num);
 }
 
-// ========================================
-// IMAGE PROCESSING
-// ========================================
-
-// Avatars ride inside the card PNG for the rest of its life, and the import re-encodes whatever
-// arrives to lossless PNG, which inflates a compressed source several times over. SillyTavern's
-// own canonical avatar is 512x768 and it never downscales on import, so an outsized one is paid
-// for on the upload, on disk, and on every later decode.
-//
-// Budget by AREA rather than by long edge: a long-edge cap punishes extreme aspect ratios hardest,
-// since a very tall card loses nearly all its width before its height comes into range, while an
-// area budget bounds the decode and the re-encode the same way whatever the shape. The edge clamp
-// is a separate backstop for panorama shapes, which can satisfy the area budget and still blow past
-// what a canvas will allocate.
-const MAX_AVATAR_PIXELS = 8_000_000;
-const MAX_AVATAR_EDGE = 8192;
-
-// PNG keeps its dimensions in the mandatory first chunk, so an oversized one is spotted
-// without paying for a decode. null means unreadable, which keeps the untouched fast path.
-function pngDimensions(buffer) {
-    if (buffer.byteLength < 24) return null;
-    const view = new DataView(buffer);
-    if (view.getUint32(12) !== 0x49484452) return null;
-    return { width: view.getUint32(16), height: view.getUint32(20) };
-}
-
-// One policy shared by the passthrough check and the resize, so the two cannot drift apart.
-function avatarScale(width, height) {
-    if (!width || !height) return 1;
-    return Math.min(
-        1,
-        Math.sqrt(MAX_AVATAR_PIXELS / (width * height)),
-        MAX_AVATAR_EDGE / Math.max(width, height),
-    );
-}
-
-/**
- * Ensure a buffer is PNG format, downscaled to a sane avatar size. Returns an already-PNG
- * buffer as-is unless it is oversized; otherwise converts via OffscreenCanvas with an
- * api.convertImageToPng fallback.
- * @param {ArrayBuffer} imageBuffer
- * @param {Object} [api] - CoreAPI reference for convertImageToPng fallback
- * @returns {Promise<ArrayBuffer|null>}
- */
-export async function ensurePng(imageBuffer, api) {
-    // An empty or truncated body still resolves as a buffer, and the header read throws on it.
-    if (!imageBuffer || imageBuffer.byteLength < 4) return null;
-
-    const header = new Uint8Array(imageBuffer, 0, 4);
-    const isPng = header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47;
-    if (isPng) {
-        const dims = pngDimensions(imageBuffer);
-        if (!dims || avatarScale(dims.width, dims.height) === 1) return imageBuffer;
-    }
-
-    try {
-        const blob = new Blob([imageBuffer]);
-        const bitmap = await createImageBitmap(blob);
-        const scale = avatarScale(bitmap.width, bitmap.height);
-        const width = Math.max(1, Math.round(bitmap.width * scale));
-        const height = Math.max(1, Math.round(bitmap.height * scale));
-        if (scale < 1) {
-            CoreAPI.debugLog(`[ProviderUtils] avatar ${bitmap.width}x${bitmap.height} scaled to ${width}x${height}`);
-        }
-        const canvas = new OffscreenCanvas(width, height);
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(bitmap, 0, 0, width, height);
-        bitmap.close();
-        const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
-        return await pngBlob.arrayBuffer();
-    } catch (e1) {
-        try {
-            if (api?.convertImageToPng) return await api.convertImageToPng(imageBuffer);
-        } catch (e2) {
-            console.warn('[ProviderUtils] PNG conversion failed:', e2.message);
-        }
-    }
-    return null;
-}
-
-/**
- * Generate a 256x256 dark gray placeholder PNG with a "?" character.
- * @returns {Promise<ArrayBuffer>}
- */
-export async function generatePlaceholder() {
-    const canvas = new OffscreenCanvas(256, 256);
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#333';
-    ctx.fillRect(0, 0, 256, 256);
-    ctx.fillStyle = '#666';
-    ctx.font = '100px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('?', 128, 128);
-    const blob = await canvas.convertToBlob({ type: 'image/png' });
-    return await blob.arrayBuffer();
-}
-
 // Post-import tail shared by every browse view: summary/preview choreography, success toast,
 // library refresh, imported-badge stamp. The timings are deliberate: mobile shows the summary
 // OVER the preview for 220ms (the small-viewport fade is too visible), the no-summary path
@@ -635,154 +543,81 @@ export async function finishBrowseImport({ view, summaryArgs, showSummary, close
 }
 
 /**
- * Assign gallery_id to a character card, inheriting from a replaced character
- * or generating a new one if the uniqueGalleryFolders setting is enabled.
- * @param {Object} card - V2 character card (mutated in place)
- * @param {Object} options
- * @param {string} [options.inheritedGalleryId] - gallery_id from a replaced character
- * @param {Object} api - CoreAPI reference
- */
-export function assignGalleryId(card, options, api) {
-    if (!card?.data?.extensions) return;
-    if (options?.inheritedGalleryId) {
-        card.data.extensions.gallery_id = options.inheritedGalleryId;
-    } else if (api?.getSetting?.('uniqueGalleryFolders') && !card.data.extensions.gallery_id) {
-        card.data.extensions.gallery_id = api.generateGalleryId?.();
-    }
-}
-
-// ========================================
-// IMPORT PIPELINE
-// ========================================
-
-// ST's import endpoint responds with the extensionless base name, while everything
-// downstream (avatar lookups, /characters/get, folder resolution) keys on the real
-// .png filename; canonicalize at the seam.
-function ensurePngExt(name) {
-    return /\.png$/i.test(String(name)) ? name : `${name}.png`;
-}
-
-/**
- * Shared import-to-SillyTavern pipeline. Handles PNG conversion, card
- * embedding, upload to ST's import endpoint, and result normalization.
+ * Capture-layer import pipeline (Phase 3B, see docs/PHASE_3B_PLAN.md). POSTs
+ * raw provider JSON straight to the server, which maps/cleans/builds/writes
+ * the card server-side (see /build-chub, /build-datacat) and hands back the
+ * written filename + built card payload. The provider no longer assembles a
+ * card or embeds a PNG at all -- it is a pure capture layer, like a
+ * userscript.
  *
- * Providers call this after they've built their V2 card and downloaded
- * the avatar image. Provider-specific logic (metadata fetch, V2 card
- * building, link metadata, avatar download) stays in the provider.
+ * Deliberately plain fetch(), not api.apiRequest(): these are real FastAPI
+ * routes at the archive's root (the same way /build and /build-saucepan are,
+ * which the userscripts already call this way), not part of the `/api/*`
+ * surface archive-api.js emulates -- routing through apiRequest would prefix
+ * `/api` and miss the route entirely.
  *
- * @param {Object} params
- * @param {Object} params.characterCard - V2 character card to embed
- * @param {ArrayBuffer|null} params.imageBuffer - avatar image (any format)
- * @param {string} params.fileName - target filename (e.g. "chub_slug.png")
- * @param {string} params.characterName - display name for toasts/results
- * @param {boolean} [params.hasGallery=false] - whether gallery images exist
- * @param {string|number|null} [params.providerCharId] - provider-side ID
- * @param {string|null} [params.fullPath] - canonical path on provider
- * @param {string|null} [params.avatarUrl] - remote avatar URL for display
- * @param {Object} params.api - CoreAPI reference
+ * @param {string} endpoint - e.g. '/build-chub'
+ * @param {Object} body - the endpoint's request payload
+ * @param {Object} opts
+ * @param {string} opts.characterName - display name for the error/success path
+ * @param {boolean} [opts.hasGallery=false]
+ * @param {string|number|null} [opts.providerCharId=null]
+ * @param {string|null} [opts.fullPath=null]
+ * @param {string|null} [opts.avatarUrl=null] - remote avatar URL for display
+ * @param {Object} [opts.api] - CoreAPI reference, for findCharacterMediaUrls
  * @returns {Promise<Object>} ProviderImportResult
  */
-export async function importFromPng({
-    characterCard,
-    imageBuffer,
-    fileName,
+export async function postCapture(endpoint, body, {
     characterName,
     hasGallery = false,
     providerCharId = null,
     fullPath = null,
     avatarUrl = null,
-    api
-}) {
-    if (characterCard?.data?.name && characterCard.data.name.length > 128) {
-        characterCard.data.name = characterCard.data.name.substring(0, 128).trimEnd();
-    }
-
-    const safeName = fileName.replace(/[^a-zA-Z0-9_.-]/g, '_');
-
-    let pngBuffer = await ensurePng(imageBuffer, api);
-    imageBuffer = null;
-
-    if (!pngBuffer) {
-        pngBuffer = await generatePlaceholder();
-    }
-
-    let embeddedPng = api.embedCharacterDataInPng(pngBuffer, characterCard);
-    pngBuffer = null;
-
-    let file = new File([embeddedPng], safeName, { type: 'image/png' });
-    embeddedPng = null;
-
-    let formData = new FormData();
-    formData.append('avatar', file);
-    formData.append('file_type', 'png');
-    file = null;
-
-    const csrfToken = api.getCSRFToken?.();
-    const importResponse = await fetch('/api/characters/import', {
+    api,
+} = {}) {
+    const resp = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken },
-        body: formData
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
     });
-    formData = null;
-
-    const responseText = await importResponse.text();
-    if (!importResponse.ok) throw new Error(`Import error: ${responseText}`);
+    const responseText = await resp.text();
+    if (!resp.ok) throw new Error(`Import error: ${responseText}`);
 
     let result;
     try { result = JSON.parse(responseText); }
     catch { throw new Error(`Invalid JSON response: ${responseText}`); }
-    if (result.error) throw new Error('Import failed: Server returned error');
-
-    // ST's V2 import path runs data.name through sanitize-filename, replacing
-    // path-illegal chars like '|' (creators use them as separators) with '_'.
-    // merge-attributes does NOT re-sanitize, so we restore the raw name here.
-    // Without this, update-checks flag false diffs against the remote and
-    // gallery-folder lookups (using char.name) diverge from auto-localize's
-    // raw-cardData folder.
-    const ST_ILLEGAL_NAME_CHARS = /[<>:"/\\|?*]/;
-    const rawName = characterCard.data?.name;
-    if (result.file_name && rawName && ST_ILLEGAL_NAME_CHARS.test(rawName)) {
-        // ST returns file_name without the extension; merge-attributes needs it.
-        const avatarWithExt = ensurePngExt(result.file_name);
-        let restoreOk = false;
-        try {
-            // CARVE-OUT from the "no direct merge-attributes" architectural rule: this fires during the import round-trip, before CL has the new char in its allCharacters list, so applyCardFieldUpdates' avatar lookup would fail. The write is a single scalar data.name field with no extension namespace involved, so no preflight or sentinel handling is needed.
-            const resp = await api.apiRequest?.('/characters/merge-attributes', 'POST', {
-                avatar: avatarWithExt,
-                data: { name: rawName }
-            });
-            if (resp?.ok) {
-                restoreOk = true;
-            } else if (resp) {
-                let body = '';
-                try { body = await resp.clone().text(); } catch { /* ignore */ }
-                console.warn(`[Import] data.name restore failed (HTTP ${resp.status}):`, body.slice(0, 200));
-            }
-        } catch (e) {
-            console.warn('[Import] Failed to restore raw data.name:', e?.message || e);
-        }
-        if (!restoreOk) {
-            api.showToast?.(`Imported "${characterName}" but couldn't restore special characters in the name; update checks may show false differences.`, 'warning', 6000);
-        }
+    if (!result.ok) {
+        throw new Error(result.warnings?.length ? result.warnings.join('; ') : 'Import failed: server returned ok=false');
     }
 
-    const mediaUrls = api.findCharacterMediaUrls?.(characterCard) || [];
-    await CoreAPI.ensureExtractorsLoaded();
-    const galleryPageUrls = CoreAPI.findCharacterGalleryUrls(characterCard);
-    const galleryId = characterCard.data.extensions?.gallery_id || null;
+    // The duplicate branch returns path but no filename/card (see BuildResponse) --
+    // nothing was (re)written, so there's no fresh card to feed the media/gallery scan.
+    const fileName = result.filename || (result.path ? result.path.replace(/^.*[\\/]/, '') : ensurePngExt(`${slugify(characterName)}.png`));
+    const cardData = result.card?.data || null;
+
+    let mediaUrls = [];
+    let galleryPageUrls = [];
+    if (cardData) {
+        const characterCard = { data: cardData };
+        mediaUrls = api?.findCharacterMediaUrls?.(characterCard) || [];
+        await CoreAPI.ensureExtractorsLoaded();
+        galleryPageUrls = CoreAPI.findCharacterGalleryUrls(characterCard);
+    }
 
     return {
         success: true,
-        fileName: ensurePngExt(result.file_name || fileName),
-        characterName: characterCard.data?.name || characterName,
-        hasGallery,
+        fileName,
+        characterName: cardData?.name || characterName,
+        hasGallery: cardData ? hasGallery : false,
         providerCharId,
         fullPath,
         avatarUrl,
         embeddedMediaUrls: mediaUrls,
         galleryPageUrls,
-        galleryId,
-        cardData: characterCard.data
+        galleryId: cardData?.extensions?.gallery_id || null,
+        cardData,
+        duplicate: !!result.duplicate,
+        warnings: result.warnings || [],
     };
 }
 

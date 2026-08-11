@@ -179,11 +179,17 @@ test("gallery thumbnails keep their requested size", async () => {
   assert.deepEqual(calls, ["/api/v1/galleries/Abbie_kz/files/one.webp/thumb?size=384"]);
 });
 
-test("everything else cl-helper offered is gone, and says so with a 404", async () => {
+test("everything else cl-helper offered is gone, and just 404s off the real server", async () => {
+  // No entry in the routing table synthesises this anymore (Phase 3B removed
+  // the catch-all stub along with the plugin itself) -- gallery-thumb is the
+  // one route kept alive above, and DataCat's own surface moved to a real
+  // backend route (/api/v1/datacat/*, see proxy/api/datacat.py), so an
+  // unmapped cl-helper path now falls through like any other unknown path and
+  // reaches the server for real, where it 404s because nothing answers it.
   const { fetch, calls } = loadAdapter({});
   const resp = await fetch("/api/plugins/cl-helper/avatar-thumb-stats");
-  assert.equal(resp.status, 404);
-  assert.deepEqual(calls, [], "a vanished plugin route must not reach the server");
+  assert.equal(resp.status, 599, "unstubbed in the test harness -- a live server would 404 it");
+  assert.deepEqual(calls, ["/api/plugins/cl-helper/avatar-thumb-stats"]);
 });
 
 test("the frontend's own JSON blobs round-trip through browser storage", async () => {

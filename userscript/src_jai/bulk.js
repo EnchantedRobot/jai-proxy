@@ -9,7 +9,7 @@
   // — it cannot tell open from hidden. Only the per-card /hampter/characters/<id>
   // response carries the real `showdefinition`. So we enumerate ids from the
   // list, then fetch each card to classify + export. Userscript-only; every
-  // open card still goes through the same server /build as the single button.
+  // open card still goes through the same server /build-jai as the single button.
   // ---------------------------------------------------------------------------
   const LIST_PAGE_DELAY_MS = 600;    // between list-endpoint pages
   const CARD_BUILD_DELAY_MS = 1500;  // after exporting an open card (writes a PNG)

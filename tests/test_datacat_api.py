@@ -234,13 +234,13 @@ def test_persists_freshly_fetched_token_to_env_file(tmp_path):
         )
 
     env_path = tmp_path / ".env"
-    env_path.write_text("JAI_PROXY_OUTPUT_DIR=/somewhere\n")
+    env_path.write_text("JAI_PROXY_ARCHIVE_DIR=/somewhere\n")
     resolver = DatacatImageResolver(client=_client(handler), env_path=env_path)
     resolver.resolve("char-id")
 
     contents = env_path.read_text()
     assert "JAI_PROXY_DATACAT_SESSION_TOKEN=brand-new-tok" in contents
-    assert "JAI_PROXY_OUTPUT_DIR=/somewhere" in contents  # untouched
+    assert "JAI_PROXY_ARCHIVE_DIR=/somewhere" in contents  # untouched
 
 
 def test_persist_false_never_touches_the_env_file(tmp_path):
@@ -260,13 +260,13 @@ def test_persist_false_never_touches_the_env_file(tmp_path):
 
 def test_persist_session_token_replaces_existing_line(tmp_path):
     env_path = tmp_path / ".env"
-    env_path.write_text("JAI_PROXY_OUTPUT_DIR=/somewhere\nJAI_PROXY_DATACAT_SESSION_TOKEN=old-tok\nJAI_PROXY_CARD_LAYOUT=flat\n")
+    env_path.write_text("JAI_PROXY_ARCHIVE_DIR=/somewhere\nJAI_PROXY_DATACAT_SESSION_TOKEN=old-tok\nJAI_PROXY_CARD_LAYOUT=flat\n")
 
     datacat_api._persist_session_token("new-tok", env_path)
 
     lines = env_path.read_text().splitlines()
     assert lines == [
-        "JAI_PROXY_OUTPUT_DIR=/somewhere",
+        "JAI_PROXY_ARCHIVE_DIR=/somewhere",
         "JAI_PROXY_DATACAT_SESSION_TOKEN=new-tok",
         "JAI_PROXY_CARD_LAYOUT=flat",
     ]
@@ -274,11 +274,11 @@ def test_persist_session_token_replaces_existing_line(tmp_path):
 
 def test_persist_session_token_appends_when_no_existing_line(tmp_path):
     env_path = tmp_path / ".env"
-    env_path.write_text("JAI_PROXY_OUTPUT_DIR=/somewhere\n")
+    env_path.write_text("JAI_PROXY_ARCHIVE_DIR=/somewhere\n")
 
     datacat_api._persist_session_token("new-tok", env_path)
 
-    assert env_path.read_text() == "JAI_PROXY_OUTPUT_DIR=/somewhere\nJAI_PROXY_DATACAT_SESSION_TOKEN=new-tok\n"
+    assert env_path.read_text() == "JAI_PROXY_ARCHIVE_DIR=/somewhere\nJAI_PROXY_DATACAT_SESSION_TOKEN=new-tok\n"
 
 
 def test_persist_session_token_creates_missing_env_file(tmp_path):

@@ -203,3 +203,67 @@ def test_payload_survives_png_roundtrip():
     assert back["character_book"]["entries"][0]["probability"] == (
         cleaned["character_book"]["entries"][0]["probability"]
     )
+
+
+# ---------------------------------------------------------------------------
+# build_v2_from_chub -- the browser-capture path (Phase 3B). Ported from
+# chub-api.js:buildCharacterCardFromChub; validated against a real captured
+# GET /api/characters/{fullPath}?full=true node (RelicGuy's "Your Bully Wants
+# To Be Your Sex Slave?!") plus its real linked-lorebook git-API response,
+# both captured live 2026-08-11 -- not hand-written fixtures.
+# ---------------------------------------------------------------------------
+
+
+def load_raw(name: str) -> dict:
+    return json.loads((FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def test_build_v2_from_chub_maps_fields_from_real_node():
+    node = load_raw("raw_api_full_your_bully")
+    linked = load_raw("raw_linked_lorebook_your_bully")
+
+    data = mapper.build_v2_from_chub(node, linked)
+
+    assert data["name"] == "Autumn"
+    assert data["creator"] == "RelicGuy"
+    assert data["first_mes"]
+    assert len(data["alternate_greetings"]) == 11
+    assert "Smut" in data["tags"]
+    # Chub bakes its own id/full_path into definition.extensions.chub; the
+    # port must preserve them (not just apiData.id/fullPath separately).
+    assert data["extensions"]["chub"]["id"] == 7547962
+    assert data["extensions"]["chub"]["full_path"] == node["fullPath"]
+    assert data["extensions"]["chub"]["tagline"] == node["tagline"]
+    # Linked lorebook resolved via the git API, not the (absent) embedded one.
+    assert len(data["character_book"]["entries"]) == 4
+
+
+def test_build_v2_from_chub_survives_clean_card_as_raw_dict_passthrough():
+    """The trap: a Chub character_book entry carries extra fields a pydantic
+    LoreEntry round-trip would drop (priority/probability/selectiveLogic) and
+    a position that isn't always an int. clean_card() must leave them as-is."""
+    node = load_raw("raw_api_full_your_bully")
+    linked = load_raw("raw_linked_lorebook_your_bully")
+
+    data = mapper.build_v2_from_chub(node, linked)
+    cleaned, warnings = mapper.clean_card(data, MacroSanitizer())
+
+    entry = cleaned["character_book"]["entries"][0]
+    assert "priority" in entry
+    assert "probability" in entry
+    assert "selectiveLogic" in entry
+    assert isinstance(entry["position"], str)  # Chub sent "", not an int
+    assert warnings == []
+
+    assert mapper.card_id(cleaned) == "7547962"
+    assert mapper.page_name(cleaned) == "Autumn"
+    assert mapper.source_url(cleaned) == (
+        "https://chub.ai/characters/RelicGuy/your-bully-wants-to-be-your-sex-slave-6d84429ab4b8"
+    )
+
+
+def test_build_v2_from_chub_falls_back_to_embedded_lorebook_without_linked():
+    node = load_raw("raw_api_full_your_bully")
+    data = mapper.build_v2_from_chub(node, linked_lorebook=None)
+    # No linked lorebook passed in -- falls back to definition.embedded_lorebook.
+    assert data["character_book"] is node["definition"]["embedded_lorebook"]

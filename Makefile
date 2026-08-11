@@ -1,7 +1,7 @@
 .PHONY: compile test test-js run docker-build docker-up import gallery-ids check names thumbs settings-import
 
 # Every target reads .env (see .env.template) via proxy/config.py -- most
-# importantly JAI_PROXY_OUTPUT_DIR, the cards folder they all read and write.
+# importantly JAI_PROXY_ARCHIVE_DIR, the cards folder they all read and write.
 
 # Concatenate userscript/src_jai/*.js   -> userscript/jai-proxy-bridge.user.js
 # and userscript/src_saucepan/*.js       -> userscript/saucepan-proxy-bridge.user.js
