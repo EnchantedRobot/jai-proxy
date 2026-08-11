@@ -34,53 +34,6 @@ function loadModuleCSS(path) {
 
 
 // ========================================
-// LAZY BRIDGE HELPERS
-// ========================================
-
-/**
- * Creates a group of window.* bridges that share a single dynamic import.
- * On first invocation of ANY bridge in the group the module is imported once;
- * setupFn then replaces every stub with the real function so subsequent calls
- * go straight through with zero overhead.
- */
-function createLazyBridgeGroup(importFn, setupFn) {
-    let loading = null;
-
-    function ensureLoaded() {
-        if (!loading) {
-            loading = importFn().then(mod => {
-                setupFn(mod);
-                return mod;
-            }).catch(err => {
-                console.error('[ModuleLoader] Lazy load failed:', err);
-                loading = null;
-                throw err;
-            });
-        }
-        return loading;
-    }
-
-    /**
-     * Returns a stub that, on call, triggers the shared import then resolves
-     * getTarget() - which by that point has been replaced with the real
-     * function by setupFn - and forwards the original arguments.
-     */
-    function createStub(getTarget) {
-        return function (...args) {
-            return ensureLoaded().then(() => {
-                const realFn = getTarget();
-                if (typeof realFn === 'function') {
-                    return realFn(...args);
-                }
-            });
-        };
-    }
-
-    return { ensureLoaded, createStub };
-}
-
-
-// ========================================
 // MODULE REGISTRY
 // ========================================
 
@@ -208,80 +161,6 @@ async function initModuleSystem() {
     }
 
     try {
-        const charVersionsModule = await import('./character-versions.js');
-        loadModuleCSS('./character-versions.css');
-        ModuleLoader.register('character-versions', charVersionsModule.default);
-
-        window.renderVersionsPane = charVersionsModule.renderVersionsPane;
-        window.cleanupVersionsPane = charVersionsModule.cleanupVersionsPane;
-        window.autoSnapshotBeforeChange = charVersionsModule.autoSnapshotBeforeChange;
-    } catch (err) {
-        console.warn('[ModuleLoader] Could not load character-versions module:', err);
-    }
-
-    try {
-        loadModuleCSS('./card-updates.css');
-        const cardUpdatesModule = await import('./card-updates.js');
-        ModuleLoader.register('card-updates', cardUpdatesModule.default);
-
-        window.checkAllCardUpdates = cardUpdatesModule.checkAllLinkedCharacters;
-    } catch (err) {
-        console.warn('[ModuleLoader] Could not load card-updates module:', err);
-    }
-
-    try {
-        loadModuleCSS('./gallery-sync.css');
-        const gallerySyncModule = await import('./gallery-sync.js');
-        ModuleLoader.register('gallery-sync', gallerySyncModule.default);
-
-        window.auditGalleryIntegrity = gallerySyncModule.auditGalleryIntegrity;
-        window.updateGallerySyncWarning = gallerySyncModule.updateWarningIndicator;
-    } catch (err) {
-        console.warn('[ModuleLoader] Could not load gallery-sync module:', err);
-    }
-
-    try {
-        loadModuleCSS('./recommender.css');
-        const recommenderModule = await import('./recommender.js');
-        ModuleLoader.register('recommender', recommenderModule.default);
-
-        window.openRecommender = recommenderModule.openModal;
-    } catch (err) {
-        console.warn('[ModuleLoader] Could not load recommender module:', err);
-    }
-
-    try {
-        loadModuleCSS('./custom-css.css');
-        const customCssModule = await import('./custom-css.js');
-        ModuleLoader.register('custom-css', customCssModule.default);
-
-        window.openCustomCssModal = customCssModule.openModal;
-    } catch (err) {
-        console.warn('[ModuleLoader] Could not load custom-css module:', err);
-    }
-
-    try {
-        loadModuleCSS('./css-assistant.css');
-        const cssAssistantModule = await import('./css-assistant.js');
-        ModuleLoader.register('css-assistant', cssAssistantModule.default);
-    } catch (err) {
-        console.warn('[ModuleLoader] Could not load css-assistant module:', err);
-    }
-
-    try {
-        loadModuleCSS('./character-creator.css');
-        const creatorModule = await import('./character-creator.js');
-        ModuleLoader.register('character-creator', creatorModule.default);
-
-        window.openCharacterCreator = creatorModule.openModal;
-        window.closeCharacterCreator = creatorModule.closeModal;
-        window.closeAiStudio = creatorModule.closeStudio;
-        window.closeNotesPreview = creatorModule.closeNotesPreview;
-    } catch (err) {
-        console.warn('[ModuleLoader] Could not load character-creator module:', err);
-    }
-
-    try {
         loadModuleCSS('./lorebook-manager.css');
         const lorebookModule = await import('./lorebook-manager.js');
         ModuleLoader.register('lorebook-manager', lorebookModule.default);
@@ -289,27 +168,6 @@ async function initModuleSystem() {
         window.openLorebookManager = lorebookModule.openModal;
     } catch (err) {
         console.warn('[ModuleLoader] Could not load lorebook-manager module:', err);
-    }
-
-    try {
-        loadModuleCSS('./playlists.css');
-        const playlistsModule = await import('./playlists.js');
-        ModuleLoader.register('playlists', playlistsModule.default);
-
-        window.playlistsLoadPlaylists = playlistsModule.loadPlaylists;
-        window.playlistsRemoveFromPlaylist = playlistsModule.removeFromPlaylist;
-        window.playlistsGetAll = playlistsModule.getAllPlaylists;
-        window.playlistsGetPlaylist = playlistsModule.getPlaylist;
-        window.playlistsGetCharacters = playlistsModule.getPlaylistCharacters;
-        window.playlistsGetAvatarSet = playlistsModule.getPlaylistAvatarSet;
-        window.playlistsGetForChar = playlistsModule.getPlaylistsForChar;
-        window.playlistsIsCharInAny = playlistsModule.isCharInAnyPlaylist;
-        window.playlistsOnCharDeleted = playlistsModule.onCharacterDeleted;
-        window.playlistsPruneDeleted = playlistsModule.pruneDeletedCharacters;
-        window.openPlaylistPicker = playlistsModule.openPlaylistPicker;
-        window.openPlaylistManager = playlistsModule.openPlaylistManager;
-    } catch (err) {
-        console.warn('[ModuleLoader] Could not load playlists module:', err);
     }
 
     try {
@@ -358,28 +216,11 @@ async function initModuleSystem() {
     // during character grid rendering (link indicators, taglines, etc.)
     loadModuleCSS('./providers/browse-shared.css');
     loadModuleCSS('./providers/chub/chub-browse.css');
-    loadModuleCSS('./providers/chartavern/chartavern-browse.css');
-    loadModuleCSS('./providers/pygmalion/pygmalion-browse.css');
-    loadModuleCSS('./providers/wyvern/wyvern-browse.css');
     loadModuleCSS('./providers/datacat/datacat-browse.css');
-    loadModuleCSS('./providers/saucepan/saucepan-browse.css');
-    loadModuleCSS('./providers/botbooru/botbooru-browse.css');
-    loadModuleCSS('./providers/janitorai/janitorai-browse.css');
     {
         const providerImports = [
             { name: 'chub', load: () => import('./providers/chub/chub-provider.js') },
-            // Ahead of janny for the same-state tie-break: getProviderForUrl prefers ENABLED
-            // claimants, so with janitorai disabled (the shipped default) a janitorai.com link
-            // resolves to jannyai; once both are enabled this order sends it to the source.
-            // jannyai.com URLs are unaffected either way.
-            { name: 'janitorai', load: () => import('./providers/janitorai/janitorai-provider.js') },
-            { name: 'janny', load: () => import('./providers/janny/janny-provider.js') },
-            { name: 'chartavern', load: () => import('./providers/chartavern/chartavern-provider.js') },
-            { name: 'pygmalion', load: () => import('./providers/pygmalion/pygmalion-provider.js') },
-            { name: 'wyvern', load: () => import('./providers/wyvern/wyvern-provider.js') },
             { name: 'datacat', load: () => import('./providers/datacat/datacat-provider.js') },
-            { name: 'saucepan', load: () => import('./providers/saucepan/saucepan-provider.js') },
-            { name: 'botbooru', load: () => import('./providers/botbooru/botbooru-provider.js') },
         ];
         const results = await Promise.allSettled(providerImports.map(p => p.load()));
         for (let i = 0; i < results.length; i++) {
@@ -405,8 +246,6 @@ async function initModuleSystem() {
 
     setupLazyBatchTagging();
     setupLazyBatchTransfer();
-    loadModuleCSS('./chats.css');
-    setupLazyChats();
 
     // Initialize all Tier 1 modules
     await ModuleLoader.initAll(dependencies);
@@ -448,57 +287,6 @@ function setupLazyBatchTransfer() {
     // library.js's import modal routes dropped .zip bundles here
     window.openBatchImportReview = (...args) =>
         ModuleLoader.ensureLoaded('batch-transfer').then(mod => mod?.openImportReview?.(...args));
-}
-
-
-// ========================================
-// LAZY: CHATS
-// ========================================
-
-function setupLazyChats() {
-    const { createStub } = createLazyBridgeGroup(
-        () => import('./chats.js'),
-        (mod) => {
-            const chats = mod.default;
-            ModuleLoader.register('chats', chats);
-            chats.init({});
-            chats._mlInitDone = true;
-
-            window.chatsModule = {
-                fetchCharacterChats: chats.fetchCharacterChats,
-                createNewChat: chats.createNewChat,
-                loadAllChats: chats.loadAllChats,
-                renderChats: chats.renderChats,
-                clearChatCache: chats.clearChatCache,
-                openChatPreview: chats.openChatPreview,
-                setChatBoundWorld: chats.setChatBoundWorld,
-                listCharacterChatsWithMeta: chats.listCharacterChatsWithMeta,
-                listAllChatsWithMeta: chats.listAllChatsWithMeta,
-            };
-
-            window.fetchCharacterChats = chats.fetchCharacterChats;
-            window.createNewChat = chats.createNewChat;
-
-            window.debugLog?.('[ModuleLoader] Lazy-loaded chats');
-        }
-    );
-
-    const chatStub = (method) => createStub(() => window.chatsModule?.[method]);
-
-    window.chatsModule = {
-        fetchCharacterChats: chatStub('fetchCharacterChats'),
-        createNewChat: chatStub('createNewChat'),
-        loadAllChats: chatStub('loadAllChats'),
-        renderChats: chatStub('renderChats'),
-        clearChatCache: chatStub('clearChatCache'),
-        openChatPreview: chatStub('openChatPreview'),
-        setChatBoundWorld: chatStub('setChatBoundWorld'),
-        listCharacterChatsWithMeta: chatStub('listCharacterChatsWithMeta'),
-        listAllChatsWithMeta: chatStub('listAllChatsWithMeta'),
-    };
-
-    window.fetchCharacterChats = chatStub('fetchCharacterChats');
-    window.createNewChat = chatStub('createNewChat');
 }
 
 

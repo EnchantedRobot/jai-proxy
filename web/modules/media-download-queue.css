@@ -158,3 +158,97 @@ html.cl-mobile .mdq-job-btn {
     min-width: 32px;
     min-height: 32px;
 }
+
+/* ========================================
+   NOTIFICATIONS CENTER SHELL
+   The topbar bell + its dropdown. Owned here rather than by any one section:
+   library.js's notifications center renders whatever sections registered, and
+   this module is the only one that still does. Sections style their own body.
+   ======================================== */
+
+.notifications-container {
+    position: relative;
+}
+
+.notifications-container.hidden {
+    display: none;
+}
+
+.notifications-btn {
+    position: relative;
+    color: var(--text-muted) !important;
+    transition: color 0.2s ease;
+}
+
+.notifications-btn:hover {
+    color: var(--text-primary) !important;
+}
+
+.notifications-btn.has-issues {
+    color: var(--cl-warning-bright) !important;
+    animation: pulse-warning 2s ease-in-out infinite;
+}
+
+.notifications-btn.has-issues:hover {
+    color: var(--cl-warning-bright-darker) !important;
+    background: rgba(var(--cl-warning-bright-rgb), 0.15) !important;
+}
+
+.notifications-btn .warning-badge {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    min-width: 16px;
+    height: 16px;
+    background: var(--cl-error-bright);
+    color: white;
+    font-size: var(--font-3xs);
+    font-weight: 600;
+    border-radius: var(--radius-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.notifications-btn .warning-badge.hidden {
+    display: none;
+}
+
+.notifications-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 8px;
+    min-width: 280px;
+    max-width: 350px;
+    background: rgba(30, 30, 35, 0.98);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+    z-index: 1000;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm-md);
+    padding: var(--space-sm-md);
+}
+
+/* Each notification section reads as its own card */
+.notif-section {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-md);
+}
+
+.notif-section.hidden {
+    display: none;
+}
+
+@keyframes pulse-warning {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}

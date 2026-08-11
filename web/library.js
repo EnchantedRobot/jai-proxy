@@ -13,8 +13,6 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
 };
 
 const API_BASE = '/api'; 
-const isEmbedded = new URLSearchParams(window.location.search).get('embedded') === '1';
-const embeddedShowTopBar = new URLSearchParams(window.location.search).get('showTopBar') === '1';
 let allCharacters = [];
 let currentCharacters = [];
 
@@ -502,8 +500,6 @@ function prepareCharacterKeys(chars) {
         // Pre-compute numeric timestamps for date sorting
         c._dateAdded = getCharacterDateAdded(c);
         c._createDate = getCharacterCreateDate(c);
-        const lastChat = c.date_last_chat;
-        c._dateLastChat = lastChat ? (parseDateValue(lastChat)?.getTime() || 0) : 0;
         // Shallow cards have no heavy text; undefined = "not known yet" (sorts last / filters out) until recovery fills it.
         if (c.shallow) {
             c._tokenEstimate = _tokenEstimateCache.has(c.avatar) ? _tokenEstimateCache.get(c.avatar) : undefined;
@@ -627,7 +623,6 @@ const DEFAULT_SETTINGS = {
     replaceUserPlaceholder: true,
     animateTagPills: true,
     animateKeepName: false,
-    hidePlaylistBadges: false,
     debugMode: false,
     // ARCHIVE FORK (see web/VENDORED.md): upstream defaults this off because a
     // SillyTavern install may hold either folder layout. This archive holds
@@ -665,7 +660,7 @@ const DEFAULT_SETTINGS = {
     providerOrder: null,
     providerDefaults: {},
     infiniteScroll: {},
-    disabledProviders: ['datacat', 'saucepan', 'botbooru', 'janitorai'],
+    disabledProviders: ['datacat'],
     datacatFollowedCreators: [],
     providerExcludeTags: {},
 
@@ -1450,10 +1445,6 @@ function applyAnimateTagPills(enabled, keepName) {
     document.documentElement.classList.toggle('animate-keep-name', !!enabled && !!keepName);
 }
 
-function applyHidePlaylistBadges(hidden) {
-    document.documentElement.classList.toggle('hide-playlist-badges', !!hidden);
-}
-
 function applyMobileHideBackArrows(hidden) {
     document.documentElement.classList.toggle('cl-hide-back-arrows', !!hidden);
 }
@@ -1470,13 +1461,12 @@ function getActiveFilterState() {
     return {
         fav: !!document.getElementById('searchFavoritesOnly')?.checked,
         tag: !!(activeTagFilters && activeTagFilters.size > 0),
-        playlist: !!activePlaylistFilter,
     };
 }
 
 function updateMobileFilterIndicator() {
     const s = getActiveFilterState();
-    document.documentElement.classList.toggle('cl-filters-active', s.fav || s.tag || s.playlist);
+    document.documentElement.classList.toggle('cl-filters-active', s.fav || s.tag);
 }
 
 function updateThemeCustomizerVisibility() {
@@ -1716,31 +1706,8 @@ function setupSettingsModal() {
     const chubTokenInput = document.getElementById('settingsChubToken');
     const rememberTokenCheckbox = document.getElementById('settingsRememberToken');
     const toggleTokenVisibility = document.getElementById('toggleChubTokenVisibility');
-    const pygmalionEmailInput = document.getElementById('settingsPygmalionEmail');
-    const pygmalionPasswordInput = document.getElementById('settingsPygmalionPassword');
-    const pygmalionRememberCredsCheckbox = document.getElementById('settingsPygmalionRememberCredentials');
-    const togglePygmalionPasswordVisibility = document.getElementById('togglePygmalionPasswordVisibility');
-    const pygmalionPluginBanner = document.getElementById('pygmalionPluginBanner');
-    const pygmalionSettingsFields = document.getElementById('pygmalionSettingsFields');
-    const botbooruUsernameInput = document.getElementById('settingsBotbooruUsername');
-    const botbooruPasswordInput = document.getElementById('settingsBotbooruPassword');
-    const botbooruPluginBanner = document.getElementById('botbooruPluginBanner');
-    const botbooruSettingsFields = document.getElementById('botbooruSettingsFields');
-    const ctCookieInput = document.getElementById('settingsCtCookie');
-    const ctPluginBanner = document.getElementById('ctPluginBanner');
-    const ctSettingsFields = document.getElementById('ctSettingsFields');
-    const wyvernEmailInput = document.getElementById('settingsWyvernEmail');
-    const wyvernPasswordInput = document.getElementById('settingsWyvernPassword');
-    const wyvernRememberCredsCheckbox = document.getElementById('settingsWyvernRememberCredentials');
-    const toggleWyvernPasswordVisibility = document.getElementById('toggleWyvernPasswordVisibility');
     const datacatTokenInput = document.getElementById('settingsDatacatToken');
     const toggleDatacatTokenVisibility = document.getElementById('toggleDatacatTokenVisibility');
-    const saucepanHandleInput = document.getElementById('settingsSaucepanHandle');
-    const saucepanPasswordInput = document.getElementById('settingsSaucepanPassword');
-    const saucepanTokenInput = document.getElementById('settingsSaucepanToken');
-    const toggleSaucepanTokenVisibility = document.getElementById('toggleSaucepanTokenVisibility');
-    const saucepanPluginBanner = document.getElementById('saucepanPluginBanner');
-    const saucepanSettingsFields = document.getElementById('saucepanSettingsFields');
     const datacatPluginBanner = document.getElementById('datacatPluginBanner');
     const datacatSettingsFields = document.getElementById('datacatSettingsFields');
     const datacatSessionStatus = document.getElementById('datacatSessionStatus');
@@ -1818,7 +1785,6 @@ function setupSettingsModal() {
     const animateTagPillsCheckbox = document.getElementById('settingsAnimateTagPills');
     const animateKeepNameCheckbox = document.getElementById('settingsAnimateKeepName');
     const animateKeepNameRow = document.getElementById('animateKeepNameRow');
-    const hidePlaylistBadgesCheckbox = document.getElementById('settingsHidePlaylistBadges');
     const enableCharDetailNavCheckbox = document.getElementById('settingsEnableCharDetailNav');
     const highlightColorInput = document.getElementById('settingsHighlightColor');
     const themeCustomizerCheckbox = document.getElementById('settingsThemeCustomizer');
@@ -2249,14 +2215,7 @@ function setupSettingsModal() {
 
     const EXCLUDE_TAG_PROVIDERS = [
         { id: 'chub', inputId: 'chubExcludeTagsInput', pillsId: 'chubExcludeTagsPills' },
-        { id: 'janny', inputId: 'jannyExcludeTagsInput', pillsId: 'jannyExcludeTagsPills' },
-        { id: 'pygmalion', inputId: 'pygmalionExcludeTagsInput', pillsId: 'pygmalionExcludeTagsPills' },
-        { id: 'chartavern', inputId: 'ctExcludeTagsInput', pillsId: 'ctExcludeTagsPills' },
-        { id: 'wyvern', inputId: 'wyvernExcludeTagsInput', pillsId: 'wyvernExcludeTagsPills' },
         { id: 'datacat', inputId: 'datacatExcludeTagsInput', pillsId: 'datacatExcludeTagsPills' },
-        { id: 'saucepan', inputId: 'saucepanExcludeTagsInput', pillsId: 'saucepanExcludeTagsPills' },
-        { id: 'botbooru', inputId: 'botbooruExcludeTagsInput', pillsId: 'botbooruExcludeTagsPills' },
-        { id: 'janitorai', inputId: 'janitoraiExcludeTagsInput', pillsId: 'janitoraiExcludeTagsPills' },
     ];
 
     function renderExcludeTagPills(providerId, pillsId) {
@@ -2314,20 +2273,7 @@ function setupSettingsModal() {
     settingsBtn.onclick = () => {
         chubTokenInput.value = getSetting('chubToken') || '';
         rememberTokenCheckbox.checked = getSetting('chubRememberToken') || false;
-        if (pygmalionEmailInput) pygmalionEmailInput.value = getSetting('pygmalionEmail') || '';
-        if (botbooruUsernameInput) botbooruUsernameInput.value = getSetting('botbooruUsername') || '';
-        if (botbooruPasswordInput) botbooruPasswordInput.value = getSetting('botbooruPassword') || '';
-        if (pygmalionPasswordInput) pygmalionPasswordInput.value = getSetting('pygmalionPassword') || '';
-        if (pygmalionRememberCredsCheckbox) pygmalionRememberCredsCheckbox.checked = getSetting('pygmalionRememberCredentials') || false;
-        if (ctCookieInput) ctCookieInput.value = getSetting('ctCookie') || '';
-        if (wyvernEmailInput) wyvernEmailInput.value = getSetting('wyvernEmail') || '';
-        if (wyvernPasswordInput) wyvernPasswordInput.value = getSetting('wyvernPassword') || '';
-        if (wyvernRememberCredsCheckbox) wyvernRememberCredsCheckbox.checked = getSetting('wyvernRememberCredentials') || false;
         if (datacatTokenInput) datacatTokenInput.value = getSetting('datacatToken') || '';
-        if (saucepanTokenInput) saucepanTokenInput.value = getSetting('saucepanToken') || '';
-        // Not just field repopulation: this also re-reads the managed browser's live state, which
-        // can have started or idle-stopped since the panel was last built.
-        refreshJanitoraiSettingsUi();
         const civitaiApiKeyInput = document.getElementById('settingsCivitaiApiKey');
         if (civitaiApiKeyInput) civitaiApiKeyInput.value = getSetting('civitaiApiKey') || '';
         const pixivCookieInput = document.getElementById('settingsPixivCookie');
@@ -2743,14 +2689,9 @@ function setupSettingsModal() {
         const galleryThumbsClHelperBanner = document.getElementById('galleryThumbsClHelperBanner');
         const galleryThumbsClHelperFields = document.getElementById('galleryThumbsClHelperFields');
         checkClHelperPlugin(
-            pygmalionPluginBanner, pygmalionSettingsFields,
-            botbooruPluginBanner, botbooruSettingsFields,
-            ctPluginBanner, ctSettingsFields,
             datacatPluginBanner, datacatSettingsFields,
-            saucepanPluginBanner, saucepanSettingsFields,
             gridThumbsClHelperBanner, settingsGridThumbClHelperFields,
             galleryThumbsClHelperBanner, galleryThumbsClHelperFields,
-            document.getElementById('janitoraiBrowserPluginBanner'), document.getElementById('janitoraiBrowserFields'),
         ).then(available => {
             if (datacatSessionStatus) {
                 if (!available) {
@@ -2918,9 +2859,6 @@ function setupSettingsModal() {
         if (animateKeepNameCheckbox) {
             animateKeepNameCheckbox.checked = getSetting('animateKeepName') || false;
         }
-        if (hidePlaylistBadgesCheckbox) {
-            hidePlaylistBadgesCheckbox.checked = getSetting('hidePlaylistBadges') || false;
-        }
         if (enableCharDetailNavCheckbox) {
             enableCharDetailNavCheckbox.checked = getSetting('enableCharDetailNav') !== false;
         }
@@ -3065,21 +3003,7 @@ function setupSettingsModal() {
         toggleTokenVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
     };
     
-    if (togglePygmalionPasswordVisibility && pygmalionPasswordInput) {
-        togglePygmalionPasswordVisibility.onclick = () => {
-            const isPassword = pygmalionPasswordInput.type === 'password';
-            pygmalionPasswordInput.type = isPassword ? 'text' : 'password';
-            togglePygmalionPasswordVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
-        };
-    }
 
-    if (toggleWyvernPasswordVisibility && wyvernPasswordInput) {
-        toggleWyvernPasswordVisibility.onclick = () => {
-            const isPassword = wyvernPasswordInput.type === 'password';
-            wyvernPasswordInput.type = isPassword ? 'text' : 'password';
-            toggleWyvernPasswordVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
-        };
-    }
 
     if (toggleDatacatTokenVisibility && datacatTokenInput) {
         toggleDatacatTokenVisibility.onclick = () => {
@@ -3315,16 +3239,6 @@ function setupSettingsModal() {
         openThemeCustomizerBtnEl.addEventListener('click', () => openThemeCustomizer());
     }
 
-    const openCustomCssBtnEl = document.getElementById('openCustomCssBtn');
-    if (openCustomCssBtnEl) {
-        openCustomCssBtnEl.addEventListener('click', () => {
-            if (typeof window.openCustomCssModal === 'function') {
-                window.openCustomCssModal();
-            } else {
-                showToast('Custom CSS module not loaded yet, try again in a moment', 'warning');
-            }
-        });
-    }
 
     const doSaveSettings = () => {
         const newHighlightColor = highlightColorInput ? highlightColorInput.value : DEFAULT_SETTINGS.highlightColor;
@@ -3392,7 +3306,6 @@ function setupSettingsModal() {
             modalSize: modalSizeSelect ? parseInt(modalSizeSelect.value) || 2 : 2,
             animateTagPills: animateTagPillsCheckbox ? animateTagPillsCheckbox.checked : false,
             animateKeepName: animateKeepNameCheckbox ? animateKeepNameCheckbox.checked : false,
-            hidePlaylistBadges: hidePlaylistBadgesCheckbox ? hidePlaylistBadgesCheckbox.checked : false,
             enableCharDetailNav: enableCharDetailNavCheckbox ? enableCharDetailNavCheckbox.checked : true,
             uniqueGalleryFolders: uniqueGalleryFoldersCheckbox ? uniqueGalleryFoldersCheckbox.checked : false,
             chubUseV4Api: chubUseV4ApiCheckbox ? chubUseV4ApiCheckbox.checked : false,
@@ -3414,8 +3327,6 @@ function setupSettingsModal() {
             animateKeepNameCheckbox ? animateKeepNameCheckbox.checked : false
         );
 
-        // Apply hide playlist badges
-        applyHidePlaylistBadges(hidePlaylistBadgesCheckbox ? hidePlaylistBadgesCheckbox.checked : false);
 
         updateCharModalNavState();
 
@@ -3452,16 +3363,6 @@ function setupSettingsModal() {
         closeModal();
         
         performSearch();
-
-        // Update gallery sync indicator visibility
-        if (typeof window.updateGallerySyncWarning === 'function') {
-            window.updateGallerySyncWarning();
-        }
-        const uniqueFoldersEnabled = getSetting('uniqueGalleryFolders') || false;
-        const menuGSync = document.getElementById('menuGallerySyncBtn');
-        if (menuGSync) menuGSync.style.display = uniqueFoldersEnabled ? '' : 'none';
-        const mobileSyncItem = document.querySelector('[data-gallery-sync-item]');
-        if (mobileSyncItem) mobileSyncItem.style.display = uniqueFoldersEnabled ? '' : 'none';
 
         // Rebuild provider selector to reflect new order
         providerSelectorInitialized = false;
@@ -3673,168 +3574,13 @@ function setupSettingsModal() {
 
     // Session Validation - CharacterTavern
     // A textarea cannot be type="password", so this credential masks via .cl-masked-field.
-    const toggleCtCookieBtn = document.getElementById('toggleCtCookieVisibility');
-    if (toggleCtCookieBtn && ctCookieInput) {
-        toggleCtCookieBtn.onclick = () => {
-            const revealed = ctCookieInput.classList.toggle('revealed');
-            toggleCtCookieBtn.innerHTML = `<i class="fa-solid fa-eye${revealed ? '-slash' : ''}"></i>`;
-        };
-    }
 
-    const validateCtCookieBtn = document.getElementById('validateCtCookieBtn');
-    if (validateCtCookieBtn && ctCookieInput) {
-        validateCtCookieBtn.onclick = async (e) => {
-            e.preventDefault();
-            validateCtCookieBtn.classList.remove('success', 'error');
-            const originalHtml = '<i class="fa-solid fa-check"></i>';
-            validateCtCookieBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-            validateCtCookieBtn.disabled = true;
-
-            try {
-                if (!window.ctValidateSession) {
-                    showToast('Validation module not ready', 'error');
-                    throw new Error('Module not ready');
-                }
-                const result = await window.ctValidateSession(ctCookieInput.value || null);
-                validateCtCookieBtn.classList.remove('success', 'error');
-
-                if (result.valid) {
-                    if (result.hasNsfw) {
-                        showToast('Session Valid! NSFW Access Confirmed.', 'success');
-                        validateCtCookieBtn.classList.add('success');
-                        validateCtCookieBtn.innerHTML = '<i class="fa-solid fa-check-double"></i>';
-                    } else {
-                        showToast('Warning: Session accepted, but NO NSFW access detected.', 'warning');
-                        validateCtCookieBtn.classList.add('error');
-                        validateCtCookieBtn.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>';
-                    }
-                } else {
-                    showToast(`Session invalid: ${result.reason || 'Unknown error'}`, 'error');
-                    validateCtCookieBtn.classList.add('error');
-                    validateCtCookieBtn.innerHTML = '<i class="fa-solid fa-times"></i>';
-                }
-            } catch (err) {
-                if (!validateCtCookieBtn.classList.contains('error')) {
-                    showToast(`Validation error: ${err.message}`, 'error');
-                    validateCtCookieBtn.classList.add('error');
-                    validateCtCookieBtn.innerHTML = '<i class="fa-solid fa-exclamation"></i>';
-                }
-            } finally {
-                validateCtCookieBtn.disabled = false;
-                if (validateCtCookieBtn.classList.contains('success')) {
-                    validateCtCookieBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
-                }
-                setTimeout(() => {
-                    validateCtCookieBtn.classList.remove('success', 'error');
-                    validateCtCookieBtn.innerHTML = originalHtml;
-                }, 3000);
-            }
-        };
-    }
 
     // Session Validation - Pygmalion
     const validatePygmalionBtn = document.getElementById('validatePygmalionBtn');
-    if (validatePygmalionBtn && pygmalionEmailInput && pygmalionPasswordInput) {
-        validatePygmalionBtn.onclick = async (e) => {
-            e.preventDefault();
-            validatePygmalionBtn.classList.remove('success', 'error');
-            const originalHtml = '<i class="fa-solid fa-check"></i>';
-            validatePygmalionBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-            validatePygmalionBtn.disabled = true;
-
-            try {
-                if (!window.pygmalionLoginCheck) {
-                    showToast('Login module not ready', 'error');
-                    throw new Error('Module not ready');
-                }
-                
-                const email = pygmalionEmailInput.value;
-                const password = pygmalionPasswordInput.value;
-                if (!email || !password) {
-                    showToast('Email and password required', 'warning');
-                    validatePygmalionBtn.classList.add('error');
-                    return;
-                }
-
-                const result = await window.pygmalionLoginCheck(email, password);
-                if (result.ok) {
-                    showToast('Pygmalion login successful!', 'success');
-                    validatePygmalionBtn.classList.add('success');
-                } else {
-                    showToast(`Login failed: ${result.error}`, 'error');
-                    validatePygmalionBtn.classList.add('error');
-                    validatePygmalionBtn.innerHTML = '<i class="fa-solid fa-times"></i>';
-                }
-            } catch (err) {
-                if (!validatePygmalionBtn.classList.contains('error')) {
-                    showToast(`Login error: ${err.message}`, 'error');
-                    validatePygmalionBtn.classList.add('error');
-                    validatePygmalionBtn.innerHTML = '<i class="fa-solid fa-exclamation"></i>';
-                }
-            } finally {
-                validatePygmalionBtn.disabled = false;
-                if (validatePygmalionBtn.classList.contains('success')) {
-                    validatePygmalionBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
-                }
-                setTimeout(() => {
-                    validatePygmalionBtn.classList.remove('success', 'error');
-                    validatePygmalionBtn.innerHTML = originalHtml;
-                }, 3000);
-            }
-        };
-    }
     
     // Session Validation - Wyvern
     const validateWyvernBtn = document.getElementById('validateWyvernBtn');
-    if (validateWyvernBtn && wyvernEmailInput && wyvernPasswordInput) {
-        validateWyvernBtn.onclick = async (e) => {
-            e.preventDefault();
-            validateWyvernBtn.classList.remove('success', 'error');
-            const originalHtml = '<i class="fa-solid fa-check"></i>';
-            validateWyvernBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-            validateWyvernBtn.disabled = true;
-
-            try {
-                if (!window.wyvernLoginCheck) {
-                    showToast('Login module not ready', 'error');
-                    throw new Error('Module not ready');
-                }
-                
-                const email = wyvernEmailInput.value;
-                const password = wyvernPasswordInput.value;
-                if (!email || !password) {
-                    showToast('Email and password required', 'warning');
-                    validateWyvernBtn.classList.add('error');
-                    return;
-                }
-
-                const result = await window.wyvernLoginCheck(email, password);
-                if (result.ok) {
-                    showToast('Wyvern login successful!', 'success');
-                    validateWyvernBtn.classList.add('success');
-                } else {
-                    showToast(`Login failed: ${result.error}`, 'error');
-                    validateWyvernBtn.classList.add('error');
-                    validateWyvernBtn.innerHTML = '<i class="fa-solid fa-times"></i>';
-                }
-            } catch (err) {
-                if (!validateWyvernBtn.classList.contains('error')) {
-                    showToast(`Login error: ${err.message}`, 'error');
-                    validateWyvernBtn.classList.add('error');
-                    validateWyvernBtn.innerHTML = '<i class="fa-solid fa-exclamation"></i>';
-                }
-            } finally {
-                validateWyvernBtn.disabled = false;
-                if (validateWyvernBtn.classList.contains('success')) {
-                    validateWyvernBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
-                }
-                setTimeout(() => {
-                    validateWyvernBtn.classList.remove('success', 'error');
-                    validateWyvernBtn.innerHTML = originalHtml;
-                }, 3000);
-            }
-        };
-    }
 
     // DataCat session management
     function updateDatacatSessionStatus() {
@@ -3965,57 +3711,9 @@ function setupSettingsModal() {
     // ---- Saucepan Account (native extraction) ----
     // Token persistence lives in window.saucepanLogin/saucepanSetToken/
     // saucepanClearSession (saucepan-provider.js); handlers here only drive the UI.
-    if (toggleSaucepanTokenVisibility && saucepanTokenInput) {
-        toggleSaucepanTokenVisibility.onclick = () => {
-            const isPassword = saucepanTokenInput.type === 'password';
-            saucepanTokenInput.type = isPassword ? 'text' : 'password';
-            toggleSaucepanTokenVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
-        };
-    }
 
     const toggleSaucepanPasswordVisibility = document.getElementById('toggleSaucepanPasswordVisibility');
-    if (toggleSaucepanPasswordVisibility && saucepanPasswordInput) {
-        toggleSaucepanPasswordVisibility.onclick = () => {
-            const isPassword = saucepanPasswordInput.type === 'password';
-            saucepanPasswordInput.type = isPassword ? 'text' : 'password';
-            toggleSaucepanPasswordVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
-        };
-    }
 
-    const saucepanLoginBtn = document.getElementById('saucepanLoginBtn');
-    if (saucepanLoginBtn) {
-        saucepanLoginBtn.onclick = async (e) => {
-            e.preventDefault();
-            const handle = (saucepanHandleInput?.value || '').trim();
-            const password = saucepanPasswordInput?.value || '';
-            if (!handle || !password) {
-                showToast('Enter your Saucepan handle and password', 'warning');
-                return;
-            }
-            if (!window.saucepanLogin) {
-                showToast('Saucepan module not ready', 'error');
-                return;
-            }
-            const originalHtml = saucepanLoginBtn.innerHTML;
-            saucepanLoginBtn.disabled = true;
-            saucepanLoginBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-            try {
-                const result = await window.saucepanLogin(handle, password);
-                if (result?.ok && result.token) {
-                    if (saucepanTokenInput) saucepanTokenInput.value = result.token;
-                    if (saucepanPasswordInput) saucepanPasswordInput.value = '';
-                    showToast('Saucepan login successful!', 'success');
-                } else {
-                    showToast(`Saucepan login failed: ${result?.error || 'unknown error'}`, 'error');
-                }
-            } catch (err) {
-                showToast(`Saucepan login error: ${err.message}`, 'error');
-            } finally {
-                saucepanLoginBtn.disabled = false;
-                saucepanLoginBtn.innerHTML = originalHtml;
-            }
-        };
-    }
 
     const saveSaucepanTokenBtn = document.getElementById('saveSaucepanTokenBtn');
     if (saveSaucepanTokenBtn) {
@@ -4085,19 +3783,6 @@ function setupSettingsModal() {
         };
     }
 
-    const saucepanClearTokenBtn = document.getElementById('saucepanClearTokenBtn');
-    if (saucepanClearTokenBtn) {
-        saucepanClearTokenBtn.onclick = async () => {
-            try {
-                if (window.saucepanClearSession) await window.saucepanClearSession();
-                else setSetting('saucepanToken', null);
-                if (saucepanTokenInput) saucepanTokenInput.value = '';
-                showToast('Saucepan token cleared', 'info');
-            } catch (err) {
-                showToast(`Clear error: ${err.message}`, 'error');
-            }
-        };
-    }
 
     // ---- Civitai API Key ----
     const civitaiApiKeyInputEl = document.getElementById('settingsCivitaiApiKey');
@@ -4346,635 +4031,6 @@ function setupSettingsModal() {
         };
     }
 
-    // ---- JanitorAI provider login (driven through the hosted browser; Turnstile is domain-locked) ----
-    // Parse / verify / refresh live in janitor-session.js (window.janitorai*).
-    const clearJanitoraiTokenBtn = document.getElementById('clearJanitoraiTokenBtn');
-    const janitoraiTokenStatusEl = document.getElementById('janitoraiTokenStatus');
-
-    function updateJanitoraiStatus() {
-        if (!janitoraiTokenStatusEl) return;
-        const set = (cls, icon, text) => { janitoraiTokenStatusEl.className = `settings-status-badge ${cls}`; janitoraiTokenStatusEl.innerHTML = `<i class="fa-solid ${icon}"></i> ${text}`; };
-        const status = window.janitoraiSessionStatus?.() || { loggedIn: !!getSetting('janitoraiToken') };
-        if (!status.loggedIn) return set('inactive', 'fa-circle', 'Not logged in');
-        // Without a refresh token the session lapses in ~3h; browser sign-in always returns one.
-        if (status.hasRefresh === false) return set('active', 'fa-triangle-exclamation', `Logged in${status.email ? ' as ' + status.email : ''} (expires in ~3h, sign in again for a lasting session)`);
-        set('active', 'fa-circle-check', `Logged in${status.email ? ' as ' + status.email : ''}`);
-    }
-    updateJanitoraiStatus();
-
-    // Token paste: the alternative to signing in through the browser. Social-login accounts have
-    // no password to submit, so for them this is the only way in.
-    const janitoraiTokenInputEl = document.getElementById('settingsJanitoraiToken');
-    const toggleJanitoraiTokenBtn = document.getElementById('toggleJanitoraiTokenVisibility');
-    const saveJanitoraiTokenBtn = document.getElementById('saveJanitoraiTokenBtn');
-
-    if (toggleJanitoraiTokenBtn && janitoraiTokenInputEl) {
-        toggleJanitoraiTokenBtn.onclick = () => {
-            const isPassword = janitoraiTokenInputEl.type === 'password';
-            janitoraiTokenInputEl.type = isPassword ? 'text' : 'password';
-            toggleJanitoraiTokenBtn.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
-        };
-    }
-    if (saveJanitoraiTokenBtn && janitoraiTokenInputEl) {
-        saveJanitoraiTokenBtn.onclick = async () => {
-            const raw = (janitoraiTokenInputEl.value || '').trim();
-            if (!raw) { showToast('Paste your sb-auth-auth-token cookie value first', 'warning'); return; }
-            const original = saveJanitoraiTokenBtn.innerHTML;
-            saveJanitoraiTokenBtn.disabled = true;
-            saveJanitoraiTokenBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
-            try {
-                const res = await window.janitoraiSetSession?.(raw);
-                if (res?.ok) {
-                    janitoraiTokenInputEl.value = '';
-                    updateJanitoraiStatus();
-                    // The browser needs the session as a cookie of its own, or extraction opens a
-                    // chat page that is signed out. Best effort: browsing works either way.
-                    let inBrowser = false;
-                    try {
-                        const managed = janitoraiBrowserMode() === 'managed';
-                        const endpoint = (janitoraiEndpointInput?.value || '').trim();
-                        const push = await window.janitoraiBrowserSetSession?.(managed ? '' : endpoint);
-                        inBrowser = !!push?.ok;
-                    } catch { /* reported through the toast below */ }
-                    const who = res.email ? ' as ' + res.email : '';
-                    if (!res.hasRefresh) showToast('Logged in, but no refresh token was in that value; this session expires in ~3h. Copy the whole sb-auth-auth-token cookie for a lasting login.', 'warning', 9000);
-                    else if (inBrowser) showToast(`Signed in to JanitorAI${who}; the browser is signed in too`, 'success');
-                    else showToast(`Signed in to JanitorAI${who}. Browsing works, but the browser could not be signed in, so character extraction may not. Check that the browser is running and cl-helper is up to date.`, 'warning', 12000);
-                } else {
-                    showToast(res?.error || 'Could not save the session', 'error');
-                }
-            } catch (err) {
-                showToast(`Login error: ${err.message}`, 'error');
-            } finally {
-                saveJanitoraiTokenBtn.disabled = false;
-                saveJanitoraiTokenBtn.innerHTML = original;
-            }
-        };
-    }
-
-    if (clearJanitoraiTokenBtn) {
-        clearJanitoraiTokenBtn.onclick = async () => {
-            // Also clears the stored credentials: janitoraiLogout() only drops the tokens, and a
-            // button labelled Log Out leaving the password saved would surprise.
-            window.janitoraiLogout?.();
-            if (janitoraiTokenInputEl) janitoraiTokenInputEl.value = '';
-            setSettings({ janitoraiEmail: null, janitoraiPassword: null });
-            const emailEl = document.getElementById('settingsJanitoraiEmail');
-            const pwEl = document.getElementById('settingsJanitoraiPassword');
-            if (emailEl) emailEl.value = '';
-            if (pwEl) pwEl.value = '';
-            updateJanitoraiStatus();
-
-            // The browser keeps its own cookies, so without this a sign-in straight afterwards
-            // silently adopts the session the user just asked us to forget.
-            const original = clearJanitoraiTokenBtn.innerHTML;
-            clearJanitoraiTokenBtn.disabled = true;
-            clearJanitoraiTokenBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Logging out...';
-            let browserCleared = false;
-            try {
-                const managed = janitoraiBrowserMode() === 'managed';
-                const endpoint = (janitoraiEndpointInput?.value || '').trim();
-                const res = await window.janitoraiBrowserLogout?.(managed ? '' : endpoint);
-                browserCleared = !!res?.ok;
-            } catch { /* an unreachable browser still leaves the local session cleared */ }
-            clearJanitoraiTokenBtn.disabled = false;
-            clearJanitoraiTokenBtn.innerHTML = original;
-            updateJanitoraiStatus();
-            showToast(browserCleared
-                ? 'Logged out of JanitorAI, and the browser session was cleared'
-                : 'Logged out of JanitorAI, but the browser session could not be cleared, so it may still hold the account. Check that the browser is running and cl-helper is up to date.', browserCleared ? 'info' : 'warning', browserCleared ? 5000 : 9000);
-        };
-    }
-
-    const janitoraiExtractOnUpdateCheckbox = document.getElementById('janitoraiExtractOnUpdateCheckbox');
-    if (janitoraiExtractOnUpdateCheckbox) {
-        janitoraiExtractOnUpdateCheckbox.checked = getSetting('janitoraiExtractOnUpdate') === true;
-        janitoraiExtractOnUpdateCheckbox.onchange = () => {
-            setSetting('janitoraiExtractOnUpdate', janitoraiExtractOnUpdateCheckbox.checked);
-        };
-    }
-
-    // ── JanitorAI browser endpoint (hidden-definition recovery) ──
-    const janitoraiEndpointInput = document.getElementById('settingsJanitoraiBrowserEndpoint');
-    const janitoraiChecksEl = document.getElementById('janitoraiBrowserChecks');
-    const janitoraiBrowserLoginBtn = document.getElementById('janitoraiBrowserLoginBtn');
-    const janitoraiBrowserLoginHint = document.getElementById('janitoraiBrowserLoginHint');
-    const janitoraiEmailInput = document.getElementById('settingsJanitoraiEmail');
-    const janitoraiPasswordInput = document.getElementById('settingsJanitoraiPassword');
-    const togglePwBtn = document.getElementById('toggleJanitoraiPasswordVisibility');
-
-    const janitoraiModeSelect = document.getElementById('settingsJanitoraiBrowserMode');
-    const janitoraiManagedRow = document.getElementById('janitoraiManagedRow');
-    const janitoraiManagedStatusRow = document.getElementById('janitoraiManagedStatusRow');
-    const janitoraiEndpointHintRow = document.getElementById('janitoraiEndpointHintRow');
-    const janitoraiManagedStatusEl = document.getElementById('janitoraiManagedStatus');
-    const janitoraiManagedStartBtn = document.getElementById('janitoraiManagedStartBtn');
-    const janitoraiManagedStopBtn = document.getElementById('janitoraiManagedStopBtn');
-
-    const janitoraiBrowserMode = () => getSetting('janitoraiBrowserMode') || 'managed';
-
-    async function refreshJanitoraiManagedStatus() {
-        if (!janitoraiManagedStatusEl) return;
-        if (janitoraiBrowserMode() !== 'managed') return;
-        try {
-            const resp = await apiRequest('/plugins/cl-helper/janitorai-managed/status', 'GET');
-            const d = await resp.json().catch(() => null);
-            if (!d) throw new Error('no answer');
-            const running = !!d.running;
-            janitoraiManagedStatusEl.className = `settings-status-badge ${running ? 'active' : 'inactive'}`;
-            const label = running
-                ? `Running (${d.browser || 'browser'}), stops after ${d.idleStopMinutes || 10} min idle`
-                : (d.binary
-                    ? 'Not started. It starts by itself when something needs it.'
-                    : 'No Chrome, Chromium or Edge found on this machine.');
-            janitoraiManagedStatusEl.innerHTML = `<i class="fa-solid fa-circle"></i> ${escapeHtml(label)}`;
-            if (janitoraiManagedStopBtn) janitoraiManagedStopBtn.disabled = !running;
-        } catch {
-            janitoraiManagedStatusEl.className = 'settings-status-badge inactive';
-            janitoraiManagedStatusEl.innerHTML = '<i class="fa-solid fa-circle"></i> cl-helper did not answer';
-        }
-    }
-
-    /**
-     * Re-read everything this section displays. Called on each settings open and whenever the
-     * JanitorAI section is expanded, because the managed browser starts LAZILY: browsing
-     * JanitorAI can bring one up long after this panel was first built, and a status read once
-     * at init would still say "Not started" forever. The 10 minute idle stop moves it the other
-     * way just as invisibly.
-     */
-    function refreshJanitoraiSettingsUi() {
-        if (janitoraiEmailInput) janitoraiEmailInput.value = getSetting('janitoraiEmail') || '';
-        if (janitoraiPasswordInput) janitoraiPasswordInput.value = getSetting('janitoraiPassword') || '';
-        if (janitoraiEndpointInput) janitoraiEndpointInput.value = getSetting('janitoraiBrowserEndpoint') || '';
-        if (janitoraiModeSelect) {
-            janitoraiModeSelect.value = janitoraiBrowserMode();
-            janitoraiModeSelect._customSelect?.update?.();
-        }
-        updateJanitoraiStatus();
-        applyJanitoraiBrowserMode();
-    }
-
-    // The section is a <details>; expanding it is the moment the user actually looks at the
-    // status, so re-read it then rather than only when the whole panel opens.
-    document.getElementById('settingsJanitoraiSection')?.addEventListener('toggle', (e) => {
-        if (e.target.open) refreshJanitoraiSettingsUi();
-    });
-
-    function applyJanitoraiBrowserMode() {
-        const managed = janitoraiBrowserMode() === 'managed';
-        // Managed mode has no endpoint to type, but Test applies to both modes, so hide only the
-        // input and its label, never the row that carries the Test button.
-        const endpointRow = janitoraiEndpointInput?.closest('.settings-row');
-        endpointRow?.querySelector('label')?.classList.toggle('cl-hidden', managed);
-        janitoraiEndpointInput?.classList.toggle('cl-hidden', managed);
-        janitoraiManagedRow?.classList.toggle('cl-hidden', !managed);
-        janitoraiManagedStatusRow?.classList.toggle('cl-hidden', !managed);
-        janitoraiEndpointHintRow?.classList.toggle('cl-hidden', managed);
-        // In managed mode there is nothing to configure before logging in: the browser is started
-        // on demand, so gating the login button on a URL the user never has to enter would be a
-        // dead end.
-        const ready = managed || !!(janitoraiEndpointInput?.value || '').trim();
-        setJanitoraiLoginEnabled(ready, ready
-            ? ''
-            : "Needs a browser endpoint above (JanitorAI's login captcha only runs on their own page).");
-        if (managed) refreshJanitoraiManagedStatus();
-    }
-
-    if (janitoraiModeSelect) {
-        janitoraiModeSelect.value = janitoraiBrowserMode();
-        // Classes transfer to the custom-select container at build time only, so a programmatic
-        // value write needs the trigger re-synced by hand.
-        janitoraiModeSelect._customSelect?.update?.();
-        janitoraiModeSelect.addEventListener('change', () => {
-            setSetting('janitoraiBrowserMode', janitoraiModeSelect.value === 'endpoint' ? 'endpoint' : 'managed');
-            renderJanitoraiChecks([], null);
-            applyJanitoraiBrowserMode();
-        });
-    }
-
-    if (janitoraiManagedStartBtn) {
-        janitoraiManagedStartBtn.onclick = async () => {
-            const original = janitoraiManagedStartBtn.innerHTML;
-            janitoraiManagedStartBtn.disabled = true;
-            janitoraiManagedStartBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Starting...';
-            try {
-                const resp = await apiRequest('/plugins/cl-helper/janitorai-managed/start', 'POST', {});
-                const d = await resp.json().catch(() => null);
-                if (!resp.ok || !d?.ok) throw new Error(d?.error || `HTTP ${resp.status}`);
-                showToast('Browser started', 'success');
-            } catch (err) {
-                showToast(err.message || 'Could not start a browser', 'error');
-            } finally {
-                janitoraiManagedStartBtn.disabled = false;
-                janitoraiManagedStartBtn.innerHTML = original;
-                refreshJanitoraiManagedStatus();
-            }
-        };
-    }
-
-    if (janitoraiManagedStopBtn) {
-        janitoraiManagedStopBtn.onclick = async () => {
-            try {
-                await apiRequest('/plugins/cl-helper/janitorai-managed/stop', 'POST', {});
-            } catch { /* status refresh below reports the truth either way */ }
-            refreshJanitoraiManagedStatus();
-        };
-    }
-
-    if (janitoraiEndpointInput) {
-        janitoraiEndpointInput.value = getSetting('janitoraiBrowserEndpoint') || '';
-        // Saved on change rather than on Save: the Test button reads it back immediately,
-        // and a tested-but-unsaved endpoint would silently not be the one extraction uses.
-        janitoraiEndpointInput.addEventListener('change', () => {
-            const v = janitoraiEndpointInput.value.trim();
-            setSetting('janitoraiBrowserEndpoint', v || null);
-            applyJanitoraiBrowserMode();
-        });
-    }
-    if (togglePwBtn && janitoraiPasswordInput) {
-        togglePwBtn.onclick = () => {
-            const isPassword = janitoraiPasswordInput.type === 'password';
-            janitoraiPasswordInput.type = isPassword ? 'text' : 'password';
-            togglePwBtn.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
-        };
-    }
-
-    // Show what is actually configured. Blank boxes next to a "Logged in" badge give no way to
-    // tell whether the stored credentials are the ones you think they are. Saved on change, the
-    // same way the endpoint field above is, because this section has no Save button.
-    janitoraiEmailInput?.addEventListener('change', () => {
-        setSetting('janitoraiEmail', janitoraiEmailInput.value.trim() || null);
-    });
-    janitoraiPasswordInput?.addEventListener('change', () => {
-        setSetting('janitoraiPassword', janitoraiPasswordInput.value || null);
-    });
-
-    // Single init paint, after every field and listener above exists. A saved endpoint is enough
-    // to enable Sign In; requiring a green test first meant reopening the panel disabled the
-    // button again, since nothing re-runs the test.
-    refreshJanitoraiSettingsUi();
-
-    function renderJanitoraiChecks(checks, fatalError) {
-        if (!janitoraiChecksEl) return;
-        if (!checks?.length && !fatalError) {
-            janitoraiChecksEl.classList.add('hidden');
-            janitoraiChecksEl.innerHTML = '';
-            return;
-        }
-        janitoraiChecksEl.classList.remove('hidden');
-        const rows = (checks || []).map(c => `
-            <div class="janitorai-check ${c.ok ? 'ok' : (c.optional ? 'warn' : 'fail')}">
-                <i class="fa-solid ${c.ok ? 'fa-circle-check' : (c.optional ? 'fa-circle-info' : 'fa-circle-xmark')}"></i>
-                <span class="janitorai-check-label">${escapeHtml(c.label || c.key || '')}</span>
-                ${c.detail ? `<span class="janitorai-check-detail">${escapeHtml(String(c.detail))}</span>` : ''}
-            </div>`).join('');
-        janitoraiChecksEl.innerHTML = rows + (fatalError
-            ? `<div class="janitorai-check fail"><i class="fa-solid fa-circle-xmark"></i><span class="janitorai-check-label">${escapeHtml(fatalError)}</span></div>`
-            : '');
-    }
-
-    function setJanitoraiLoginEnabled(enabled, hint) {
-        if (janitoraiBrowserLoginBtn) janitoraiBrowserLoginBtn.disabled = !enabled;
-        if (janitoraiBrowserLoginHint) janitoraiBrowserLoginHint.textContent = hint || '';
-    }
-
-    const testJanitoraiBrowserBtn = document.getElementById('testJanitoraiBrowserBtn');
-    if (testJanitoraiBrowserBtn) {
-        testJanitoraiBrowserBtn.onclick = async () => {
-            const managed = janitoraiBrowserMode() === 'managed';
-            const endpoint = (janitoraiEndpointInput?.value || '').trim();
-            if (!managed && !endpoint) { showToast('Enter a browser endpoint first', 'warning'); return; }
-            if (!managed) setSetting('janitoraiBrowserEndpoint', endpoint);
-            const original = testJanitoraiBrowserBtn.innerHTML;
-            testJanitoraiBrowserBtn.disabled = true;
-            testJanitoraiBrowserBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-            renderJanitoraiChecks([], null);
-            try {
-                // Through the provider helper rather than a hand-rolled apiRequest: it carries an
-                // abort timeout and apiRequest has none, so a wedged browser spun here forever.
-                const data = await window.janitoraiTestBrowserEndpoint?.(managed ? '' : endpoint);
-                renderJanitoraiChecks(data?.checks, data?.checks?.length ? null : (data?.error || 'cl-helper did not answer'));
-                if (data?.ok) {
-                    setJanitoraiLoginEnabled(true, 'Browser ready.');
-                    showToast('Browser is ready', 'success');
-                } else {
-                    setJanitoraiLoginEnabled(false, 'Fix the failing checks above.');
-                    showToast('Browser is not usable yet', 'warning');
-                }
-            } catch (err) {
-                renderJanitoraiChecks([], err.message);
-                setJanitoraiLoginEnabled(false, 'Fix the failing checks above.');
-            } finally {
-                testJanitoraiBrowserBtn.disabled = false;
-                testJanitoraiBrowserBtn.innerHTML = original;
-                if (managed) refreshJanitoraiManagedStatus();
-            }
-        };
-    }
-
-    if (janitoraiBrowserLoginBtn) {
-        janitoraiBrowserLoginBtn.onclick = async () => {
-            const managed = janitoraiBrowserMode() === 'managed';
-            const endpoint = (janitoraiEndpointInput?.value || '').trim();
-            const email = (janitoraiEmailInput?.value || '').trim();
-            const password = janitoraiPasswordInput?.value || '';
-            if ((!managed && !endpoint) || !email || !password) {
-                showToast(managed ? 'Email and password are both required' : 'Endpoint, email and password are all required', 'warning');
-                return;
-            }
-            const original = janitoraiBrowserLoginBtn.innerHTML;
-            janitoraiBrowserLoginBtn.disabled = true;
-            janitoraiBrowserLoginBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Signing in...';
-            try {
-                const data = await window.janitoraiBrowserLogin?.(email, password, managed ? '' : endpoint);
-                if (!data?.ok) throw new Error(data?.error || 'Sign-in failed');
-                // The browser is signed in either way; adopting the session locally is what
-                // unlocks paging past page 1 in the browse view.
-                const res = data.session ? await window.janitoraiSetSession?.(data.session) : null;
-                // Keep the credentials that just worked, rather than clearing the field. The
-                // session refreshes itself, but when it does lapse this is what lets the user
-                // sign in again without going to find the password.
-                setSettings({ janitoraiEmail: email, janitoraiPassword: password });
-                updateJanitoraiStatus();
-                showToast(res?.ok
-                    ? `Signed in${res.email ? ' as ' + res.email : ''}; session adopted for browsing too`
-                    : 'Browser signed in to JanitorAI', 'success');
-            } catch (err) {
-                // Social-login accounts can never sign in here, so point at the token either way.
-                showToast(`Sign-in failed: ${err.message} If you use Google, Discord, X or Apple to sign in, or this keeps failing, paste a session token below instead.`, 'error', 14000);
-            } finally {
-                janitoraiBrowserLoginBtn.disabled = false;
-                janitoraiBrowserLoginBtn.innerHTML = original;
-            }
-        };
-    }
-
-    // ── DataCat -> JanitorAI batch re-link ──────────────────
-    const migrateDatacatLinksBtn = document.getElementById('migrateDatacatLinksBtn');
-    const dcRelinkModal = document.getElementById('dcRelinkModal');
-    if (migrateDatacatLinksBtn && dcRelinkModal) {
-        const dcListEl = document.getElementById('dcRelinkList');
-        const dcSummaryEl = document.getElementById('dcRelinkSummary');
-        const dcProgressEl = document.getElementById('dcRelinkProgress');
-        const dcRunBtn = document.getElementById('dcRelinkRunBtn');
-        const dcRemoveOldCb = document.getElementById('dcRelinkRemoveOld');
-        const dcVerifyCb = document.getElementById('dcRelinkVerify');
-        let dcRelinkRows = [];
-        let dcRelinkNotChecked = 0;
-        let dcRelinkRunning = false;
-        let dcRelinkAbort = false;
-
-        const DC_JA_UUID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
-        const DC_BUCKET_LABELS = {
-            already: 'Already linked - cleanup only',
-            conflict: 'Conflict: different JanitorAI link',
-            saucepan: 'Saucepan-sourced',
-            unresolvable: 'No JanitorAI id found',
-        };
-
-        function scanDcRelink() {
-            const ja = window.ProviderRegistry?.getProvider?.('janitorai');
-            const rows = [];
-            let notChecked = 0;
-            for (const char of allCharacters) {
-                if (!extensionsReady(char)) { notChecked++; continue; }
-                const dc = char.data?.extensions?.datacat;
-                if (!dc || !dc.id) continue;
-                const existing = char.data?.extensions?.janitorai?.id || null;
-                // Old datacat downloads shipped the source JanitorAI URL in character_version;
-                // for janitor-sourced cards datacat's own id IS the JanitorAI uuid.
-                const version = char.data?.character_version || char.character_version || '';
-                const verUuid = ja?.parseUrl?.(String(version)) || null;
-                let resolved = verUuid;
-                let source = 'version URL';
-                if (!resolved && dc.sourceKind !== 'saucepan' && DC_JA_UUID_RE.test(String(dc.id))) {
-                    resolved = String(dc.id);
-                    source = 'DataCat id';
-                }
-                let bucket;
-                if (existing) bucket = (resolved && String(existing) !== resolved) ? 'conflict' : 'already';
-                else if (resolved) bucket = 'ready';
-                else bucket = dc.sourceKind === 'saucepan' ? 'saucepan' : 'unresolvable';
-                rows.push({
-                    avatar: char.avatar,
-                    name: getCharacterName(char) || char.name || char.avatar,
-                    bucket, resolved, source, existing,
-                    locked: !!char.data?.extensions?.update_locked,
-                    pageName: dc.pageName || null,
-                    tagline: dc.tagline || null,
-                });
-            }
-            return { rows, notChecked };
-        }
-
-        function dcRowActionable(r, removeOld) {
-            return !r.done && r.selected !== false
-                && (r.bucket === 'ready' || (r.bucket === 'already' && removeOld));
-        }
-
-        function updateDcSelCount() {
-            const n = dcRelinkRows.filter(r => dcRowActionable(r, dcRemoveOldCb.checked)).length;
-            const sel = document.getElementById('dcRelinkSelCount');
-            if (sel) sel.textContent = `${n} selected`;
-            dcRunBtn.innerHTML = `<i class="fa-solid fa-play"></i> Migrate Selected (${n})`;
-            dcRunBtn.disabled = n === 0 || dcRelinkRunning;
-        }
-
-        function renderDcRelink() {
-            const removeOld = dcRemoveOldCb.checked;
-            const counts = {};
-            for (const r of dcRelinkRows) counts[r.bucket] = (counts[r.bucket] || 0) + 1;
-            const pill = (n, label, cls) => `<span class="dc-relink-pill ${cls}">${n} ${escapeHtml(label)}</span>`;
-            const pills = [];
-            if (counts.ready) pills.push(pill(counts.ready, 'ready', 'ready'));
-            if (counts.already) pills.push(pill(counts.already, removeOld ? 'cleanup only' : 'already linked (hidden)', ''));
-            if (counts.conflict) pills.push(pill(counts.conflict, 'conflicting', 'conflict'));
-            if (counts.saucepan) pills.push(pill(counts.saucepan, 'saucepan-sourced', ''));
-            if (counts.unresolvable) pills.push(pill(counts.unresolvable, 'unresolvable', ''));
-            if (dcRelinkNotChecked) pills.push(pill(dcRelinkNotChecked, 'not checked', ''));
-            dcSummaryEl.innerHTML = pills.length
-                ? pills.join('')
-                : '<span class="dc-relink-pill">No DataCat-linked characters found</span>';
-
-            const order = { ready: 0, conflict: 1, already: 2, unresolvable: 3, saucepan: 4 };
-            // Cleanup-only rows have nothing to offer while removal is off, so they hide with it.
-            const visible = dcRelinkRows.filter(r => removeOld || r.bucket !== 'already');
-            const sorted = visible.sort((a, b) =>
-                (order[a.bucket] - order[b.bucket]) || a.name.localeCompare(b.name));
-            dcListEl.innerHTML = sorted.map(r => {
-                const selectable = (r.bucket === 'ready' || r.bucket === 'already') && !r.done;
-                const cb = selectable
-                    ? `<input type="checkbox" class="dc-relink-cb" data-avatar="${escapeHtml(r.avatar)}"${r.selected === false ? '' : ' checked'}>`
-                    : '<span class="dc-relink-cb-spacer"></span>';
-                const lock = r.locked
-                    ? '<i class="fa-solid fa-lock dc-relink-lock" title="Update-locked. The lock governs update checks; the link can still change."></i>'
-                    : '';
-                let badge;
-                if (r.bucket === 'ready') {
-                    badge = `<span class="dc-relink-badge ready" title="JanitorAI id resolved from ${escapeHtml(r.source)}">${escapeHtml(r.source)}</span>`;
-                } else if (r.bucket === 'already') {
-                    badge = `<span class="dc-relink-badge" title="Already linked to JanitorAI. Running removes the leftover DataCat namespace; its display fields are kept when the JanitorAI side lacks them.">${escapeHtml(DC_BUCKET_LABELS.already)}</span>`;
-                } else if (r.bucket === 'conflict') {
-                    badge = `<span class="dc-relink-badge conflict" title="Linked to ${escapeHtml(String(r.existing))} but resolved ${escapeHtml(String(r.resolved))}. This tool never touches conflicting cards.">${escapeHtml(DC_BUCKET_LABELS.conflict)}</span>`;
-                } else {
-                    badge = `<span class="dc-relink-badge">${escapeHtml(DC_BUCKET_LABELS[r.bucket] || r.bucket)}</span>`;
-                }
-                return `<div class="dc-relink-row" data-avatar="${escapeHtml(r.avatar)}">${cb}<img class="dc-relink-avatar" src="${escapeHtml(getCharacterAvatarStThumbUrl(r.avatar))}" loading="lazy" alt=""><span class="dc-relink-row-name" title="${escapeHtml(r.avatar)}">${escapeHtml(r.name)}</span>${lock}${badge}</div>`;
-            }).join('');
-            updateDcSelCount();
-        }
-
-        function markDcRow(avatar, ok, msg) {
-            if (ok) {
-                const data = dcRelinkRows.find(x => x.avatar === avatar);
-                if (data) data.done = true;
-            }
-            const row = dcListEl.querySelector(`.dc-relink-row[data-avatar="${CSS.escape(avatar)}"]`);
-            if (!row) return;
-            const b = document.createElement('span');
-            b.className = `dc-relink-badge ${ok ? 'ready' : 'fail'}`;
-            b.textContent = msg;
-            row.appendChild(b);
-            const cb = row.querySelector('.dc-relink-cb');
-            if (cb) { cb.checked = false; cb.disabled = true; }
-        }
-
-        function openDcRelinkModal() {
-            if (window.extensionsRecoveryInProgress) {
-                showToast('Character data is still loading, please wait', 'warning');
-                return;
-            }
-            const scan = scanDcRelink();
-            dcRelinkRows = scan.rows;
-            dcRelinkNotChecked = scan.notChecked;
-            renderDcRelink();
-            dcProgressEl.textContent = '';
-            dcRelinkModal.classList.add('visible');
-        }
-
-        function closeDcRelinkModal() {
-            dcRelinkAbort = true;
-            dcRelinkModal.classList.remove('visible');
-        }
-
-        async function runDcRelink() {
-            if (dcRelinkRunning) return;
-            const removeOld = dcRemoveOldCb.checked;
-            const verify = dcVerifyCb.checked;
-            const targets = dcRelinkRows.filter(r => dcRowActionable(r, removeOld));
-            if (targets.length === 0) { showToast('Nothing selected.', 'info'); return; }
-
-            dcRelinkRunning = true;
-            dcRelinkAbort = false;
-            dcRunBtn.disabled = true;
-            let linked = 0, cleaned = 0, skipped = 0, failed = 0, unverified = 0;
-
-            for (let i = 0; i < targets.length; i++) {
-                if (dcRelinkAbort) break;
-                const r = targets[i];
-                dcProgressEl.textContent = `${i + 1}/${targets.length} - ${r.name}`;
-
-                if (activeChar?.avatar === r.avatar && isCharModalDirty()) {
-                    skipped++;
-                    markDcRow(r.avatar, false, 'Skipped: open with unsaved edits');
-                    continue;
-                }
-
-                const updates = {};
-                if (r.bucket === 'ready') {
-                    let pageName = r.pageName;
-                    if (verify) {
-                        let detail;
-                        let verifyThrew = false;
-                        try {
-                            detail = await window.janitoraiFetchCharacter?.(r.resolved);
-                        } catch { verifyThrew = true; }
-                        // hampter rate-limits bursts hard (measured 429s), pace the pass
-                        await new Promise(res => setTimeout(res, 900));
-                        if (dcRelinkAbort) break;
-                        // null = definitive 404 (the fetcher throws on transport/auth); linking a gone target would be wrong
-                        if (!verifyThrew && detail === null) {
-                            skipped++;
-                            markDcRow(r.avatar, false, 'Not found on JanitorAI');
-                            continue;
-                        }
-                        if (detail?.name) pageName = detail.name;
-                        else unverified++;
-                    }
-                    const jaNs = { id: r.resolved, linkedAt: new Date().toISOString() };
-                    if (pageName) jaNs.pageName = pageName;
-                    if (r.tagline) jaNs.tagline = r.tagline;
-                    updates['extensions.janitorai'] = jaNs;
-                }
-                if (r.bucket === 'already' && removeOld) {
-                    // Dual-linked cleanup: keep datacat's display fields when the janitorai namespace lacks them.
-                    const live = allCharacters.find(c => c.avatar === r.avatar);
-                    const jaExisting = live?.data?.extensions?.janitorai || {};
-                    if (!jaExisting.pageName && r.pageName) updates['extensions.janitorai.pageName'] = r.pageName;
-                    if (!jaExisting.tagline && r.tagline) updates['extensions.janitorai.tagline'] = r.tagline;
-                }
-                if (removeOld) updates['extensions.datacat'] = ST_UNSET_SENTINEL;
-                if (Object.keys(updates).length === 0) { skipped++; continue; }
-
-                try {
-                    const ok = await window.applyCardFieldUpdates(r.avatar, updates);
-                    if (ok) {
-                        if (r.bucket === 'ready') { linked++; markDcRow(r.avatar, true, 'Migrated'); }
-                        else { cleaned++; markDcRow(r.avatar, true, 'Cleaned'); }
-                    } else {
-                        failed++;
-                        markDcRow(r.avatar, false, 'Write failed');
-                    }
-                } catch (e) {
-                    failed++;
-                    markDcRow(r.avatar, false, e?.message || 'Write failed');
-                }
-            }
-
-            dcRelinkRunning = false;
-            updateDcSelCount();
-            const bits = [`${linked} migrated`];
-            if (cleaned) bits.push(`${cleaned} cleaned`);
-            if (skipped) bits.push(`${skipped} skipped`);
-            if (failed) bits.push(`${failed} failed`);
-            if (unverified) bits.push(`${unverified} unverified`);
-            dcProgressEl.textContent = (dcRelinkAbort ? 'Stopped. ' : 'Done. ') + bits.join(', ');
-
-            window.ProviderRegistry?.rebuildAllBrowseLookups?.();
-            window.ProviderRegistry?.refreshActiveBrowseBadges?.();
-            performSearch();
-        }
-
-        migrateDatacatLinksBtn.onclick = openDcRelinkModal;
-        dcRunBtn.onclick = runDcRelink;
-        document.getElementById('dcRelinkCloseBtn').onclick = closeDcRelinkModal;
-        document.getElementById('dcRelinkCancelBtn').onclick = () => {
-            if (dcRelinkRunning) { dcRelinkAbort = true; return; }
-            closeDcRelinkModal();
-        };
-        dcListEl.addEventListener('change', (e) => {
-            const cb = e.target?.classList?.contains('dc-relink-cb') ? e.target : null;
-            if (!cb) return;
-            const row = dcRelinkRows.find(x => x.avatar === cb.dataset.avatar);
-            if (row) row.selected = cb.checked;
-            updateDcSelCount();
-        });
-        dcRemoveOldCb.addEventListener('change', renderDcRelink);
-        document.getElementById('dcRelinkSelAllBtn').onclick = () => {
-            for (const r of dcRelinkRows) {
-                if (r.bucket === 'ready' || r.bucket === 'already') r.selected = true;
-            }
-            renderDcRelink();
-        };
-        document.getElementById('dcRelinkSelNoneBtn').onclick = () => {
-            for (const r of dcRelinkRows) {
-                if (r.bucket === 'ready' || r.bucket === 'already') r.selected = false;
-            }
-            renderDcRelink();
-        };
-        window.registerOverlay?.({ id: 'dcRelinkModal', tier: 4, close: () => closeDcRelinkModal(), visible: (el) => el.classList.contains('visible') });
-    }
-
     function updateGalleryMigrationStatus() {
         if (!galleryMigrationStatus || !galleryMigrationStatusText) return;
 
@@ -5003,19 +4059,6 @@ function setupSettingsModal() {
         } else {
             galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-info-circle"></i> ${hasId}/${total} characters have gallery IDs. ${needsId} need assignment.${unknown > 0 ? ` ${unknown} could not be checked.` : ''}`;
         }
-    }
-    
-    // Batch check for updates button
-    const batchCheckUpdatesBtn = document.getElementById('batchCheckUpdatesBtn');
-    if (batchCheckUpdatesBtn) {
-        batchCheckUpdatesBtn.onclick = () => {
-            if (typeof window.checkAllCardUpdates === 'function') {
-                settingsModal.classList.remove('visible');
-                window.checkAllCardUpdates();
-            } else {
-                showToast('Card updates module not loaded', 'error');
-            }
-        };
     }
     
     if (migrateGalleryFoldersBtn) {
@@ -5060,10 +4103,6 @@ function setupSettingsModal() {
             migrateGalleryFoldersBtn.innerHTML = originalText;
             migrateGalleryFoldersBtn.disabled = false;
             updateGalleryMigrationStatus();
-
-            if (typeof window.updateGallerySyncWarning === 'function' && typeof window.auditGalleryIntegrity === 'function') {
-                window.updateGallerySyncWarning(window.auditGalleryIntegrity());
-            }
 
             if (errors === 0) {
                 showToast(`${assigned} gallery IDs assigned.`, 'success');
@@ -5299,83 +4338,6 @@ function setupSettingsModal() {
         };
     }
     
-    const gallerySyncAuditBtn = document.getElementById('gallerySyncAuditBtn');
-    const gallerySyncStatus = document.getElementById('gallerySyncStatus');
-    
-    const updateSyncStatusUI = (audit) => {
-        if (!gallerySyncStatus) return;
-
-        const missingIds = audit.issues.missingIds;
-        const unknownIds = audit.issues.unknown || 0;
-        const statusClass = missingIds === 0 ? 'healthy' : 'issues';
-        const hasId = audit.totalCharacters - missingIds - unknownIds;
-
-        const buildMissingIdsDetails = () => {
-            if (audit.missingGalleryId.length === 0) return '';
-            const items = audit.missingGalleryId.slice(0, 20).map(({ avatar, name }) =>
-                `<div class="sync-detail-item"><span class="sync-detail-name">${escapeHtml(name)}</span><span class="sync-detail-avatar">${escapeHtml(avatar)}</span></div>`
-            ).join('');
-            const moreCount = audit.missingGalleryId.length - 20;
-            return `<div class="sync-details-content">${items}${moreCount > 0 ? `<div class="sync-detail-more">...and ${moreCount} more</div>` : ''}</div>`;
-        };
-
-        gallerySyncStatus.innerHTML = `
-            <div class="sync-result">
-                <div class="sync-result-header ${statusClass}">
-                    <i class="fa-solid ${missingIds === 0 ? 'fa-circle-check' : 'fa-triangle-exclamation'}"></i>
-                    <span>${missingIds === 0 ? (unknownIds > 0 ? 'All checked characters have gallery IDs' : 'All characters have gallery IDs') : `${missingIds} character${missingIds !== 1 ? 's' : ''} missing gallery_id`}</span>
-                </div>
-                ${missingIds > 0 ? `
-                <div class="sync-issues-list">
-                    <details class="sync-issue-details" open>
-                        <summary class="sync-issue-item">
-                            <i class="fa-solid fa-id-card"></i>
-                            <span>${missingIds} missing gallery_id</span>
-                            <i class="fa-solid fa-chevron-down sync-expand-icon"></i>
-                        </summary>
-                        ${buildMissingIdsDetails()}
-                    </details>
-                </div>
-                ` : ''}
-                <div class="sync-stats">
-                    <span><i class="fa-solid fa-users"></i> ${audit.totalCharacters} chars</span>
-                    <span><i class="fa-solid fa-check"></i> ${hasId} with ID</span>
-                    ${unknownIds > 0 ? `<span title="Character data could not be loaded for these; they are not counted as missing"><i class="fa-solid fa-circle-question"></i> ${unknownIds} not checked</span>` : ''}
-                </div>
-            </div>
-        `;
-    };
-    
-    if (gallerySyncAuditBtn) {
-        gallerySyncAuditBtn.onclick = () => {
-            if (typeof window.auditGalleryIntegrity !== 'function') {
-                showToast('Gallery sync module not loaded', 'error');
-                return;
-            }
-            if (window.extensionsRecoveryInProgress) {
-                showToast('Character data is still loading — please wait', 'warning');
-                return;
-            }
-            
-            gallerySyncStatus.innerHTML = '<div class="sync-loading"><i class="fa-solid fa-spinner fa-spin"></i> Running audit...</div>';
-            
-            setTimeout(async () => {
-                try {
-                    const audit = await window.auditGalleryIntegrity();
-                    updateSyncStatusUI(audit);
-                    if (typeof window.updateGallerySyncWarning === 'function') {
-                        window.updateGallerySyncWarning(audit);
-                    }
-                    showToast('Audit complete', 'success');
-                } catch (err) {
-                    console.error('[GallerySync] Audit failed:', err);
-                    gallerySyncStatus.innerHTML = '<div class="sync-status-placeholder"><i class="fa-solid fa-circle-xmark" style="color: var(--cl-error-bright);"></i><span>Audit failed - check console</span></div>';
-                    showToast('Audit failed', 'error');
-                }
-            }, 100);
-        };
-    }
-    
     // When extensions recovery finishes, refresh gallery migration status so the
     // settings panel shows real counts instead of the "recovering" placeholder.
     document.addEventListener('cl-extensions-recovered', () => {
@@ -5476,7 +4438,7 @@ function isMultiSelectEnabled() {
 
 // ========================================
 // VIEW MANAGEMENT
-// Top-level view switching (characters, chats, online)
+// Top-level view switching (characters, online)
 // Exposed on window.* so CoreAPI proxies and modules can access it.
 // ========================================
 
@@ -5523,10 +4485,10 @@ function activateOnlineProvider(requestedId) {
 }
 
 /**
- * Switch between top-level views (characters, chats, online).
+ * Switch between top-level views (characters, online).
  * Handles UI toggles for filter areas, buttons, scroll reset, etc.
  * Modules register lazy-load hooks via onViewEnter().
- * @param {string} view - 'characters' | 'chats' | 'online'
+ * @param {string} view - 'characters' | 'online'
  */
 function switchView(view) {
     debugLog('[View] Switching to:', view);
@@ -5554,8 +4516,6 @@ function switchView(view) {
     if (searchInput) {
         if (view === 'characters') {
             searchInput.placeholder = 'Search characters...';
-        } else if (view === 'chats') {
-            searchInput.placeholder = 'Search chats...';
         } else {
             searchInput.placeholder = 'Search library...';
         }
@@ -5563,14 +4523,12 @@ function switchView(view) {
 
     // Get elements
     const charFilters = document.getElementById('filterArea');
-    const chatFilters = document.getElementById('chatsFilterArea');
     const onlineFilters = document.getElementById('onlineFilterArea');
     const importBtn = document.getElementById('importBtn');
     const searchSettings = document.querySelector('.search-settings-container');
     const mainSearch = document.querySelector('.search-area');
 
     hide('characterGrid');
-    hide('chatsView');
     hide('onlineView');
 
     // When leaving online view, notify provider to clean up
@@ -5586,7 +4544,6 @@ function switchView(view) {
 
     // Hide all filter areas using display:none for cleaner switching
     if (charFilters) charFilters.style.display = 'none';
-    if (chatFilters) chatFilters.style.display = 'none';
     if (onlineFilters) onlineFilters.style.display = 'none';
 
     // Online view needs filters-wrapper to grow so the left/right split works
@@ -5615,18 +4572,6 @@ function switchView(view) {
         if (_needsCharacterRefresh) {
             fetchCharacters(true);
         }
-    } else if (view === 'chats') {
-        if (chatFilters) chatFilters.style.display = 'flex';
-        if (importBtn) importBtn.style.display = 'none';
-        if (searchSettings) searchSettings.style.display = 'none';
-        if (mainSearch) {
-            mainSearch.style.display = '';
-            mainSearch.style.visibility = 'visible';
-            mainSearch.style.pointerEvents = '';
-        }
-        show('chatsView');
-        // rAF defer so swipe transitions can paint first
-        requestAnimationFrame(() => window.chatsModule?.loadAllChats?.());
     } else if (view === 'online') {
         if (onlineFilters) onlineFilters.style.display = 'flex';
         if (importBtn) importBtn.style.display = 'none';
@@ -5859,12 +4804,6 @@ function updateGalleryIdWarning(char) {
                 if (!char.data) char.data = {};
                 if (!char.data.extensions) char.data.extensions = {};
                 char.data.extensions.gallery_id = result.galleryId;
-
-                if (typeof window.auditGalleryIntegrity === 'function' &&
-                    typeof window.updateGallerySyncWarning === 'function') {
-                    const audit = await window.auditGalleryIntegrity();
-                    window.updateGallerySyncWarning(audit);
-                }
 
                 warningEl.classList.add('hidden');
                 fetchCharacterImages(char);
@@ -8043,50 +6982,10 @@ async function handleGalleryFolderRename(char, oldName, newName, galleryId) {
     return result;
 }
 
-// ==============================================
-// Embedded Mode UI
-// ==============================================
-
-function closeEmbeddedPanel() {
-    if (isEmbedded && window.parent !== window) {
-        window.parent.postMessage({ source: 'character-library', type: 'cl-close' }, window.location.origin);
-    }
-}
-
-function setupEmbeddedUI() {
-    document.body.classList.add('embedded-mode');
-
-    const logoArea = document.querySelector('.topbar .logo-area');
-    if (logoArea) {
-        const backBtn = document.createElement('button');
-        backBtn.id = 'embeddedBackBtn';
-        backBtn.className = 'glass-btn icon-only embedded-back-btn';
-        backBtn.title = 'Back to Chat';
-        backBtn.innerHTML = '<i class="fa-solid fa-arrow-left"></i>';
-        if (embeddedShowTopBar) backBtn.style.display = 'none';
-        backBtn.addEventListener('click', () => closeEmbeddedPanel());
-        logoArea.insertBefore(backBtn, logoArea.firstChild);
-    }
-
-    window.addEventListener('message', (e) => {
-        if (e.origin !== window.location.origin) return;
-        const msg = e.data;
-        if (!msg || msg.source !== 'character-library-host') return;
-        if (msg.type === 'cl-show-topbar') {
-            const btn = document.getElementById('embeddedBackBtn');
-            if (btn) btn.style.display = msg.value ? 'none' : '';
-        }
-    });
-}
-
 // Init
 document.addEventListener('DOMContentLoaded', async () => {
     // Lock view-toggle / bottom-nav until fetchCharacters finishes (eg. user cant tap into Chats mid-load)
     document.documentElement.classList.add('cl-initial-loading');
-
-    if (isEmbedded) {
-        setupEmbeddedUI();
-    }
 
     // Load settings first to ensure defaults are available
     await loadGallerySettings();
@@ -8144,8 +7043,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Apply animated tag pills setting
     applyAnimateTagPills(getSetting('animateTagPills'), getSetting('animateKeepName'));
     
-    // Apply hide playlist badges setting
-    applyHidePlaylistBadges(getSetting('hidePlaylistBadges'));
 
     // Apply any saved token overrides before first render
     loadCustomTokens();
@@ -8340,306 +7237,6 @@ function showConfirm({
     });
 }
 
-// Shared "save preset" picker (AI Studio + recommender chat). Modeled on the playlist picker: type a name to
-// create, or pick an existing preset to overwrite (always confirmed). Resolves { name, overwriteIndex } where
-// overwriteIndex -1 means a new preset, or null on cancel.
-let _savePresetResolve = null;
-let _savePresetPresets = [];
-
-function _resolveSavePreset(result) {
-    document.getElementById('savePresetPickerOverlay')?.classList.remove('visible');
-    const res = _savePresetResolve;
-    _savePresetResolve = null;
-    _savePresetPresets = [];
-    res?.(result);
-}
-
-async function _savePresetOverwrite(idx) {
-    const p = _savePresetPresets[idx];
-    if (!p) return;
-    const ok = await showConfirm({
-        title: 'Overwrite preset?',
-        message: `Replace the saved prompt in "${p.name}"?`,
-        confirmLabel: 'Overwrite',
-        cancelLabel: 'Cancel',
-        danger: true,
-    });
-    if (ok) _resolveSavePreset({ name: p.name, overwriteIndex: idx });
-}
-
-function _savePresetCommit() {
-    const name = (document.getElementById('savePresetPickerInput')?.value || '').trim();
-    if (!name) return;
-    const idx = _savePresetPresets.findIndex(p => (p.name || '').toLowerCase() === name.toLowerCase());
-    if (idx >= 0) _savePresetOverwrite(idx);
-    else _resolveSavePreset({ name, overwriteIndex: -1 });
-}
-
-// Search-filter a row list and maintain an inline "Create <query>" row while the query has no
-// exact name match. Shared by the save-preset picker and both playlist lists; createRowHtml
-// receives the raw trimmed query and must escape it itself. emptyId (optional) is shown only
-// when the list is empty with no query.
-function filterListWithInlineCreate({ searchId, listId, rowSel, nameOf, createRowClass, createRowHtml, onCreate, emptyId }) {
-    const list = document.getElementById(listId);
-    if (!list) return;
-    const raw = (document.getElementById(searchId)?.value || '').trim();
-    const query = raw.toLowerCase();
-    let exactMatch = false;
-    const rows = list.querySelectorAll(rowSel);
-    rows.forEach(row => {
-        const name = (nameOf(row) || '').toLowerCase();
-        const show = !query || name.includes(query);
-        row.style.display = show ? '' : 'none';
-        if (query && name === query) exactMatch = true;
-    });
-    if (emptyId) {
-        const emptyEl = document.getElementById(emptyId);
-        if (emptyEl) emptyEl.style.display = rows.length === 0 && !query ? '' : 'none';
-    }
-    let createRow = list.querySelector('.' + createRowClass);
-    if (query && !exactMatch) {
-        if (!createRow) {
-            createRow = document.createElement('div');
-            createRow.className = createRowClass;
-            createRow.addEventListener('click', onCreate);
-            list.appendChild(createRow);
-        }
-        createRow.innerHTML = createRowHtml(raw);
-        createRow.style.display = '';
-    } else if (createRow) {
-        createRow.style.display = 'none';
-    }
-}
-
-function _filterSavePresetList() {
-    filterListWithInlineCreate({
-        searchId: 'savePresetPickerInput',
-        listId: 'savePresetPickerList',
-        rowSel: '.preset-picker-row',
-        nameOf: (row) => row.querySelector('.preset-picker-name')?.textContent,
-        createRowClass: 'preset-picker-create-row',
-        createRowHtml: (q) => `<i class="fa-solid fa-plus preset-picker-create-icon"></i><span>Create <strong>${escapeHtml(q)}</strong></span>`,
-        onCreate: _savePresetCommit,
-    });
-}
-
-function _renderSavePresetList() {
-    const list = document.getElementById('savePresetPickerList');
-    if (!list) return;
-    list.innerHTML = _savePresetPresets.map((p, i) =>
-        `<div class="preset-picker-row" data-idx="${i}"><i class="fa-solid fa-pen-to-square preset-picker-row-icon"></i><span class="preset-picker-name">${escapeHtml(p.name || '')}</span><span class="preset-picker-row-hint">overwrite</span></div>`
-    ).join('');
-    _filterSavePresetList();
-}
-
-function savePresetPicker(title, presets) {
-    return new Promise(resolve => {
-        _savePresetResolve = resolve;
-        _savePresetPresets = Array.isArray(presets) ? presets : [];
-        let overlay = document.getElementById('savePresetPickerOverlay');
-        if (!overlay) {
-            overlay = document.createElement('div');
-            overlay.id = 'savePresetPickerOverlay';
-            overlay.className = 'cl-modal cl-modal-drawer cl-drawer-partial';
-            overlay.innerHTML = `
-                <div class="cl-modal-content" style="max-width: calc(420px * var(--modal-scale, 1));">
-                    <div class="cl-modal-header">
-                        <h3 id="savePresetPickerTitle"></h3>
-                        <button type="button" class="cl-modal-close" id="savePresetPickerClose"><i class="fa-solid fa-xmark"></i></button>
-                    </div>
-                    <div class="cl-modal-body" style="padding: 0;">
-                        <div class="preset-picker-search-wrap">
-                            <i class="fa-solid fa-tag preset-picker-search-icon"></i>
-                            <input type="search" id="savePresetPickerInput" class="cl-input preset-picker-search" placeholder="Name a new preset, or pick one to overwrite..." maxlength="100" autocomplete="one-time-code">
-                        </div>
-                        <div id="savePresetPickerList" class="preset-picker-list"></div>
-                    </div>
-                </div>`;
-            document.body.appendChild(overlay);
-            overlay.querySelector('#savePresetPickerClose').addEventListener('click', () => _resolveSavePreset(null));
-            overlay.addEventListener('click', (e) => { if (e.target === overlay) _resolveSavePreset(null); });
-            const inputEl = overlay.querySelector('#savePresetPickerInput');
-            inputEl.addEventListener('input', _filterSavePresetList);
-            inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); _savePresetCommit(); } });
-            overlay.querySelector('#savePresetPickerList').addEventListener('click', (e) => {
-                const row = e.target.closest('.preset-picker-row');
-                if (row) _savePresetOverwrite(parseInt(row.dataset.idx, 10));
-            });
-            window.registerOverlay({ id: 'savePresetPickerOverlay', tier: 0, close: () => _resolveSavePreset(null), visible: (el) => el.classList.contains('visible') });
-        }
-        overlay.querySelector('#savePresetPickerTitle').innerHTML = `<i class="fa-solid fa-floppy-disk"></i> ${escapeHtml(title || 'Save preset')}`;
-        const input = overlay.querySelector('#savePresetPickerInput');
-        input.value = '';
-        _renderSavePresetList();
-        overlay.classList.add('visible');
-        requestAnimationFrame(() => input.focus());
-    });
-}
-
-// Sync with Main Window
-async function loadCharInMain(charOrAvatar, newChat = false) {
-    // In embedded mode, send a message to the parent frame
-    if (isEmbedded && window.parent !== window) {
-        let avatar = (typeof charOrAvatar === 'string') ? charOrAvatar : charOrAvatar.avatar;
-        let charObj = (typeof charOrAvatar === 'object') ? charOrAvatar : null;
-        if (!charObj && avatar) charObj = allCharacters.find(c => c.avatar === avatar);
-
-        // newChat runs ST-side via index.js: the active-char state + slash executor live in ST's window.
-        window.parent.postMessage({ source: 'character-library', type: 'cl-open-character', avatar, newChat }, window.location.origin);
-        showToast(`Loading ${charObj?.name || avatar}...`, 'success');
-        return true;
-    }
-
-    const host = getHostWindow();
-    if (!host) {
-        showToast("Main window disconnected", "error");
-        return false;
-    }
-
-    // Normalize inputs
-    let avatar = (typeof charOrAvatar === 'string') ? charOrAvatar : charOrAvatar.avatar;
-    let charName = (typeof charOrAvatar === 'object') ? charOrAvatar.name : null;
-    let charObj = (typeof charOrAvatar === 'object') ? charOrAvatar : null;
-    
-    // If we only have avatar string, find the full character object
-    if (!charObj && avatar) {
-        charObj = allCharacters.find(c => c.avatar === avatar);
-    }
-
-    debugLog(`Attempting to load character by file: ${avatar}`);
-
-    try {
-        let context = null;
-        let mainCharacters = [];
-        
-        if (host.SillyTavern && host.SillyTavern.getContext) {
-            context = host.SillyTavern.getContext();
-            mainCharacters = context.characters || [];
-        } else if (host.characters) {
-            mainCharacters = host.characters;
-        }
-
-        // 1. Find character INDEX in main list (Strict Filename Match);
-        //    selectCharacterById takes a numeric index, not the avatar filename.
-        const characterIndex = mainCharacters.findIndex(c => c.avatar === avatar);
-        const targetChar = characterIndex !== -1 ? mainCharacters[characterIndex] : null;
-        
-        if (!targetChar) {
-            console.warn(`Character "${avatar}" not found in main window's loaded list.`);
-            showToast(`Character file "${avatar}" not found`, "error");
-            return false;
-        } else {
-             debugLog("Found character in main list at index", characterIndex, ":", targetChar);
-        }
-
-        // Show toast immediately before attempting to load
-        showToast(`Loading ${charName || avatar}...`, "success");
-
-        // Helper: Timeout wrapper for promises
-        const withTimeout = (promise, ms = 2000) => {
-            return new Promise((resolve, reject) => {
-                const timer = setTimeout(() => {
-                    reject(new Error("Timeout"));
-                }, ms);
-                promise
-                    .then(value => {
-                        clearTimeout(timer);
-                        resolve(value);
-                    })
-                    .catch(reason => {
-                        clearTimeout(timer);
-                        reject(reason);
-                    });
-            });
-        };
-
-        // Method 1: context.selectCharacterById — may not return a promise.
-        if (context && typeof context.selectCharacterById === 'function') {
-             debugLog(`Trying context.selectCharacterById with index ${characterIndex}`);
-             try {
-                 const result = context.selectCharacterById(characterIndex);
-                 // If it returns a promise, wait briefly; otherwise assume success
-                 if (result && typeof result.then === 'function') {
-                     await withTimeout(result, 5000);
-                 }
-                 if (newChat && typeof context.executeSlashCommandsWithOptions === 'function') {
-                     try { await context.executeSlashCommandsWithOptions('/newchat', { displayCommand: false, showOutput: false }); }
-                     catch (e) { console.warn('Could not start new chat:', e); }
-                 }
-                 return true;
-             } catch (err) {
-                 console.warn("selectCharacterById failed or timed out:", err);
-                 // Fall through to next method
-             }
-        }
-
-        // Method 2: context.loadCharacter (Alternative API)
-        if (context && typeof context.loadCharacter === 'function') {
-             debugLog("Trying context.loadCharacter");
-             try {
-                // Some versions return a promise, some don't.
-                await withTimeout(Promise.resolve(context.loadCharacter(avatar)), 5000);
-                return true;
-             } catch (err) {
-                 console.warn("context.loadCharacter failed:", err);
-             }
-        }
-
-        // Method 3: Global loadCharacter (Legacy)
-        if (typeof host.loadCharacter === 'function') {
-            debugLog("Trying global loadCharacter");
-            try {
-                host.loadCharacter(avatar);
-                return true;
-            } catch (err) {
-                console.warn("global loadCharacter failed:", err);
-            }
-        }
-
-        // Method 4: UI Click Simulation (Virtualization Fallback)
-        if (host.$) {
-            const $ = host.$;
-            let charBtn = $('.character-list-item').filter((i, el) => {
-                const file = $(el).attr('data-file');
-                // Check both full filename and filename without extension
-                return file === avatar || file === avatar.replace(/\.[^/.]+$/, "");
-            });
-            
-            if (charBtn.length) {
-                debugLog("Loaded via jQuery click (data-file match)");
-                charBtn.first().click();
-                return true;
-            } else {
-                 console.warn("Character found in array but not in DOM (Virtualization?)");
-            }
-        }
-        
-        // Method 5: Slash Command /go (Last Resort for Unique Names only)
-        // If we reached here, the API failed AND the DOM click failed.
-        const isDuplicateName = mainCharacters.filter(c => c.name === charName).length > 1;
-        
-        if (charName && !isDuplicateName && context && context.executeSlashCommandsWithOptions) {
-              const safeName = charName.replace(/"/g, '\\"');
-              debugLog("Falling back to Slash Command (Unique Name)");
-              context.executeSlashCommandsWithOptions(`/go "${safeName}"`, { displayCommand: false, showOutput: true });
-              showToast(`Loaded ${charName} (Slash Command)`, "success");
-              return true;
-        }
-        
-        if (isDuplicateName) {
-             showToast(`Duplicate name "${charName}" and exact file load failed.`, "error");
-             return false;
-        }
-        
-        console.warn("All load methods failed.");
-        showToast("Could not trigger load. Try clicking manually in the main list.", "error");
-        return false;
-    } catch (e) {
-        console.error("Access to opener failed:", e);
-        showToast("Error communicating with main window", "error");
-        return false;
-    }
-}
 
 // Data Fetching
 // forceRefresh: if true, fetch directly from API (authoritative) and refresh main window in background
@@ -8789,7 +7386,6 @@ function slimCharacter(char) {
         fav: char.fav,
         date_added: char.date_added,
         create_date: char.create_date,
-        date_last_chat: char.date_last_chat,
         creator: char.creator,
         tags: char.tags,
         creator_notes: char.creator_notes,
@@ -8807,7 +7403,6 @@ function slimCharacter(char) {
         _lowerNotes: char._lowerNotes || '',
         _dateAdded: char._dateAdded,
         _createDate: char._createDate,
-        _dateLastChat: char._dateLastChat,
         _tokenEstimate: char._tokenEstimate,
         _slim: true
     };
@@ -9055,7 +7650,6 @@ function processAndRender(data) {
     if (isSTShallow) {
         _recoveryGeneration++;
         window.extensionsRecoveryInProgress = true;
-        window.updateGallerySyncWarning?.();
         recoverShallowExtensions(_recoveryGeneration);
     }
     
@@ -9105,28 +7699,8 @@ function processAndRender(data) {
     // recoverShallowExtensions() re-runs sync+audit after patching extensions.
     if (isSTShallow) return;
 
-    // Prune stale playlist entries for characters that no longer exist
-    if (typeof window.playlistsPruneDeleted === 'function') {
-        window.playlistsPruneDeleted();
-    }
-
     // Audit only checks for missing gallery_ids; folder mapping is computed live by the Proxy in index.js.
-    runGallerySyncAudit();
 }
-
-function runGallerySyncAudit(retries = 10) {
-    try {
-        if (typeof window.auditGalleryIntegrity !== 'function' ||
-            typeof window.updateGallerySyncWarning !== 'function') {
-            if (retries > 0) setTimeout(() => runGallerySyncAudit(retries - 1), 200);
-            return;
-        }
-        window.updateGallerySyncWarning(window.auditGalleryIntegrity());
-        gallerySyncAuditDone = true;
-    } catch { /* ignore */ }
-}
-
-let gallerySyncAuditDone = false;
 
 // Tag filter states: Map<tagName, 'include' | 'exclude'>
 // undefined/not in map = neutral (unchecked)
@@ -9136,9 +7710,6 @@ let activeTagFilters = new Map();
 // Initialized from settings in initTagLogicToggles() after settings are loaded
 let tagIncludeMode = 'any';
 let tagExcludeMode = 'all';
-
-// Playlist filter state
-let activePlaylistFilter = null;
 
 function initTagLogicToggles() {
     const includeBtn = document.getElementById('includeLogicBtn');
@@ -9357,117 +7928,6 @@ function getTags(char) {
     if (Array.isArray(char.tags)) return char.tags;
     if (char.data && Array.isArray(char.data.tags)) return char.data.tags;
     return [];
-}
-
-// ========================================
-// PLAYLIST FILTER
-// ========================================
-
-function setPlaylistFilter(uid) {
-    // avatar set is rebuilt fresh inside performSearch so picker/manage/bulk
-    // mutations land in the grid right away. no caching here.
-    activePlaylistFilter = uid || null;
-    updatePlaylistFilterLabel();
-    performSearch();
-}
-
-// called from playlists.js after add/remove/delete; drops the filter if the playlist got deleted out from under us
-function refreshPlaylistFilterIfActive(uid) {
-    if (!activePlaylistFilter || activePlaylistFilter !== uid) return;
-    const stillExists = !!window.playlistsGetPlaylist?.(uid);
-    if (stillExists) {
-        performSearch();
-    } else {
-        setPlaylistFilter(null);
-    }
-}
-
-function updatePlaylistFilterLabel() {
-    const label = document.getElementById('playlistFilterLabel');
-    if (!label) return;
-    if (activePlaylistFilter) {
-        const pl = window.playlistsGetPlaylist?.(activePlaylistFilter);
-        label.textContent = pl ? pl.name : 'Playlists';
-        label.closest('.playlist-filter-btn')?.classList.add('active');
-    } else {
-        label.textContent = 'Playlists';
-        label.closest('.playlist-filter-btn')?.classList.remove('active');
-    }
-}
-
-function populatePlaylistDropdown() {
-    const content = document.getElementById('playlistFilterContent');
-    if (!content) return;
-
-    const playlists = window.playlistsGetAll?.() || [];
-
-    const searchWrap = document.querySelector('.pl-filter-search-wrap');
-    if (searchWrap) searchWrap.style.display = playlists.length ? '' : 'none';
-    const searchInput = document.getElementById('playlistFilterSearch');
-    if (searchInput) searchInput.value = '';
-
-    let html = `<div class="pl-filter-item ${!activePlaylistFilter ? 'active' : ''}" data-uid="">
-        <i class="fa-solid fa-users"></i>
-        <span class="pl-filter-name">All Characters</span>
-    </div>`;
-
-    if (playlists.length) {
-        html += '<div class="pl-filter-separator"></div>';
-        html += playlists.map(pl => {
-            const isActive = activePlaylistFilter === pl.uid;
-            const iconColor = pl.color ? ` style="color:${escapeHtml(pl.color)}"` : '';
-            const icon = pl.icon
-                ? `<i class="pl-filter-icon ${escapeHtml(pl.icon)}"${iconColor}></i>`
-                : '';
-            return `<div class="pl-filter-item ${isActive ? 'active' : ''}" data-uid="${escapeHtml(pl.uid)}">
-                ${icon}
-                <span class="pl-filter-name">${escapeHtml(pl.name)}</span>
-                <span class="pl-filter-count">${pl.characters.length}</span>
-            </div>`;
-        }).join('');
-    }
-
-    content.innerHTML = html;
-}
-
-function renderSidebarPlaylists(avatar) {
-    const section = document.getElementById('modalPlaylistSection');
-    const container = document.getElementById('modalPlaylists');
-    if (!section || !container) return;
-
-    const playlists = window.playlistsGetForChar?.(avatar) || [];
-
-    section.style.display = '';
-    container.innerHTML = playlists.map(pl => {
-        const iconColor = pl.color ? ` style="color:${escapeHtml(pl.color)}"` : '';
-        const icon = pl.icon
-            ? `<i class="pl-chip-icon ${escapeHtml(pl.icon)}"${iconColor}></i>`
-            : '';
-        const removeBtn = `<button class="pl-chip-remove" title="Remove from playlist" aria-label="Remove from playlist"><i class="fa-solid fa-xmark"></i></button>`;
-        return `<span class="pl-chip" data-uid="${escapeHtml(pl.uid)}">${icon}${escapeHtml(pl.name)}${removeBtn}</span>`;
-    }).join('') + '<button class="pl-chip pl-chip-add" title="Add to playlist"><i class="fa-solid fa-plus"></i></button>';
-
-    container.onclick = (e) => {
-        const addBtn = e.target.closest('.pl-chip-add');
-        if (addBtn) {
-            window.openPlaylistPicker?.([avatar]);
-            return;
-        }
-        // x button has to be checked before the chip itself, otherwise the
-        // filter-set click would fire before the remove
-        const removeBtn = e.target.closest('.pl-chip-remove');
-        if (removeBtn) {
-            e.stopPropagation();
-            const chip = removeBtn.closest('.pl-chip[data-uid]');
-            if (chip) window.playlistsRemoveFromPlaylist?.(chip.dataset.uid, [avatar]);
-            return;
-        }
-        const chip = e.target.closest('.pl-chip[data-uid]');
-        if (chip) {
-            setPlaylistFilter(chip.dataset.uid);
-            document.getElementById('modalClose')?.click();
-        }
-    };
 }
 
 // ==============================================
@@ -9968,7 +8428,6 @@ function buildCharacterCardHTML(char, virtualIndex) {
 
     const initiallyLoaded = _seenAvatarUrls.has(imgPath);
     const isSelected = !!(window.MultiSelect?.isSelected?.(char.avatar));
-    const playlists = window.playlistsGetForChar?.(char.avatar) || [];
 
     const classes = ['char-card'];
     if (isFav) classes.push('is-favorite');
@@ -9977,11 +8436,6 @@ function buildCharacterCardHTML(char, virtualIndex) {
 
     const parts = ['<div class="', classes.join(' '), '" data-avatar="', escapeHtml(char.avatar), '" data-virtual-index="', virtualIndex, '">'];
     if (isFav) parts.push('<div class="favorite-indicator"><i class="fa-solid fa-star"></i></div>');
-    if (playlists.length > 0) {
-        const firstIcon = playlists.length === 1 && playlists[0].icon ? playlists[0].icon : 'fa-solid fa-list';
-        const plTitle = playlists.map(p => p.name).join(', ');
-        parts.push('<div class="playlist-indicator" title="', escapeHtml(plTitle), '"><i class="', escapeHtml(firstIcon), '"></i></div>');
-    }
     parts.push('<div class="char-card-checkbox" aria-hidden="true"><i class="fa-solid fa-check"></i></div>');
     parts.push('<img class="card-image" src="', escapeHtml(imgPath), '" alt="" decoding="async">');
     parts.push('<div class="card-overlay"><div class="card-name">', escapeHtml(name), '</div><div class="card-tags">');
@@ -10054,19 +8508,6 @@ function createCharacterCard(char) {
         card.appendChild(favDiv);
     }
 
-    // Playlist indicator
-    if (window.playlistsIsCharInAny?.(char.avatar)) {
-        const pls = window.playlistsGetForChar?.(char.avatar) || [];
-        const plDiv = document.createElement('div');
-        plDiv.className = 'playlist-indicator';
-        plDiv.title = pls.map(p => p.name).join(', ');
-        const plIcon = document.createElement('i');
-        const firstIcon = pls.length === 1 && pls[0].icon ? pls[0].icon : 'fa-solid fa-list';
-        plIcon.className = firstIcon;
-        plDiv.appendChild(plIcon);
-        card.appendChild(plDiv);
-    }
-
     // always in dom, body.multi-select-mode reveals; real div not pseudo so themers can target it like .favorite-indicator
     const checkbox = document.createElement('div');
     checkbox.className = 'char-card-checkbox';
@@ -10126,39 +8567,6 @@ function createCharacterCard(char) {
     // No per-card attachment needed
     
     return card;
-}
-
-function refreshPlaylistBadges() {
-    // detail-modal sidebar chips reflect membership too, refresh together
-    const charModal = document.getElementById('charModal');
-    if (activeChar && charModal && !charModal.classList.contains('hidden')) {
-        renderSidebarPlaylists(activeChar.avatar);
-    }
-    for (const [, card] of activeCards) {
-        const avatar = card.dataset.avatar;
-        const existing = card.querySelector('.playlist-indicator');
-        const inPlaylist = window.playlistsIsCharInAny?.(avatar);
-        if (inPlaylist) {
-            const pls = window.playlistsGetForChar?.(avatar) || [];
-            const firstIcon = pls.length === 1 && pls[0].icon ? pls[0].icon : 'fa-solid fa-list';
-            const tooltip = pls.map(p => p.name).join(', ');
-            if (existing) {
-                existing.title = tooltip;
-                const icon = existing.querySelector('i');
-                if (icon) icon.className = firstIcon;
-            } else {
-                const plDiv = document.createElement('div');
-                plDiv.className = 'playlist-indicator';
-                plDiv.title = tooltip;
-                const plIcon = document.createElement('i');
-                plIcon.className = firstIcon;
-                plDiv.appendChild(plIcon);
-                card.appendChild(plDiv);
-            }
-        } else if (existing) {
-            existing.remove();
-        }
-    }
 }
 
 // Modal Logic
@@ -10835,284 +9243,6 @@ function freezeGifThumbnailImage(imgEl, maxSize = 192) {
     }
 }
 
-// ========================================
-// LEGACY FOLDER MIGRATION
-// Helps users move images from old "CharName" folders to new "CharName_uuid" folders
-// ========================================
-
-/**
- * Check if there are files in the legacy (non-UUID) folder for a character
- * @param {object} char - Character object
- * @returns {Promise<{hasLegacy: boolean, files: string[], legacyFolder: string, currentFolder: string}>}
- */
-async function checkLegacyFolder(char) {
-    const result = {
-        hasLegacy: false,
-        files: [],
-        legacyFolder: char.name,
-        currentFolder: getGalleryFolderName(char)
-    };
-    
-    // Only relevant if unique folders are enabled and character has gallery_id
-    if (!getSetting('uniqueGalleryFolders')) return result;
-    const galleryId = getCharacterGalleryId(char);
-    if (!galleryId) return result;
-    
-    // If legacyFolder and currentFolder are the same, no legacy folder exists
-    if (result.legacyFolder === result.currentFolder) return result;
-    
-    try {
-        const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { 
-            folder: result.legacyFolder, 
-            type: 7 
-        });
-        
-        if (response.ok) {
-            const files = await response.json();
-            if (files && files.length > 0) {
-                // Filter to only image files
-                result.files = files.filter(f => 
-                    f.match(/\.(png|jpg|jpeg|webp|gif|bmp)$/i)
-                );
-                result.hasLegacy = result.files.length > 0;
-            }
-        }
-    } catch (e) {
-        console.warn('[LegacyFolder] Error checking legacy folder:', e);
-    }
-    
-    return result;
-}
-
-/**
- * Update the legacy folder button visibility based on whether legacy files exist
- * @param {object} char - Character object
- */
-async function updateLegacyFolderButton(char) {
-    const btn = document.getElementById('checkLegacyFolderBtn');
-    const countSpan = document.getElementById('legacyFolderCount');
-    
-    if (!btn) return;
-    
-    // Hide by default
-    btn.classList.add('hidden');
-    
-    // Check for legacy files
-    const legacyInfo = await checkLegacyFolder(char);
-    
-    if (legacyInfo.hasLegacy) {
-        // Show indicator with count
-        if (countSpan) {
-            countSpan.textContent = legacyInfo.files.length;
-        }
-        btn.classList.remove('hidden');
-        btn.title = `${legacyInfo.files.length} image${legacyInfo.files.length > 1 ? 's' : ''} in legacy folder "${legacyInfo.legacyFolder}" - Click to migrate`;
-    }
-}
-
-/**
- * Show modal with legacy folder images for selective migration
- * @param {object} char - Character object
- */
-async function showLegacyFolderModal(char) {
-    const legacyInfo = await checkLegacyFolder(char);
-    
-    if (!legacyInfo.hasLegacy) {
-        showToast('No legacy images found', 'info');
-        return;
-    }
-    
-    // Create modal
-    const modal = document.createElement('div');
-    modal.className = 'confirm-modal cl-modal-drawer';
-    modal.id = 'legacyFolderModal';
-    
-    const safeLegacyFolder = sanitizeFolderName(legacyInfo.legacyFolder);
-    
-    modal.innerHTML = `
-        <div class="confirm-modal-content" style="max-width: calc(800px * var(--modal-scale, 1)); max-height: calc(90vh * var(--modal-scale, 1));">
-            <div class="confirm-modal-header" style="background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.2) 0%, rgba(52, 120, 200, 0.2) 100%);">
-                <h3>
-                    <i class="fa-solid fa-folder-tree" style="color: var(--accent);"></i>
-                    Legacy Folder Migration
-                </h3>
-                <button class="close-confirm-btn" id="closeLegacyModal">&times;</button>
-            </div>
-            <div class="confirm-modal-body" style="padding: 15px;">
-                <div style="margin-bottom: 15px; padding: 12px; background: rgba(var(--accent-rgb), 0.1); border-radius: var(--radius-lg); border: 1px solid rgba(var(--accent-rgb), 0.3);">
-                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
-                        <i class="fa-solid fa-info-circle" style="color: var(--accent);"></i>
-                        <strong style="color: var(--text-primary);">Images in Old Folder Format</strong>
-                    </div>
-                    <p style="margin: 0; color: var(--text-secondary); font-size: 13px;">
-                        These images are stored in the legacy folder <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: var(--radius-sm);">${escapeHtml(legacyInfo.legacyFolder)}</code>. 
-                        Select images to move to the new unique folder <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: var(--radius-sm);">${escapeHtml(legacyInfo.currentFolder)}</code>.
-                    </p>
-                </div>
-                
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-primary);">
-                        <input type="checkbox" id="legacySelectAll" style="accent-color: var(--accent);">
-                        <span>Select All (<span id="legacySelectedCount">0</span>/${legacyInfo.files.length})</span>
-                    </label>
-                    <div style="display: flex; gap: 8px;">
-                        <button class="action-btn secondary small" id="legacyRefreshBtn" title="Refresh file list">
-                            <i class="fa-solid fa-sync"></i>
-                        </button>
-                    </div>
-                </div>
-                
-                <div id="legacyImagesGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; max-height: 400px; overflow-y: auto; padding: 5px;">
-                    ${legacyInfo.files.map(fileName => `
-                        <div class="legacy-image-item" data-filename="${escapeHtml(fileName)}" style="position: relative; aspect-ratio: 1; border-radius: var(--radius-lg); overflow: hidden; cursor: pointer; border: 2px solid transparent; transition: all 0.2s;">
-                            <img src="${galleryFileUrl(safeLegacyFolder, fileName)}" 
-                                 style="width: 100%; height: 100%; object-fit: cover;"
-                                 loading="lazy"
-                                 onerror="this.src='/img/No-Image-Placeholder.svg'">
-                            <div class="legacy-checkbox" style="position: absolute; top: 5px; left: 5px; width: 22px; height: 22px; background: rgba(0,0,0,0.6); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center;">
-                                <input type="checkbox" class="legacy-file-checkbox" data-filename="${escapeHtml(fileName)}" style="accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer;">
-                            </div>
-                            <div style="position: absolute; bottom: 0; left: 0; right: 0; padding: 4px; background: linear-gradient(transparent, rgba(0,0,0,0.8)); font-size: 10px; color: white; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
-                                ${escapeHtml(fileName)}
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-            <div class="confirm-modal-footer" style="display: flex; gap: 10px; justify-content: flex-end;">
-                <button class="action-btn secondary" id="cancelLegacyBtn">
-                    <i class="fa-solid fa-xmark"></i> Cancel
-                </button>
-                <button class="action-btn primary" id="moveSelectedLegacyBtn" disabled>
-                    <i class="fa-solid fa-arrow-right"></i> Move Selected
-                </button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-    
-    // Setup event handlers
-    const closeModal = () => {
-        modal.remove();
-    };
-    modal._closeFn = closeModal;
-
-    modal.querySelector('#closeLegacyModal').addEventListener('click', closeModal);
-    modal.querySelector('#cancelLegacyBtn').addEventListener('click', closeModal);
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) closeModal();
-    });
-
-    // Update selected count
-    const updateSelectedCount = () => {
-        const checkboxes = modal.querySelectorAll('.legacy-file-checkbox');
-        const checked = modal.querySelectorAll('.legacy-file-checkbox:checked');
-        const countSpan = modal.querySelector('#legacySelectedCount');
-        const moveBtn = modal.querySelector('#moveSelectedLegacyBtn');
-        const selectAllCheckbox = modal.querySelector('#legacySelectAll');
-        
-        if (countSpan) countSpan.textContent = checked.length;
-        if (moveBtn) moveBtn.disabled = checked.length === 0;
-        if (selectAllCheckbox) selectAllCheckbox.checked = checked.length === checkboxes.length && checkboxes.length > 0;
-        
-        // Update visual selection state
-        modal.querySelectorAll('.legacy-image-item').forEach(item => {
-            const checkbox = item.querySelector('.legacy-file-checkbox');
-            if (checkbox?.checked) {
-                item.style.borderColor = 'var(--accent)';
-                item.style.boxShadow = '0 0 10px rgba(var(--accent-rgb), 0.3)';
-            } else {
-                item.style.borderColor = 'transparent';
-                item.style.boxShadow = 'none';
-            }
-        });
-    };
-    
-    // Click on image item to toggle checkbox
-    modal.querySelectorAll('.legacy-image-item').forEach(item => {
-        item.addEventListener('click', (e) => {
-            if (e.target.type === 'checkbox') return; // Don't double-toggle
-            const checkbox = item.querySelector('.legacy-file-checkbox');
-            if (checkbox) {
-                checkbox.checked = !checkbox.checked;
-                updateSelectedCount();
-            }
-        });
-    });
-    
-    // Checkbox change events
-    modal.querySelectorAll('.legacy-file-checkbox').forEach(checkbox => {
-        checkbox.addEventListener('change', updateSelectedCount);
-    });
-    
-    // Select all
-    modal.querySelector('#legacySelectAll').addEventListener('change', (e) => {
-        modal.querySelectorAll('.legacy-file-checkbox').forEach(cb => {
-            cb.checked = e.target.checked;
-        });
-        updateSelectedCount();
-    });
-    
-    // Refresh button
-    modal.querySelector('#legacyRefreshBtn').addEventListener('click', async () => {
-        closeModal();
-        await showLegacyFolderModal(char);
-    });
-    
-    // Move selected button
-    modal.querySelector('#moveSelectedLegacyBtn').addEventListener('click', async () => {
-        const selectedFiles = Array.from(modal.querySelectorAll('.legacy-file-checkbox:checked'))
-            .map(cb => cb.dataset.filename);
-        
-        if (selectedFiles.length === 0) {
-            showToast('No files selected', 'info');
-            return;
-        }
-        
-        const moveBtn = modal.querySelector('#moveSelectedLegacyBtn');
-        const originalHtml = moveBtn.innerHTML;
-        moveBtn.disabled = true;
-        moveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Moving...';
-        
-        let successCount = 0;
-        let errorCount = 0;
-        
-        for (let i = 0; i < selectedFiles.length; i++) {
-            const fileName = selectedFiles[i];
-            moveBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${i + 1}/${selectedFiles.length}`;
-            
-            const result = await moveImageToFolder(
-                legacyInfo.legacyFolder, 
-                legacyInfo.currentFolder, 
-                fileName, 
-                true // delete source
-            );
-            
-            if (result.success) {
-                successCount++;
-            } else {
-                errorCount++;
-                console.error(`Failed to move ${fileName}:`, result.error);
-            }
-        }
-        
-        closeModal();
-        
-        if (successCount > 0) {
-            showToast(`Moved ${successCount} image${successCount > 1 ? 's' : ''} to unique folder`, 'success');
-            // Refresh gallery view
-            fetchCharacterImages(char);
-            // Update legacy button
-            updateLegacyFolderButton(char);
-        }
-        
-        if (errorCount > 0) {
-            showToast(`Failed to move ${errorCount} image${errorCount > 1 ? 's' : ''}`, 'error');
-        }
-    });
-}
-
 function openCharModalElevated(char, navList) {
     const charModal = document.getElementById('charModal');
     if (!charModal) return;
@@ -11243,11 +9373,6 @@ async function openModal(char, { navList } = {}) {
         }
     }
 
-    // Invalidate any in-flight versions pane operations from a previous character
-    if (window.cleanupVersionsPane) window.cleanupVersionsPane();
-    const vtContent = document.getElementById('versionsTabContent');
-    if (vtContent) vtContent.innerHTML = '';
-
     const gen = ++_modalOpenGen;
     activeChar = char;
     updateCharModalNavState();
@@ -11270,12 +9395,6 @@ async function openModal(char, { navList } = {}) {
     modalImg.onload = modalImg.onerror = () => { modalImg.classList.remove('loading'); };
     modalImg.src = imgPath;
     document.getElementById('modalTitle').innerText = getCharacterName(char);
-    
-    // Reset/hide legacy folder button (will be updated when Gallery tab is clicked)
-    const legacyBtn = document.getElementById('checkLegacyFolderBtn');
-    if (legacyBtn) {
-        legacyBtn.classList.add('hidden');
-    }
     
     // Update favorite button state
     updateFavoriteButtonUI(isCharacterFavorite(char));
@@ -11399,14 +9518,11 @@ async function openModal(char, { navList } = {}) {
     // Render tags in sidebar (will be made editable when edit is unlocked)
     renderSidebarTags(getTags(char));
 
-    // Render playlist chips in sidebar
-    renderSidebarPlaylists(char.avatar);
 
     deactivateAllTabs();
     document.querySelector('.tab-btn[data-tab="details"]').classList.add('active');
     document.getElementById('pane-details').classList.add('active');
 
-    updateMobileChatButtonVisibility();
     
     // Reset scroll positions to top
     resetTabScrollPositions();
@@ -11435,33 +9551,12 @@ async function openModal(char, { navList } = {}) {
             fetchCharacterImages(char);
             
             // Check for legacy folder images (async, updates button visibility)
-            updateLegacyFolderButton(char);
 
             // Show warning if uniqueGalleryFolders is enabled but character has no gallery_id
             updateGalleryIdWarning(char);
         };
     }
     
-    // Setup legacy folder button handler
-    const legacyFolderBtn = document.getElementById('checkLegacyFolderBtn');
-    if (legacyFolderBtn) {
-        legacyFolderBtn.onclick = () => showLegacyFolderModal(char);
-    }
-    
-    // Chats tab logic (delegated to chats module)
-    const chatsTabBtn = document.querySelector('.tab-btn[data-tab="chats"]');
-    if (chatsTabBtn) {
-        chatsTabBtn.onclick = () => {
-            // Switch tabs
-            deactivateAllTabs();
-            chatsTabBtn.classList.add('active');
-            document.getElementById('pane-chats').classList.add('active');
-            
-            // Fetch chats via module
-            window.fetchCharacterChats?.(char);
-        };
-    }
-
     // Related tab logic
     const relatedTabBtn = document.querySelector('.tab-btn[data-tab="related"]');
     if (relatedTabBtn) {
@@ -11475,20 +9570,6 @@ async function openModal(char, { navList } = {}) {
             findRelatedCharacters(char);
         };
     }
-
-    // Versions tab
-    const versionsTabBtn = document.getElementById('versionsTabBtn');
-    const openVersionsTab = () => {
-        deactivateAllTabs();
-        if (versionsTabBtn) versionsTabBtn.classList.add('active');
-        document.getElementById('pane-versions').classList.add('active');
-        if (window.renderVersionsPane) {
-            window.renderVersionsPane(document.getElementById('versionsTabContent'), char);
-        }
-    };
-    if (versionsTabBtn) versionsTabBtn.onclick = openVersionsTab;
-    const editPaneVersionsBtn = document.getElementById('editPaneVersionsBtn');
-    if (editPaneVersionsBtn) editPaneVersionsBtn.onclick = openVersionsTab;
 
     // Info tab logic (developer/debugging feature)
     const infoTabBtn = document.getElementById('infoTabBtn');
@@ -11804,11 +9885,6 @@ function closeModal() {
     const taglineEl = document.getElementById('modalProviderTagline');
     if (taglineEl) taglineEl.textContent = '';
 
-    // Cleanup versions tab
-    if (window.cleanupVersionsPane) window.cleanupVersionsPane();
-    const vtContent = document.getElementById('versionsTabContent');
-    if (vtContent) vtContent.innerHTML = '';
-    
     if (duplicateModalState.wasOpen) {
         restoreDuplicateModalState();
         duplicateModalState.wasOpen = false; // Reset flag
@@ -12025,7 +10101,6 @@ function populateInfoTab(char) {
     const createDateRaw = getCharacterCreateDateValue(char);
     const dateCreated = createDateRaw ? new Date(createDateRaw) : null;
     const dateModified = char.date_added ? new Date(Number(char.date_added)) : null;
-    const dateLastChat = char.date_last_chat ? new Date(Number(char.date_last_chat)) : null;
     
     html += `<div class="info-section">
         <div class="info-section-title"><i class="fa-solid fa-calendar"></i> Dates</div>
@@ -12036,10 +10111,6 @@ function populateInfoTab(char) {
         <div class="info-row">
             <span class="info-label">Last Modified</span>
             <span class="info-value">${dateModified && !isNaN(dateModified.getTime()) ? formatDateTime(dateModified.getTime()) : '(not available)'}</span>
-        </div>
-        <div class="info-row">
-            <span class="info-label">Last Chat</span>
-            <span class="info-value">${dateLastChat && !isNaN(dateLastChat.getTime()) ? formatDateTime(dateLastChat.getTime()) : '(not available)'}</span>
         </div>
     </div>`;
     
@@ -12976,10 +11047,6 @@ async function deleteCharacter(char, deleteChats = false) {
         
         debugLog('[Delete] API call successful, cleaning up...');
 
-        // Clean up playlist membership
-        if (avatar && window.playlistsOnCharDeleted) {
-            window.playlistsOnCharDeleted(avatar);
-        }
 
         // Evict any queued/active background media download
         if (avatar) window.mediaDownloadQueueOnCharDeleted?.(avatar);
@@ -13408,9 +11475,6 @@ async function performSave() {
     // Auto-snapshot before edit (non-blocking - don't let snapshot failure block the save).
     // When the avatar is also being replaced, embed the OLD image bytes in the snapshot
     // so the version history can show/restore the original card image even after overwrite.
-    if (window.autoSnapshotBeforeChange) {
-        try { await window.autoSnapshotBeforeChange(activeChar, 'edit', { embedAvatar: hasAvatarChange }); } catch (_) {}
-    }
 
     // Capture old name before the write so the gallery folder rename has the pre-write value.
     const oldName = originalValues.name;
@@ -15658,26 +13722,9 @@ const ADV_FILTER_FIELDS = {
     providerLink: { label: 'Provider Link', type: 'provider', operators: ['is_linked', 'is_not_linked', 'linked_to', 'not_linked_to'] },
     dateAdded: { label: 'Date Added', type: 'date', operators: ['before', 'after', 'in_the_last'] },
     dateCreated: { label: 'Date Created', type: 'date', operators: ['before', 'after', 'in_the_last'] },
-    lastChat: { label: 'Last Chat', type: 'date', operators: ['before', 'after', 'in_the_last', 'never'] },
     version: { label: 'Version', type: 'text', operators: ['contains', 'is_empty', 'is_not_empty'] },
     tokens: { label: 'Token Count', type: 'number', operators: ['more_than', 'less_than', 'equals'] },
-    playlist: { label: 'Playlist', type: 'playlist', operators: ['in', 'not_in', 'in_any', 'not_in_any'] },
     nameOverride: { label: 'Name Override', type: 'nameOverride', operators: ['has_override', 'no_override', 'set_to_card', 'set_to_listing'] },
-};
-
-const CHAT_ADV_FILTER_FIELDS = {
-    charName: { label: 'Character', type: 'text', operators: ['contains', 'not_contains', 'equals', 'starts_with'] },
-    chatName: { label: 'Chat Name', type: 'text', operators: ['contains', 'not_contains', 'equals', 'starts_with'] },
-    messageCount: { label: 'Messages', type: 'number', operators: ['more_than', 'less_than', 'equals'] },
-    lastMessage: { label: 'Last Message', type: 'date', operators: ['before', 'after', 'in_the_last'] },
-    isActive: { label: 'Active Chat', type: 'boolean', operators: ['is_true', 'is_false'] },
-    isGroupChat: { label: 'Group Chat', type: 'boolean', operators: ['is_true', 'is_false'] },
-    groupMember: { label: 'Group Member', type: 'text', operators: ['contains', 'not_contains', 'equals'] },
-    charFavorite: { label: 'Char Favorite', type: 'boolean', operators: ['is_true', 'is_false'] },
-    charTags: { label: 'Char Tags', type: 'tag', operators: ['includes', 'excludes'] },
-    charProviderLink: { label: 'Char Provider Link', type: 'provider', operators: ['is_linked', 'is_not_linked', 'linked_to', 'not_linked_to'] },
-    charPlaylist: { label: 'Char Playlist', type: 'playlist', operators: ['in', 'not_in', 'in_any', 'not_in_any'] },
-    chatLorebook: { label: 'Chat Lorebook', type: 'text', operators: ['is_not_empty', 'is_empty', 'contains', 'equals'] },
 };
 
 const ADV_FILTER_OP_LABELS = {
@@ -15718,14 +13765,7 @@ const ADV_FILTER_NO_VALUE_OPS = new Set([
 
 const ADV_FILTER_PROVIDERS = [
     { value: 'chub', label: 'ChubAI' },
-    { value: 'janitorai', label: 'JanitorAI' },
-    { value: 'jannyai', label: 'JanitorAI (via JannyAI)' },
-    { value: 'chartavern', label: 'CharacterTavern' },
-    { value: 'pygmalion', label: 'Pygmalion' },
-    { value: 'wyvern', label: 'Wyvern' },
     { value: 'datacat', label: 'DataCat' },
-    { value: 'saucepan', label: 'Saucepan' },
-    { value: 'botbooru', label: 'Botbooru' },
 ];
 
 // ========== FILTER PRESETS ==========
@@ -15913,25 +13953,22 @@ function rerenderAdvFilterPresets() {
 }
 
 let charAdvFilterRules = [];
-let chatAdvFilterRules = [];
 let advFilterNextId = 1;
 
 function getAdvFilterRules() {
-    return currentView === 'chats' ? chatAdvFilterRules : charAdvFilterRules;
+    return charAdvFilterRules;
 }
 
 function setAdvFilterRules(rules) {
-    if (currentView === 'chats') chatAdvFilterRules = rules;
-    else charAdvFilterRules = rules;
+    charAdvFilterRules = rules;
 }
 
 function getActiveAdvFilterFields() {
-    return currentView === 'chats' ? CHAT_ADV_FILTER_FIELDS : ADV_FILTER_FIELDS;
+    return ADV_FILTER_FIELDS;
 }
 
 function triggerAdvFilterSearch() {
-    if (currentView === 'chats') window.chatsModule?.renderChats?.();
-    else performSearch();
+    performSearch();
 }
 
 const debouncedAdvFilterSearch = debounce(triggerAdvFilterSearch, 150);
@@ -15969,7 +14006,7 @@ function addAdvFilterRule() {
     updateAdvFilterIndicator();
 }
 
-// Operators with a UI-displayed default (date "7", first provider, first playlist) need
+// Operators with a UI-displayed default (date "7", first provider) need
 // the rule's stored value seeded to match, or evaluateAdvancedFilters skips the rule
 // for being empty while the user sees a configured filter that silently does nothing.
 function getAdvFilterDefaultValue(rule) {
@@ -15978,9 +14015,6 @@ function getAdvFilterDefaultValue(rule) {
     if (!fieldDef) return '';
     if (fieldDef.type === 'provider' && (rule.operator === 'linked_to' || rule.operator === 'not_linked_to')) {
         return ADV_FILTER_PROVIDERS[0]?.value || '';
-    }
-    if (fieldDef.type === 'playlist' && (rule.operator === 'in' || rule.operator === 'not_in')) {
-        return (window.playlistsGetAll?.() || [])[0]?.uid || '';
     }
     return '';
 }
@@ -16072,14 +14106,6 @@ function buildAdvFilterValueHtml(rule, fieldDef) {
         return `<div class="adv-filter-value"><select class="adv-filter-input" data-rule-id="${rule.id}">${opts}</select></div>`;
     }
 
-    if (fieldDef.type === 'playlist') {
-        const playlists = window.playlistsGetAll?.() || [];
-        const opts = playlists
-            .map(pl => `<option value="${escapeHtml(pl.uid)}"${pl.uid === rule.value ? ' selected' : ''}>${escapeHtml(pl.name)}</option>`)
-            .join('');
-        return `<div class="adv-filter-value"><select class="adv-filter-input" data-rule-id="${rule.id}">${opts}</select></div>`;
-    }
-
     return `<div class="adv-filter-value">
         <input type="search" class="adv-filter-input" data-rule-id="${rule.id}" value="${escapeHtml(rule.value || '')}" placeholder="Value..." autocomplete="off">
     </div>`;
@@ -16112,12 +14138,10 @@ function evaluateAdvFilterRule(c, rule) {
         case 'providerLink': return evalProviderOp(c, op, rule.value);
         case 'dateAdded': return evalDateOp(c._dateAdded, op, rule.value);
         case 'dateCreated': return evalDateOp(c._createDate, op, rule.value);
-        case 'lastChat': return evalLastChatOp(c, op, rule.value);
         case 'version': {
             const ver = (c.character_version || c.data?.character_version || '').toLowerCase();
             return evalTextOp(ver, op, val);
         }
-        case 'playlist': return evalPlaylistOp(c, op, rule.value);
         case 'tokens': return c._tokenEstimate == null ? false : evalNumberOp(c._tokenEstimate, op, rule.value);
         case 'nameOverride': return evalNameOverrideOp(c, op);
     }
@@ -16164,20 +14188,6 @@ function evalDateOp(timestamp, op, rawVal) {
     return true;
 }
 
-function evalLastChatOp(c, op, rawVal) {
-    if (op === 'never') return !c._dateLastChat;
-    if (!c._dateLastChat) return false;
-    return evalDateOp(c._dateLastChat, op, rawVal);
-}
-
-function evalPlaylistOp(c, op, val) {
-    if (op === 'in_any') return !!(window.playlistsIsCharInAny?.(c.avatar));
-    if (op === 'not_in_any') return !(window.playlistsIsCharInAny?.(c.avatar));
-    const avatarSet = window.playlistsGetAvatarSet?.(val);
-    const inPlaylist = avatarSet ? avatarSet.has(c.avatar) : false;
-    return op === 'in' ? inPlaylist : !inPlaylist;
-}
-
 function evalNameOverrideOp(c, op) {
     const prefs = getSetting('namePreferences') || {};
     const pref = prefs[c.avatar] || null;
@@ -16188,87 +14198,6 @@ function evalNameOverrideOp(c, op) {
         case 'set_to_listing': return pref === 'listing';
     }
     return true;
-}
-
-let _groupMemberCharMap = null;
-
-function resetChatFilterCaches() {
-    _groupMemberCharMap = null;
-}
-
-function evaluateChatAdvancedFilters(chat) {
-    for (const rule of chatAdvFilterRules) {
-        const needsValue = !ADV_FILTER_NO_VALUE_OPS.has(rule.operator);
-        if (needsValue && !rule.value) continue;
-        if (!evaluateChatAdvFilterRule(chat, rule)) return false;
-    }
-    return true;
-}
-
-function evaluateChatAdvFilterRule(chat, rule) {
-    const op = rule.operator;
-    const val = (rule.value || '').toLowerCase();
-
-    switch (rule.field) {
-        case 'charName': return evalTextOp((chat.charName || '').toLowerCase(), op, val);
-        case 'chatName': {
-            const name = (chat.file_name || '').replace('.jsonl', '').toLowerCase();
-            return evalTextOp(name, op, val);
-        }
-        case 'messageCount': return evalNumberOp(chat.chat_items || chat.mes_count || 0, op, rule.value);
-        case 'lastMessage': {
-            const ts = chat.last_mes ? new Date(chat.last_mes).getTime() : 0;
-            return ts ? evalDateOp(ts, op, rule.value) : false;
-        }
-        case 'isActive': {
-            const chatName = (chat.file_name || '').replace('.jsonl', '');
-            const isActive = chat.character?.chat === chatName;
-            return op === 'is_true' ? isActive : !isActive;
-        }
-        case 'isGroupChat':
-            return op === 'is_true' ? !!chat.isGroup : !chat.isGroup;
-        case 'groupMember': {
-            if (!chat.isGroup || !chat.group?.members) return false;
-            if (!_groupMemberCharMap) {
-                _groupMemberCharMap = new Map();
-                for (const c of allCharacters) _groupMemberCharMap.set(c.avatar, c);
-            }
-            const memberNames = chat.group.members.map(av => (_groupMemberCharMap.get(av)?.name || '').toLowerCase());
-            switch (op) {
-                case 'contains': return memberNames.some(n => n.includes(val));
-                case 'not_contains': return !memberNames.some(n => n.includes(val));
-                case 'equals': return memberNames.some(n => n === val);
-            }
-            return true;
-        }
-        case 'charFavorite':
-            return op === 'is_true' ? isCharacterFavorite(chat.character) : !isCharacterFavorite(chat.character);
-        case 'chatLorebook': {
-            const bound = (chat.chat_metadata?.world_info || '').toLowerCase();
-            if (op === 'is_not_empty') return !!bound;
-            if (op === 'is_empty') return !bound;
-            return evalTextOp(bound, op, val);
-        }
-        case 'charTags': return chat.character ? evalTagOp(chat.character, op, val) : false;
-        case 'charProviderLink': return chat.character ? evalProviderOp(chat.character, op, rule.value) : false;
-        case 'charPlaylist': return chat.character ? evalPlaylistOp(chat.character, op, rule.value) : false;
-    }
-    return true;
-}
-
-function evalNumberOp(num, op, rawVal) {
-    const target = parseInt(rawVal, 10);
-    if (isNaN(target)) return true;
-    switch (op) {
-        case 'more_than': return num > target;
-        case 'less_than': return num < target;
-        case 'equals': return num === target;
-    }
-    return true;
-}
-
-function getAdvFilterRulesForChats() {
-    return chatAdvFilterRules;
 }
 
 // Search and Filter Functionality (Global so it can be called from view switching)
@@ -16290,7 +14219,7 @@ function performSearch() {
     // ========================================================================
     
     // favorite before fav: alternation is first-match, so a token that prefixes another must come second.
-    const prefixPattern = /(?:^|\s)((?:creator|version|gallery|uid|favorite|fav|linked|chub|janitorai|jai|janny|charactertavern|ct|pygmalion|wyvern|datacat|dc|saucepan|botbooru|bb|playlist):(?:[^\s]+))/gi;
+    const prefixPattern = /(?:^|\s)((?:creator|version|gallery|uid|favorite|fav|linked|chub|datacat|dc):(?:[^\s]+))/gi;
     
     let creatorFilter = null;
     let versionFilter = null;
@@ -16301,7 +14230,6 @@ function performSearch() {
     let filterFavoriteNo = false;
     let linkFilterPrefix = null;
     let linkFilterWantLinked = false;
-    let playlistSearchFilter = null;
     
     let query = rawQuery;
     let match;
@@ -16327,21 +14255,13 @@ function performSearch() {
             favoriteFilter = value;
             filterFavoriteYes = value === 'yes' || value === 'true';
             filterFavoriteNo = value === 'no' || value === 'false';
-        } else if (['linked', 'chub', 'janitorai', 'jai', 'janny', 'charactertavern', 'ct', 'pygmalion', 'wyvern', 'datacat', 'dc', 'saucepan', 'botbooru', 'bb'].includes(prefix)) {
+        } else if (['linked', 'chub', 'datacat', 'dc'].includes(prefix)) {
             linkFilterPrefix = prefix;
             linkFilterWantLinked = value === 'yes' || value === 'true' || value === 'linked';
-        } else if (prefix === 'playlist') {
-            playlistSearchFilter = value;
         }
     }
     
     query = query.trim().toLowerCase();
-
-    // built once outside the per-char loop, picks up whatever the playlist
-    // actually contains right now (no stale cache between mutations).
-    const playlistAvatarSet = activePlaylistFilter
-        ? (window.playlistsGetAvatarSet?.(activePlaylistFilter) || null)
-        : null;
 
     // Tag filter selections are per-pass constants too; split them once here
     const includedTags = [];
@@ -16416,23 +14336,6 @@ function performSearch() {
             if (!linkFilterWantLinked && isLinked) return false;
         }
         
-        // playlist: search prefix
-        if (playlistSearchFilter) {
-            const charPls = window.playlistsGetForChar?.(c.avatar) || [];
-            if (playlistSearchFilter === 'none' || playlistSearchFilter === 'empty') {
-                if (charPls.length > 0) return false;
-            } else if (playlistSearchFilter === 'any' || playlistSearchFilter === 'yes') {
-                if (charPls.length === 0) return false;
-            } else {
-                if (!charPls.some(p => p.name.toLowerCase().includes(playlistSearchFilter))) return false;
-            }
-        }
-
-        // Playlist filter (outermost constraint)
-        if (playlistAvatarSet) {
-            if (!playlistAvatarSet.has(c.avatar)) return false;
-        }
-
         // Favorites-only filter (from toolbar button)
         if (showFavoritesOnly) {
             if (!isCharacterFavorite(c)) return false;
@@ -16490,20 +14393,6 @@ function performSearch() {
     renderGrid(sorted);
 }
 
-function updateMobileChatButtonVisibility() {
-    const chatBtn = document.getElementById('modalChatBtn');
-    if (!chatBtn) return;
-
-    const isMobile = isMobileMode();
-    if (!isMobile) {
-        chatBtn.classList.remove('mobile-chat-hidden');
-        return;
-    }
-
-    const isDetailsActive = document.querySelector('.tab-btn[data-tab="details"]')?.classList.contains('active');
-    chatBtn.classList.toggle('mobile-chat-hidden', !isDetailsActive);
-}
-
 /**
  * Filter local cards view by creator name
  * Sets the search to "creator:Name" and ensures Author filter is checked
@@ -16539,7 +14428,7 @@ function filterLocalByCreator(creatorName) {
 // Debounced search for better performance (150ms delay)
 const debouncedSearch = debounce(performSearch, 150);
 
-const TOPBAR_DROPDOWN_IDS = ['tagFilterPopup', 'playlistFilterPopup', 'searchSettingsMenu', 'moreOptionsMenu', 'notificationsDropdown', 'advFilterPanel'];
+const TOPBAR_DROPDOWN_IDS = ['tagFilterPopup', 'searchSettingsMenu', 'moreOptionsMenu', 'notificationsDropdown', 'advFilterPanel'];
 
 function closeAllTopbarDropdowns(exceptId) {
     for (const id of TOPBAR_DROPDOWN_IDS) {
@@ -16686,58 +14575,6 @@ function setupEventListeners() {
                 e.target !== tagBtn && 
                 !tagBtn.contains(e.target)) {
                 tagPopup.classList.add('hidden');
-            }
-        });
-    }
-
-    // Playlist Filter Toggle
-    const plBtn = document.getElementById('playlistFilterBtn');
-    const plPopup = document.getElementById('playlistFilterPopup');
-    const plContent = document.getElementById('playlistFilterContent');
-
-    if (plBtn && plPopup && plContent) {
-        plBtn.onclick = (e) => {
-            e.stopPropagation();
-            closeAllTopbarDropdowns('playlistFilterPopup');
-            populatePlaylistDropdown();
-            plPopup.classList.toggle('hidden');
-        };
-
-        plContent.addEventListener('click', (e) => {
-            const item = e.target.closest('.pl-filter-item');
-            if (!item) return;
-            const uid = item.dataset.uid;
-            setPlaylistFilter(uid || null);
-            plPopup.classList.add('hidden');
-        });
-
-        const plSearchInput = document.getElementById('playlistFilterSearch');
-        if (plSearchInput) {
-            plSearchInput.addEventListener('input', () => {
-                const query = plSearchInput.value.trim().toLowerCase();
-                const items = plContent.querySelectorAll('.pl-filter-item[data-uid]');
-                items.forEach(item => {
-                    if (!item.dataset.uid) return;
-                    const name = (item.querySelector('.pl-filter-name')?.textContent || '').toLowerCase();
-                    item.style.display = (!query || name.includes(query)) ? '' : 'none';
-                });
-            });
-        }
-
-        const plManageBtn = document.getElementById('playlistFilterManageBtn');
-        if (plManageBtn) {
-            plManageBtn.addEventListener('click', () => {
-                plPopup.classList.add('hidden');
-                window.openPlaylistManager?.();
-            });
-        }
-
-        window.addEventListener('click', (e) => {
-            if (!plPopup.classList.contains('hidden') &&
-                !plPopup.contains(e.target) &&
-                e.target !== plBtn &&
-                !plBtn.contains(e.target)) {
-                plPopup.classList.add('hidden');
             }
         });
     }
@@ -16905,19 +14742,6 @@ function setupEventListeners() {
         });
 
         // Overflow proxy items - relay clicks to the real topbar buttons
-        const menuGallerySyncBtn = document.getElementById('menuGallerySyncBtn');
-        if (menuGallerySyncBtn) {
-            if (!getSetting('uniqueGalleryFolders')) menuGallerySyncBtn.style.display = 'none';
-            menuGallerySyncBtn.addEventListener('click', () => {
-                // Navigate to gallery sync settings instead of toggling the
-                // dropdown (which is inside a hidden container at narrow widths)
-                document.getElementById('gallerySettingsBtn')?.click();
-                setTimeout(() => {
-                    const navItem = document.querySelector('.settings-nav-item[data-section="gallery-folders"]');
-                    if (navItem) navItem.click();
-                }, 100);
-            });
-        }
         const menuMultiSelectBtn = document.getElementById('menuMultiSelectBtn');
         if (menuMultiSelectBtn) {
             menuMultiSelectBtn.addEventListener('click', () => {
@@ -17073,23 +14897,9 @@ function setupEventListeners() {
             
             // Reset scroll position when switching tabs
             pane.scrollTop = 0;
-
-            updateMobileChatButtonVisibility();
         });
     });
     
-    // Chat Button
-    document.getElementById('modalChatBtn').onclick = async () => {
-        if (activeChar) {
-            // Pass the whole character object now, just in case we need the name for slash command
-            if (await loadCharInMain(activeChar)) {
-                // Optional: Close gallery?
-            }
-        }
-    };
-
-    updateMobileChatButtonVisibility();
-
     setupCharacterGridDelegates();
     
     // Save Button
@@ -17148,21 +14958,6 @@ function setupEventListeners() {
     }
     if (closeConfirmModal) {
         closeConfirmModal.onclick = () => confirmModal?.classList.add('hidden');
-    }
-    
-    // Chats Tab Buttons (delegated to chats module)
-    const newChatBtn = document.getElementById('newChatBtn');
-    const refreshChatsBtn = document.getElementById('refreshChatsBtn');
-    
-    if (newChatBtn) {
-        newChatBtn.onclick = () => {
-            if (activeChar) window.createNewChat?.(activeChar);
-        };
-    }
-    if (refreshChatsBtn) {
-        refreshChatsBtn.onclick = () => {
-            if (activeChar) window.fetchCharacterChats?.(activeChar);
-        };
     }
     
     // Gallery Settings Modal
@@ -20542,9 +18337,6 @@ async function unlinkFromProvider() {
         if (!provider) throw new Error('No provider found for this character');
 
         // Non-blocking auto-snapshot before unlink (destructive, restore is the only undo).
-        if (window.autoSnapshotBeforeChange) {
-            try { await window.autoSnapshotBeforeChange(activeChar, 'unlink'); } catch (_) {}
-        }
 
         // Capture provider display metadata before setLinkInfo wipes it, so it survives as CL-owned fallback.
         const provTagline = activeChar.data?.extensions?.[provider.id]?.tagline;
@@ -21611,9 +19403,6 @@ async function saveProviderLink(char, provider, linkInfo) {
     if (!char?.avatar) throw new Error('No character or avatar');
 
     // Non-blocking auto-snapshot before link (overwrites the cl namespace).
-    if (window.autoSnapshotBeforeChange) {
-        try { await window.autoSnapshotBeforeChange(char, 'link'); } catch (_) {}
-    }
 
     // Populate provider namespace + drop cl in-memory so the spread carries the new link and the cl-delete has a target.
     provider.setLinkInfo(char, linkInfo);
@@ -21769,8 +19558,6 @@ async function applyBulkAutoLinks() {
 // Event handlers for Bulk Auto-Link
 window.openBulkAutoLinkModal = openBulkAutoLinkModal;
 document.getElementById('bulkAutoLinkBtn')?.addEventListener('click', openBulkAutoLinkModal);
-document.getElementById('recommenderBtn')?.addEventListener('click', () => window.openRecommender?.());
-document.getElementById('creatorBtn')?.addEventListener('click', () => window.openCharacterCreator?.());
 document.getElementById('lorebooksBtn')?.addEventListener('click', () => window.openLorebookManager?.());
 document.getElementById('closeBulkAutoLinkModal')?.addEventListener('click', () => {
     // Just set abort flag and close - state is preserved for resuming
@@ -26316,7 +24103,6 @@ function renderCharDupCard(char, type, charIdx = 0, diffs = null) {
     const tokenClass = diffs && diffs.tokens ? 'diff-highlight' : '';
     
     const galleryCountId = `gallery-count-${char.avatar.replace(/[^a-zA-Z0-9]/g, '_')}`;
-    const chatCountId = `chat-count-${char.avatar.replace(/[^a-zA-Z0-9]/g, '_')}`;
     
     return `
         <div class="char-dup-card ${type}" data-avatar="${escapeHtml(char.avatar)}">
@@ -26333,14 +24119,10 @@ function renderCharDupCard(char, type, charIdx = 0, diffs = null) {
                 <div class="char-dup-card-meta-item ${dateClass}"><i class="fa-solid fa-calendar"></i> ${dateStr}</div>
                 <div class="char-dup-card-meta-item ${tokenClass}"><i class="fa-solid fa-code"></i> ~${tokens} tokens</div>
                 <div class="char-dup-card-meta-item gallery-count-item" id="${galleryCountId}" data-avatar="${escapeHtml(char.avatar)}" title="Gallery images"><i class="fa-solid fa-images"></i> <span class="gallery-count-value">...</span></div>
-                <div class="char-dup-card-meta-item chat-count-item" id="${chatCountId}" data-avatar="${escapeHtml(char.avatar)}" title="Chat sessions"><i class="fa-solid fa-comments"></i> <span class="chat-count-value">...</span></div>
             </div>
             <div class="char-dup-card-actions">
                 <button class="action-btn secondary small dup-view-btn">
                     <i class="fa-solid fa-eye"></i> View
-                </button>
-                <button class="action-btn secondary small dup-playlist-btn" title="Add to Playlist">
-                    <i class="fa-solid fa-list"></i> Playlist
                 </button>
                 <button class="action-btn danger-hover small dup-delete-btn">
                     <i class="fa-solid fa-trash"></i> Delete
@@ -26354,62 +24136,6 @@ function getCharDateMs(char) {
     if (char.date_added) return Number(char.date_added);
     if (char.create_date) return new Date(char.create_date).getTime();
     return 0;
-}
-
-function showDupPlaylistSelectionMenu(anchorBtn, groups) {
-    const existing = document.querySelector('.dup-playlist-dropdown');
-    if (existing) { existing.remove(); return; }
-
-    const menu = document.createElement('div');
-    menu.className = 'dropdown-menu dup-playlist-dropdown';
-    menu.style.position = 'absolute';
-    menu.style.zIndex = '1001';
-    menu.innerHTML = `
-        <div class="dropdown-section-title">Add to Playlist</div>
-        <button class="dropdown-item" data-selection="newest">
-            <i class="fa-solid fa-arrow-up"></i> Select all newest
-        </button>
-        <button class="dropdown-item" data-selection="oldest">
-            <i class="fa-solid fa-arrow-down"></i> Select all oldest
-        </button>
-    `;
-
-    anchorBtn.style.position = 'relative';
-    anchorBtn.appendChild(menu);
-    menu.style.top = '100%';
-    menu.style.right = '0';
-    menu.style.marginTop = '4px';
-
-    const collect = (pickNewest) => {
-        const avatars = new Set();
-        for (const group of groups) {
-            const allChars = [group.reference, ...group.duplicates.map(d => d.char)];
-            allChars.sort((a, b) => getCharDateMs(a) - getCharDateMs(b));
-            const pick = pickNewest ? allChars[allChars.length - 1] : allChars[0];
-            if (pick?.avatar) avatars.add(pick.avatar);
-        }
-        return [...avatars];
-    };
-
-    menu.addEventListener('click', (e) => {
-        const item = e.target.closest('[data-selection]');
-        if (!item) return;
-        e.stopPropagation();
-        const selection = item.dataset.selection;
-        const avatars = collect(selection === 'newest');
-        menu.remove();
-        if (avatars.length > 0 && window.openPlaylistPicker) {
-            window.openPlaylistPicker(avatars);
-        }
-    });
-
-    const closeMenu = (e) => {
-        if (!menu.contains(e.target) && e.target !== anchorBtn) {
-            menu.remove();
-            document.removeEventListener('click', closeMenu, true);
-        }
-    };
-    setTimeout(() => document.addEventListener('click', closeMenu, true), 0);
 }
 
 /**
@@ -26439,7 +24165,7 @@ async function renderDuplicateGroups(groups) {
     let totalDuplicates = groups.reduce((sum, g) => sum + g.duplicates.length, 0);
     const isExactMode = (getSetting('duplicateMinScore') || 35) >= 120;
     statusEl.innerHTML = `<i class="fa-solid fa-exclamation-triangle"></i> Found ${totalDuplicates} potential duplicate(s) in ${groups.length} group(s)`
-        + (isExactMode ? `<button class="action-btn secondary small dup-playlist-all-btn" style="margin-left:auto" title="Add newest or oldest from each group to a playlist"><i class="fa-solid fa-list-ul"></i> Add to Playlist</button>` : '');
+;
     statusEl.className = 'char-duplicates-status complete';
     
     let html = '';
@@ -26633,18 +24359,8 @@ async function renderDuplicateGroups(groups) {
     
     resultsEl.innerHTML = html;
     
-    // Attach playlist-all button handler (Exact mode only)
-    const playlistAllBtn = statusEl.querySelector('.dup-playlist-all-btn');
-    if (playlistAllBtn) {
-        playlistAllBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            showDupPlaylistSelectionMenu(playlistAllBtn, groups);
-        });
-    }
-    
     // Load gallery and chat counts asynchronously after rendering
     loadDuplicateGalleryCounts(groups);
-    loadDuplicateChatCounts(groups);
 }
 
 /**
@@ -26748,43 +24464,6 @@ async function loadDuplicateGalleryCounts(groups) {
                 }
             } catch (e) {
                 debugLog(`[Gallery] Error loading count for ${avatar}:`, e);
-            }
-        }));
-    }
-}
-
-async function loadDuplicateChatCounts(groups) {
-    const avatars = new Set();
-    for (const group of groups) {
-        avatars.add(group.reference.avatar);
-        for (const dup of group.duplicates) avatars.add(dup.char.avatar);
-    }
-
-    const BATCH_SIZE = 5;
-    const avatarList = [...avatars];
-
-    for (let i = 0; i < avatarList.length; i += BATCH_SIZE) {
-        const batch = avatarList.slice(i, i + BATCH_SIZE);
-        await Promise.all(batch.map(async (avatar) => {
-            try {
-                const response = await apiRequest(ENDPOINTS.CHARACTERS_CHATS, 'POST', { avatar_url: avatar });
-                const chats = response.ok ? await response.json() : [];
-                const count = Array.isArray(chats) ? chats.length : 0;
-                const countEl = document.getElementById(`chat-count-${avatar.replace(/[^a-zA-Z0-9]/g, '_')}`);
-                if (countEl) {
-                    const countValue = countEl.querySelector('.chat-count-value');
-                    if (countValue) {
-                        countValue.textContent = count.toString();
-                        if (count > 0) {
-                            countEl.classList.add('has-chats');
-                            countEl.title = `${count} chat session${count !== 1 ? 's' : ''} tied to this card`;
-                        } else {
-                            countEl.title = 'No chat sessions';
-                        }
-                    }
-                }
-            } catch (e) {
-                debugLog(`[Chats] Error loading count for ${avatar}:`, e);
             }
         }));
     }
@@ -27290,11 +24969,6 @@ document.getElementById('charDuplicatesResults')?.addEventListener('click', (e) 
     if (!avatar) return;
 
     if (e.target.closest('.dup-view-btn')) { viewCharFromDuplicates(avatar); return; }
-
-    if (e.target.closest('.dup-playlist-btn')) {
-        if (window.openPlaylistPicker) window.openPlaylistPicker([avatar]);
-        return;
-    }
 
     const deleteBtn = e.target.closest('.dup-delete-btn');
     if (deleteBtn) {
@@ -28799,7 +26473,6 @@ window.registerOverlay?.({ id: 'confirmSaveModal', tier: 7, close: (el) => el?.c
 // Dynamic confirm-modals (created/removed each invocation; registry entry persists).
 window.registerOverlay?.({ id: 'deleteConfirmModal',  tier: 7, static: false, close: (el) => el?.remove() });
 window.registerOverlay?.({ id: 'deleteDuplicateModal', tier: 7, static: false, close: (el) => el?.remove() });
-window.registerOverlay?.({ id: 'legacyFolderModal',    tier: 7, static: false, close: (el) => el?._closeFn ? el._closeFn() : el?.remove() });
 window.registerOverlay?.({ id: 'folderMappingModal',   tier: 7, static: false, close: (el) => el?._closeFn ? el._closeFn() : el?.remove() });
 window.registerOverlay?.({ id: 'orphanedFoldersModal', tier: 7, static: false, close: (el) => el?._closeFn ? el._closeFn() : el?.remove() });
 
@@ -28915,7 +26588,6 @@ document.addEventListener('keydown', (e) => {
 window.apiRequest = apiRequest;
 window.showToast = showToast;
 window.showConfirm = showConfirm;
-window.savePresetPicker = savePresetPicker;
 window.escapeHtml = escapeHtml;
 window.utf8ToBase64 = utf8ToBase64;
 window.safePurify = safePurify;
@@ -28929,7 +26601,6 @@ window.truncate = truncate;
 window.isMobileMode = isMobileMode;
 window.downloadBlobAsFile = downloadBlobAsFile;
 window.crc32 = crc32;
-window.filterListWithInlineCreate = filterListWithInlineCreate;
 window.sanitizeTaglineHtml = sanitizeTaglineHtml;
 
 // Character Data
@@ -28957,8 +26628,6 @@ window.deleteCharacter = deleteCharacter;
 window.showDeleteConfirmation = showDeleteConfirmation;
 window.generateGalleryId = generateGalleryId;
 window.getCharacterByAvatar = getCharacterByAvatar;
-window.getGallerySyncAuditDone = function() { return gallerySyncAuditDone; };
-window.setGallerySyncAuditDone = function(v) { gallerySyncAuditDone = v; };
 
 // UI / Modals
 window.openModal = openModal;
@@ -28995,17 +26664,11 @@ window.getDisplayTagline = getDisplayTagline;
 window.getCharacterName = getCharacterName;
 window.formatRichText = formatRichText;
 window.renderLorebookEntriesHtml = renderLorebookEntriesHtml;
-window.loadCharInMain = loadCharInMain;
 window.debugLog = debugLog;
 window.performSearch = performSearch;
 window.toggleFavoritesFilter = toggleFavoritesFilter;
 window.toggleCharacterFavorite = toggleCharacterFavorite;
 window.updateCharacterCardFavoriteStatus = updateCharacterCardFavoriteStatus;
-window.evaluateChatAdvancedFilters = evaluateChatAdvancedFilters;
-window.resetChatFilterCaches = resetChatFilterCaches;
-window.getAdvFilterRulesForChats = getAdvFilterRulesForChats;
-window.refreshPlaylistFilterIfActive = refreshPlaylistFilterIfActive;
-window.refreshPlaylistBadges = refreshPlaylistBadges;
 window.showElement = show;
 window.hideElement = hide;
 window.onElement = on;
@@ -29020,9 +26683,6 @@ window.callLLM = callLLM;
 window.callCustomLLM = callCustomLLM;
 window.getLlmSettings = getLlmSettings;
 window.extractLlmContent = extractLlmContent;
-window.isEmbedded = isEmbedded;
-window.embeddedShowTopBar = embeddedShowTopBar;
-window.closeEmbeddedPanel = closeEmbeddedPanel;
 
 // Settings
 window.getSetting = getSetting;

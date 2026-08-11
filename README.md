@@ -3,9 +3,8 @@
 Archives JanitorAI character cards as SillyTavern-compatible **Character Card V3**
 PNGs, for personal use. It captures both **public** cards and **creator-hidden**
 definitions, and saves each as a self-contained PNG (definition + all greetings +
-lorebook + avatar) into the cards folder — `./cards/` by default, or straight
-into SillyTavern's own characters directory (see
-[Configuration](#configuration-env)).
+lorebook + avatar) straight into the archive it also browses and serves —
+`data/characters/` (see [Configuration](#configuration-env)).
 
 ## How it works
 
@@ -25,7 +24,33 @@ chat's first message. The server captures both from the chat request it answers
 itself, so nothing leaves your machine, and merges them with the JSON (alternate
 greetings, tags, creator notes, avatar) at export.
 
-## Setup (macOS)
+## Running it
+
+```bash
+make docker-build     # docker compose build
+make docker-up        # docker compose up -d  -> http://127.0.0.1:8000
+```
+
+One image, one mount (`./data`), one port. The image carries the **server only**:
+everything writable already defaults under `data/` — the archive, galleries,
+thumbnail cache, `settings.json` and the server's working state — so that single
+bind mount is the whole of the container's state, and `JAI_PROXY_HOST=0.0.0.0`
+is the only variable it needs. Nothing is architecture-specific, so it builds
+natively on arm64 and amd64 alike.
+
+⚠️ **Port 8000 is not negotiable and SillyTavern's stock port is also 8000.** The
+userscripts hardcode `http://127.0.0.1:8000` (`userscript/src_jai/client-server.js`,
+`src_saucepan/config.js`), so publishing on anything else breaks export. If
+SillyTavern is running, `docker compose up` fails to bind — stop it or move it.
+
+The maintenance scripts (`make import` / `check` / `names` / `thumbs` /
+`gallery-ids`) stay on the host and run against the same `./data`. They are not
+in the image on purpose: they are leftovers from stitching several repos
+together, and the intended flow is *retrieve → cleaned once on the way in →
+archived*, with a clean card exported into SillyTavern when you actually want to
+play it.
+
+For development, run it directly instead:
 
 ```bash
 uv sync
@@ -56,20 +81,20 @@ The two keys that matter most:
 
 | key | default | what it does |
 | --- | --- | --- |
-| `JAI_PROXY_OUTPUT_DIR` | `./cards` | where cards land |
+| `JAI_PROXY_OUTPUT_DIR` | `./data/characters` | where a build drops its card |
 | `JAI_PROXY_CARD_LAYOUT` | `flat` | `flat` = `<name>_<id8>.png`; `nested` = `<creator>/<name>_<id8>.png` |
 
-**Pointing `JAI_PROXY_OUTPUT_DIR` at SillyTavern's characters folder** (typically
-`…/SillyTavern/data/default-user/characters`) makes SillyTavern the archive
-itself rather than a copy of it: a card you edit there is edited in the archive,
-a card you delete there is gone from the archive, and a newly retrieved card is
-in SillyTavern the moment it's written. There is no sync step because there is
-only one folder. This is what `flat` is for — SillyTavern reads its characters
-folder **non-recursively**, so a `nested` archive is invisible to it. Nothing is
-lost by going flat: the creator stays on the card (`extensions.jai.creatorName`),
-and the `_<id8>` filename fragment keeps names unique across creators.
+`OUTPUT_DIR` defaults to **the archive itself** (`ARCHIVE_DIR`), so a retrieved
+card is in the archive the moment it's written and there is no sync step and no
+second copy to reconcile. `flat` is what keeps that workable: names stay unique
+across creators via the `_<id8>` fragment, and nothing is lost, since the creator
+is on the card (`extensions.jai.creatorName`).
 
-Two things to know if you do share the folder with SillyTavern:
+Pointing `OUTPUT_DIR` at **SillyTavern's characters folder** (typically
+`…/SillyTavern/data/default-user/characters`) is still supported — it used to be
+the recommended setup, when SillyTavern *was* the archive. It no longer is: the
+browse API always reads `ARCHIVE_DIR`, so a build sent to SillyTavern lands
+outside the archive. Two things to know if you do share a folder with it:
 
 - SillyTavern re-encodes a card's PNG whenever you save an edit to it, so that
   card loses its pngquant compression (the data — including `extensions.jai`,
@@ -80,8 +105,9 @@ Two things to know if you do share the folder with SillyTavern:
   saves keep the filename; renames don't. A renamed card can be retrieved again
   as a duplicate.
 
-Working state (`state/captures`, `state/lorecache`) is deliberately kept out of
-the cards folder, since that folder may not be ours.
+Working state (`data/state/captures`, `data/state/lorecache`) sits beside the
+archive rather than inside it — under the one directory that has to be mounted
+and backed up, so nothing the server writes can land anywhere else.
 
 Install `userscript/jai-proxy-bridge.user.js` in Tampermonkey. In JanitorAI's
 proxy/config settings, set the endpoint to
@@ -166,7 +192,7 @@ definition or lorebooks — **delete the card file and export it again**.
 
 Hidden cards are matched by character name against accumulated captures, so name
 collisions get likelier as captures pile up. The pill's **CLEAR** link wipes all
-captured system prompts and greetings (`./state/captures/`) and also resets the
+captured system prompts and greetings (`data/state/captures/`) and also resets the
 plugin's own remembered state (last card id / hidden flag). Finished card PNGs
 are not affected.
 
@@ -334,7 +360,7 @@ is verified live.
 
 ## Status
 
-`uv run pytest` green (564). Server-side JSON refactor complete; datacat + Chub.ai
+`uv run pytest` green (565). Server-side JSON refactor complete; datacat + Chub.ai
 bulk import live; live end-to-end verification of the userscript export flows is
 pending.
 
@@ -342,9 +368,11 @@ Mid-migration to a standalone **character archive** that runs beside SillyTavern
 rather than inside it. Landed: `data/` holds the archive (3,839 cards), the
 read-only browse API above, 100% thumbnail coverage, CharacterLibrary's frontend
 vendored into `web/` against that API, bundle `.zip` export, on-disk UI settings
-(`data/settings.json`), and the local responder that replaced `mlx_client.py` —
-the MLX upstream was the last thing that kept the server tied to a second
-macOS-only process.
+(`data/settings.json`), the local responder that replaced `mlx_client.py` — the
+MLX upstream was the last thing tying the server to a second macOS-only process
+— and, on top of that, the **container** above: builds land in the archive,
+every writable path folded under `data/`, and the whole thing runs from one
+image with one mount.
 
 Deliberately out of scope unless a real need surfaces: reconstructing lorebook
 entries from raw prompt text (real captures show no structural markers to

@@ -1,4 +1,4 @@
-.PHONY: compile test test-js run import gallery-ids check names thumbs settings-import
+.PHONY: compile test test-js run docker-build docker-up import gallery-ids check names thumbs settings-import
 
 # Every target reads .env (see .env.template) via proxy/config.py -- most
 # importantly JAI_PROXY_OUTPUT_DIR, the cards folder they all read and write.
@@ -23,6 +23,14 @@ test-js:
 
 run:
 	uv run python -m proxy.server
+
+# The same server in a container: one image, one mount (./data), one port.
+# The targets below still run on the host, against that same ./data.
+docker-build:
+	docker compose build
+
+docker-up:
+	docker compose up -d
 
 # Bulk-import card PNGs from ./import into the cards folder -- datacat, JannyAI
 # and Chub.ai exports are auto-detected (see scripts/import_cards.py). Cards

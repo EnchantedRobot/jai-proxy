@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import proxy
-from proxy.config import Settings
+from proxy.config import ROOT, Settings
 from proxy.models import CharacterCardV3
 
 
@@ -15,11 +15,18 @@ def test_settings_defaults():
     defaults = Settings(_env_file=None)
     assert defaults.mock_model == "jai-proxy-mock"
     assert defaults.port == 8000
-    assert defaults.output_dir == Path("./cards")
     assert defaults.card_layout == "flat"
-    # Working state stays out of the cards folder -- that may be SillyTavern's.
-    assert defaults.captures_dir == Path("./state/captures")
-    assert defaults.lorebook_cache_dir == Path("./state/lorecache")
+    # Every writable path lives under ROOT/data/ -- the single directory a
+    # container mounts -- so nothing the server writes can land inside an image.
+    assert defaults.captures_dir == ROOT / "data" / "state" / "captures"
+    assert defaults.lorebook_cache_dir == ROOT / "data" / "state" / "lorecache"
+
+
+def test_builds_land_in_the_archive_by_default():
+    # A build writes into the archive the browse API reads: one directory, no
+    # sync step. The equality is the design, not a coincidence.
+    defaults = Settings(_env_file=None)
+    assert defaults.output_dir == defaults.archive_dir
 
 
 def test_settings_read_env_file(tmp_path):

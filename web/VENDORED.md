@@ -1,22 +1,97 @@
 # web/ — the vendored Character Library frontend
 
-This directory is a **copy** of [SillyTavern-CharacterLibrary][cl] 7.0.4, taken
-from `~/workspaces/SillyTavern-CharacterLibrary` on branch `upstream-fixes`, and
-adapted to run against the archive server instead of SillyTavern.
+This directory started as a **copy** of [SillyTavern-CharacterLibrary][cl] 7.0.4,
+taken from `~/workspaces/SillyTavern-CharacterLibrary` on branch `upstream-fixes`,
+and adapted to run against the archive server instead of SillyTavern.
 
-It is vendored rather than rewritten on purpose. `library.js` alone is 29,700
-lines in one file with module-scope globals: it is not trimmable, and a rewrite
-is a project rather than a step. The bet is that the *API contract* is the
-durable artifact and this UI is replaceable later, so the goal here is the
-smallest possible diff against upstream — every change listed below, and nothing
-else.
+**It is no longer a minimal-diff vendor.** The original bet — keep the diff tiny,
+treat the API contract as the durable artifact — held through Phase 1–2. Once the
+pivot's scope decisions were final, carrying features with no server behind them
+cost more than it saved, so the tree was **trimmed to the archive's five jobs**
+(store, browse/edit/galleries, acquire, export, bulk tag cleanup). See
+"The trim" below for what came out and why.
+
+Re-vendoring wholesale from upstream is therefore no longer possible without
+redoing the trim. That is deliberate and was the point.
+
+## The trim
+
+63,000 lines came out — `web/` went from ~151,000 lines of JS/CSS/HTML to ~80,500,
+and from 117 files to 73. Nothing here was a judgement call made on the spot: the
+drop list is the pivot's own scope decision.
+
+### Features dropped (no server behind them, by decision)
+
+`chats`, `character-creator` (and its AI Studio), `recommender`, `card-updates`,
+`playlists`, `css-assistant` — named in the pivot as dropped. Plus three more,
+decided during the trim: `custom-css` + the theme customizer,
+`character-versions` (snapshots need a write path the API does not have), and
+`gallery-sync` (it flags cards missing a `gallery_id`, but the archive stamps one
+at write time, so it could never fire).
+
+Each removal is the module file, its CSS, its loader block, its `index.html`
+markup, its `library.js` call sites, its settings rows and its Help & Tips
+section. `lorebook-manager` was **deferred, not dropped**, and stays.
+
+### The mobile layer
+
+`library-mobile.js` + `library-mobile.css` (8,559 lines) deleted outright. The
+desktop layout was usable on a phone before that layer existed; the layer made it
+worse.
+
+### Providers: 9 → 2
+
+Only **chub** and **datacat** remain. The archive was surveyed first — provider
+link keys actually present across 3,839 cards were `datacat` (2,589), `chub`
+(1,196) and `jannyai` (54). There were **zero** `janitorai`, `saucepan`,
+`pygmalion`, `wyvern`, `chartavern` and `botbooru` links, so those browse views
+were dead weight in every sense. Note the CL janitorai provider reads
+`extensions.janitorai`, which is *not* this repo's `extensions.jai` key — dropping
+it cost nothing at all.
+
+**Two API modules survive their providers, and must not be "cleaned up":**
+
+| kept | why |
+| --- | --- |
+| `providers/janny/janny-api.js` | `datacat-api.js` searches JannyAI's Meili index and maps its numeric tag ids via `TAG_MAP`. |
+| `providers/saucepan/saucepan-api.js` | a datacat hit can be sourced from saucepan; `datacat-browse.js` calls `fetchSaucepanCompanion*` to fill those in. |
+
+Each folder carries a `README.md` saying so. `providers/janitor-bridge.js` also
+stays (datacat's Cloudflare pass); `providers/janitor-session.js` went, because
+only the deleted janitorai provider imported it and datacat has its own.
+
+### Dead host compatibility
+
+This is the pivot's "host compatibility is the hydra" principle applied to the
+frontend:
+
+- **Embedded Mode UI** — the `?embedded=1` iframe panel SillyTavern used to host.
+- **`loadCharInMain()`** — "open this card in SillyTavern's window", ~165 lines.
+- **Legacy folder migration** (~280 lines) — moved images from old `CharName`
+  gallery folders to `CharName_<gallery_id>`. The archive has exactly one layout.
+  Removing it also **closed a documented "known gap"**: the stray
+  `404 /api/v1/galleries/<Name>` in devtools was this code probing the legacy
+  folder name, not a real missing folder.
+- **DataCat → JanitorAI batch re-link** (~580 lines) — wrote `extensions.janitorai`
+  and read `getProvider('janitorai')`; both gone.
+
+### Still there, and known
+
+`getHostWindow()` / `getSTContext()` and their guarded call sites
+(`notifySTCharacterEdited`, `notifySTCharacterAdded`, persona name, the
+settings-load fallbacks) were **left in place**. They always return `null`
+standalone so every branch is already inert, but they are diffuse rather than
+blocked-out and were not worth the risk in one pass. Same for the remaining
+`cl-helper` plugin probe and the shared LLM client — the latter still has one live
+consumer, `lorebook-manager.js`, whose AI features call SillyTavern's
+`/backends/chat-completions/generate` and therefore do not work here.
 
 ## How it is wired
 
 ```
 index.html  ->  archive-api.js   (ours, loaded first)
-            ->  library.js       (vendored, 1.3 MB)
-            ->  modules/*        (vendored)
+            ->  library.js       (vendored + trimmed)
+            ->  modules/*        (vendored + trimmed)
 ```
 
 `archive-api.js` wraps `window.fetch` and translates the SillyTavern URL space
@@ -91,23 +166,39 @@ Every edit is marked in place with a comment beginning `ARCHIVE FORK`, so
 The fullscreen viewer built its media URLs inline; repointed at
 `/api/v1/galleries/.../files/...` for the same `<img src>` reason.
 
+### `modules/media-download-queue.css`
+
+Gained the **notifications-center shell** (the topbar bell and its dropdown),
+which upstream kept in `gallery-sync.css`. Gallery sync is gone but the
+notifications center is not — the media-download queue is still a section in it —
+so the shell moved to the one module that still registers a section, and
+`.gallery-sync-{container,btn,dropdown}` were renamed to `.notifications-*`.
+`multi-select.js` anchors its toolbar button to that container and was repointed
+with it.
+
 ### Everything else
 
-Untouched. `modules/batch-transfer.js` and `modules/media-dedup.js` still
-address `/user/images/...`, but they reach it through `fetch()`, so
-`archive-api.js` handles them and no edit is needed.
+Untouched apart from the trim. `modules/batch-transfer.js` and
+`modules/media-dedup.js` still address `/user/images/...`, but they reach it
+through `fetch()`, so `archive-api.js` handles them and no edit is needed.
 
-## Re-vendoring from upstream
+## Verifying a change
 
-1. Copy `app/*` and `modules/*` over the top, keeping `archive-api.js`,
-   `manifest.json`, `tests/`, `VENDORED.md` and `vendor/notosans`,
-   `vendor/fontawesome/{css,webfonts}`.
-2. Rename `library.html` → `index.html` and redo the three `index.html` edits.
-3. Reapply the `ARCHIVE FORK` edits above.
-4. `cd web && node --test` — the adapter tests do not cover the vendored edits,
-   so also load the app and check: grid thumbnails appear, a detail portrait
-   loads, a gallery shows images.
-5. `grep -rn 'ARCHIVE FORK' .` should list exactly the edits in this document.
+There is no re-vendor path any more (see the top of this file). To check the app
+still works after touching it:
+
+1. `cd web && node --test` — adapter tests only; they do not cover vendored code.
+2. Load the app against a running server and confirm: the grid renders,
+   thumbnails appear, a detail portrait loads, a gallery shows images, **every
+   settings section opens**, and **every Help & Tips section opens**.
+
+That last pair matters more than it sounds. Panels only execute when opened, so a
+handler broken by a deletion stays silent until someone clicks the section — one
+over-broad cut during the trim removed `updateGalleryMigrationStatus()` and was
+invisible until the Gallery Folders panel was actually opened.
+
+Watch `console.warn` too, not just errors: `multi-select.js` degrades to a warning
+and simply never injects its button.
 
 ## Settings
 
@@ -186,11 +277,11 @@ implementation of a format the client already writes correctly.
   tags all match. Adding it means an `include=notes` on the list endpoint.
 - **Every write refuses with 501.** Card edits, deletes, imports, gallery
   uploads and world info all answer with a message the UI shows in a toast. The
-  archive API is read-only through Phase 1.
-- **Chats, the character creator, the recommender, card updates, playlists and
-  the CSS assistant are still present in the UI** but have no server behind
-  them. They were dropped by the pivot's scope decision and their menu entries
-  have not been removed yet.
+  archive API is read-only through Phase 1 — this is what Phase 3 addresses.
+- **`lorebook-manager`'s AI features do not work.** It is the last live consumer
+  of the shared LLM client, which posts to SillyTavern's
+  `/backends/chat-completions/generate`. The module was deferred rather than
+  dropped, so this is pending a decision, not a bug.
 - **Some frontend state still lives in `localStorage`.** Filter presets, the
   media-dedup ledger, playlists — everything the frontend stores as a file under
   `user/files/`. The settings blob has moved to `data/settings.json` (above);
@@ -199,9 +290,9 @@ implementation of a format the client already writes correctly.
   would overflow fails loudly rather than truncating. Moving it beside the
   settings is the obvious next step — it was left out because the settings were
   urgent (they hold credentials that exist nowhere else) and a ledger rebuilds.
-- **A missing gallery folder logs a 404 in devtools.** The adapter turns it into
-  an empty listing, which is correct, but the underlying request is still
-  visible. The API 404s on a folder that does not exist rather than creating it
-  the way SillyTavern did.
+- **Dead provider settings keys remain in `DEFAULT_SETTINGS`.**
+  `pygmalion*`, `wyvern*`, `botbooru*`, `saucepan*`, `ctCookie` and the
+  `janitorai*` pair are still declared and still written into
+  `data/settings.json`. Their UI and wiring are gone; only the keys are left.
 
 [cl]: https://github.com/SillyTavern/SillyTavern-CharacterLibrary

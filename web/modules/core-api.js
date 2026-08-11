@@ -14,14 +14,6 @@ export function getSTContext() {
     return window.getSTContext?.() || null;
 }
 
-export function getIsEmbedded() {
-    return window.isEmbedded || false;
-}
-
-export function closeEmbeddedPanel() {
-    return window.closeEmbeddedPanel?.();
-}
-
 export function resolveProxyForProfile(profile) {
     return window.resolveProxyForProfile?.(profile);
 }
@@ -223,9 +215,6 @@ export function showConfirm(opts) {
  * @param {Array<{name: string}>} presets - Existing presets (only `name` is read for the list)
  * @returns {Promise<{name: string, overwriteIndex: number} | null>} overwriteIndex -1 = new, null = cancel
  */
-export function savePresetPicker(title, presets) {
-    return window.savePresetPicker?.(title, presets) ?? Promise.resolve(null);
-}
 
 /**
  * Refresh the character list from server
@@ -659,10 +648,6 @@ export function formatRichText(text, charName = '', preserveHtml = false) {
  * @param {boolean} newChat - Whether to start a new chat
  * @returns {Promise<boolean>} Success status
  */
-export function loadCharInMain(charOrAvatar, newChat = false) {
-    return window.loadCharInMain?.(charOrAvatar, newChat) || Promise.resolve(false);
-}
-
 /**
  * Delete a character from the local library
  * @param {Object|string} charOrAvatar - Character object or avatar filename
@@ -767,9 +752,6 @@ export function crc32(...args) {
  * Search-filter a row list with an inline "Create <query>" row on no exact match
  * @param {Object} cfg - { searchId, listId, rowSel, nameOf, createRowClass, createRowHtml, onCreate, emptyId? }
  */
-export function filterListWithInlineCreate(...args) {
-    return window.filterListWithInlineCreate?.(...args);
-}
 
 export function evaluateChatAdvancedFilters(chat) {
     return window.evaluateChatAdvancedFilters?.(chat) ?? true;
@@ -1433,7 +1415,6 @@ export default {
     showToast,
     hapticFeedback,
     showConfirm,
-    savePresetPicker,
     refreshCharacters,
     
     // API
@@ -1507,7 +1488,6 @@ export default {
     renderLorebookEntriesHtml,
     
     // Character actions
-    loadCharInMain,
     deleteCharacter,
     showDeleteConfirmation,
     fetchCharacters,
@@ -1520,7 +1500,6 @@ export default {
     updateCharacterCardFavoriteStatus,
     downloadBlobAsFile,
     crc32,
-    filterListWithInlineCreate,
     evaluateChatAdvancedFilters,
     resetChatFilterCaches,
     getAdvFilterRulesForChats,
@@ -1618,8 +1597,6 @@ export default {
     // Host window / Embedded mode
     getHostWindow,
     getSTContext,
-    getIsEmbedded,
-    closeEmbeddedPanel,
     resolveProxyForProfile,
     getLlmSettings,
     callLLM,

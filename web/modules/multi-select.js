@@ -267,10 +267,10 @@ function injectMultiSelectToolbar() {
 
 function injectMultiSelectToggle() {
     const filterArea = document.getElementById('filterArea');
-    const gallerySyncContainer = filterArea?.querySelector('.gallery-sync-container');
+    const notificationsContainer = filterArea?.querySelector('.notifications-container');
 
-    if (!filterArea || !gallerySyncContainer) {
-        console.warn('[MultiSelect] Could not find filter area or gallery sync container');
+    if (!filterArea || !notificationsContainer) {
+        console.warn('[MultiSelect] Could not find filter area or notifications container');
         return;
     }
 
@@ -281,7 +281,7 @@ function injectMultiSelectToggle() {
         <i class="fa-solid fa-object-group"></i>
     </button>`;
 
-    gallerySyncContainer.insertAdjacentHTML('afterend', toggleHtml);
+    notificationsContainer.insertAdjacentHTML('afterend', toggleHtml);
 
     document.getElementById('multiSelectToggleBtn')?.addEventListener('click', () => {
         const btn = document.getElementById('multiSelectToggleBtn');

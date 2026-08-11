@@ -1,0 +1,47 @@
+# The build context is everything NOT listed here, so this file is what keeps
+# `docker build` at ~10 MB instead of ~11 GB.
+
+# The archive itself (11 GB) and the server's working state. Both arrive at
+# runtime through the ./data volume mount -- never baked into the image.
+data/
+state/
+
+# Host-side working directories: cards staged for `make import`, the legacy
+# pre-`data/` output folder, run logs.
+import/
+cards/
+logs/
+
+# The macOS pngquant binary. Excluding it is what makes the image work:
+# PngWriter._resolve_pngquant falls back to `shutil.which("pngquant")` when the
+# configured path is missing, so the Linux one installed by apt wins. Ship the
+# Mach-O binary and every card build would fail on it.
+proxy/pngquant
+
+# Local configuration. Correctness, not size -- config.py reads ROOT/.env, and
+# a developer's .env points OUTPUT_DIR at their SillyTavern install.
+.env
+
+# The image is the server only; tests, scripts and the userscript sources stay
+# on the host (see README, "What is in the image").
+tests/
+scripts/
+userscript/
+docs/
+example.json
+
+# Build/tooling detritus.
+.venv/
+.git/
+.github/
+.claude/
+node_modules/
+.pytest_cache/
+__pycache__/
+*.py[co]
+*.egg-info/
+.DS_Store
+Dockerfile
+.dockerignore
+compose.yaml
+Makefile

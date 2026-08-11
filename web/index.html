@@ -8,7 +8,6 @@
     <meta name="character-library" content="1"><!-- marker for the optional JanitorAI bridge userscript -->
     <title>Character Archive</title>
     <link rel="stylesheet" href="library.css?v=108">
-    <link rel="stylesheet" href="library-mobile.css?v=37">
     <!-- Fonts, vendored. Upstream pulled these from SillyTavern's server root
          (/webfonts, /css); nothing serves that root any more, so they live under
          vendor/ and the archive serves itself. -->
@@ -90,9 +89,6 @@
             <div class="view-toggle">
                 <button class="view-toggle-btn active" data-view="characters">
                     <i class="fa-solid fa-users"></i> Characters
-                </button>
-                <button class="view-toggle-btn" data-view="chats">
-                    <i class="fa-solid fa-comments"></i> Chats
                 </button>
                 <button class="view-toggle-btn" data-view="online">
                     <i class="fa-solid fa-globe"></i> Online
@@ -189,33 +185,13 @@
                         </div>
                     </div>
                 </div>
-                <div class="filter-group" style="position: relative;">
-                    <button id="playlistFilterBtn" class="glass-btn playlist-filter-btn" title="Filter by playlist">
-                        <i class="fa-solid fa-list-ul"></i> <span id="playlistFilterLabel">Playlists</span>
-                    </button>
-                    <div id="playlistFilterPopup" class="dropdown-menu playlist-filter-popup hidden">
-                        <div class="pl-filter-search-wrap">
-                            <i class="fa-solid fa-magnifying-glass pl-filter-search-icon"></i>
-                            <input type="search" id="playlistFilterSearch" class="cl-input pl-filter-search" placeholder="Search playlists..." autocomplete="one-time-code">
-                        </div>
-                        <div id="playlistFilterContent"></div>
-                        <div class="pl-filter-footer">
-                            <button id="playlistFilterManageBtn" class="pl-filter-manage-btn"><i class="fa-solid fa-gear"></i> Manage Playlists</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="gallery-sync-container notifications-container hidden">
-                    <button id="notificationsBtn" class="glass-btn icon-only gallery-sync-btn" title="Notifications">
+                <div class="notifications-container hidden">
+                    <button id="notificationsBtn" class="glass-btn icon-only notifications-btn" title="Notifications">
                         <i class="fa-solid fa-bell"></i>
                         <span class="warning-badge hidden"></span>
                     </button>
-                    <div id="notificationsDropdown" class="dropdown-menu gallery-sync-dropdown hidden">
+                    <div id="notificationsDropdown" class="dropdown-menu notifications-dropdown hidden">
                         <div class="notif-section" data-notif-section="media-downloads"></div>
-                        <div class="notif-section sync-dropdown-content" data-notif-section="gallery-sync">
-                            <div class="sync-dropdown-loading">
-                                <i class="fa-solid fa-spinner fa-spin"></i> Checking...
-                            </div>
-                        </div>
                     </div>
                 </div>
                 <div class="more-options-container">
@@ -229,12 +205,6 @@
                         <button id="lorebooksBtn" class="dropdown-item">
                             <i class="fa-solid fa-book-atlas"></i> Lorebooks
                         </button>
-                        <button id="recommenderBtn" class="dropdown-item">
-                            <i class="fa-solid fa-wand-magic-sparkles"></i> Card Recommender
-                        </button>
-                        <button id="creatorBtn" class="dropdown-item">
-                            <i class="fa-solid fa-plus-circle"></i> Create Character
-                        </button>
                         <button id="checkDuplicatesBtn" class="dropdown-item">
                             <i class="fa-solid fa-clone"></i> Find Duplicates
                         </button>
@@ -244,9 +214,6 @@
                         <div class="dropdown-divider"></div>
                         <button id="menuRefreshBtn" class="dropdown-item">
                             <i class="fa-solid fa-sync"></i> Refresh
-                        </button>
-                        <button id="menuGallerySyncBtn" class="dropdown-item topbar-overflow-item">
-                            <i class="fa-solid fa-circle-info"></i> Gallery Sync Status
                         </button>
                         <button id="menuMultiSelectBtn" class="dropdown-item topbar-overflow-item">
                             <i class="fa-solid fa-object-group"></i> Select Mode
@@ -273,38 +240,6 @@
 
             <!-- Filters wrapper - prevents layout shift by maintaining consistent space -->
             <div class="filters-wrapper">
-                <!-- Chats-specific filters (hidden by default via CSS) -->
-                <div class="filter-area chats-filters" id="chatsFilterArea">
-                    <select id="chatsSortSelect" class="glass-select">
-                        <option value="recent" data-icon="fa-solid fa-clock">Most Recent</option>
-                        <option value="oldest" data-icon="fa-solid fa-hourglass">Oldest First</option>
-                        <option value="char_asc" data-icon="fa-solid fa-arrow-down-a-z">Character (A-Z)</option>
-                        <option value="char_desc" data-icon="fa-solid fa-arrow-up-z-a">Character (Z-A)</option>
-                        <option value="most_messages" data-icon="fa-solid fa-comments">Most Messages</option>
-                        <option value="least_messages" data-icon="fa-solid fa-comment">Least Messages</option>
-                        <option value="longest_chat" data-icon="fa-solid fa-ruler">Longest Chat</option>
-                        <option value="shortest_chat" data-icon="fa-solid fa-ruler">Shortest Chat</option>
-                        <option value="most_chats" data-icon="fa-solid fa-layer-group">Most Chats (Character)</option>
-                    </select>
-                    <select id="chatsDensitySelect" class="glass-select" title="Card Density">
-                        <option value="spacious" data-icon="fa-solid fa-expand">Spacious</option>
-                        <option value="comfortable" data-icon="fa-solid fa-rectangle-list">Comfortable</option>
-                        <option value="compact" data-icon="fa-solid fa-table-list">Compact</option>
-                        <option value="minimal" data-icon="fa-solid fa-grip-lines">Minimal</option>
-                    </select>
-                    <div class="grouping-toggle">
-                        <button class="glass-btn grouping-btn active" data-group="flat" title="Flat list">
-                            <i class="fa-solid fa-list"></i>
-                        </button>
-                        <button class="glass-btn grouping-btn" data-group="grouped" title="Group by character">
-                            <i class="fa-solid fa-layer-group"></i>
-                        </button>
-                    </div>
-                    <button id="refreshChatsViewBtn" class="glass-btn icon-only" title="Refresh Chats">
-                        <i class="fa-solid fa-sync"></i>
-                    </button>
-                </div>
-
                 <!-- Online view - provider selector + filters -->
                 <div class="filter-area online-filters" id="onlineFilterArea">
                     <div id="providerSelectorArea"></div>
@@ -328,16 +263,6 @@
                 <!-- Cards will be injected here -->
             </div>
 
-            <!-- Chats View (hidden by default) -->
-            <div id="chatsView" class="chats-view hidden">
-                <div id="chatsGrid" class="chats-grid">
-                    <!-- Chat cards will be injected here -->
-                </div>
-                <div id="chatsGroupedView" class="chats-grouped-view hidden">
-                    <!-- Grouped chat cards will be injected here -->
-                </div>
-            </div>
-
             <!-- Online View - populated by active provider -->
             <div id="browseRecoveryBanner" class="browse-recovery-banner hidden">
                 <i class="fa-solid fa-sync fa-spin"></i>
@@ -347,35 +272,6 @@
             <div id="onlineView" class="online-view hidden">
             </div>
         </main>
-    </div>
-
-    <!-- Chat Preview Modal -->
-    <div id="chatPreviewModal" class="modal-overlay hidden">
-        <div class="modal-glass chat-preview-modal">
-            <div class="modal-header">
-                <div class="chat-preview-header-info">
-                    <img id="chatPreviewAvatar" src="" alt="" class="chat-preview-avatar">
-                    <div>
-                        <h2 id="chatPreviewTitle">Chat Preview</h2>
-                        <p class="chat-preview-meta">
-                            <span id="chatPreviewCharName"></span> • 
-                            <span id="chatPreviewMessageCount"></span> messages • 
-                            <span id="chatPreviewDate"></span>
-                        </p>
-                    </div>
-                </div>
-                <div class="modal-controls">
-                    <button id="chatPreviewOpenBtn" class="action-btn primary"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open in SillyTavern</button>
-                    <button id="chatPreviewDeleteBtn" class="action-btn danger-hover"><i class="fa-solid fa-trash"></i></button>
-                    <button class="close-btn" id="chatPreviewClose">&times;</button>
-                </div>
-            </div>
-            <div class="chat-preview-body">
-                <div id="chatPreviewMessages" class="chat-preview-messages">
-                    <div class="chats-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading messages...</div>
-                </div>
-            </div>
-        </div>
     </div>
 
     <!-- ChubAI modals (login + preview) are injected by the provider at runtime -->
@@ -394,7 +290,6 @@
                     <button id="deleteCharBtn" class="action-btn danger-hover" title="Delete Character">
                         <i class="fa-solid fa-trash"></i>
                     </button>
-                    <button id="modalChatBtn" class="action-btn primary"><i class="fa-solid fa-comments"></i> Chat</button>
                     <button class="close-btn" id="modalClose">&times;</button>
                 </div>
             </div>
@@ -453,10 +348,8 @@
                     <div class="tab-nav">
                         <button class="tab-btn active" data-tab="details">Details</button>
                         <button class="tab-btn" data-tab="edit">Edit</button>
-                        <button class="tab-btn" data-tab="chats">Chats</button>
                         <button class="tab-btn" data-tab="gallery">Gallery</button>
                         <button class="tab-btn" data-tab="related">Related</button>
-                        <button class="tab-btn hidden" data-tab="versions" id="versionsTabBtn"></button>
                         <button class="tab-btn hidden" data-tab="info" id="infoTabBtn"><i class="fa-solid fa-microscope"></i> Info</button>
                     </div>
                     
@@ -716,26 +609,10 @@
                         </div>
                     </div>
 
-                    <div class="tab-pane" id="pane-chats">
-                        <div class="chats-header">
-                            <h4><i class="fa-solid fa-message"></i> Chat History</h4>
-                            <div class="chats-actions">
-                                <button id="newChatBtn" class="action-btn secondary small"><i class="fa-solid fa-plus"></i> New Chat</button>
-                                <button id="refreshChatsBtn" class="action-btn secondary small"><i class="fa-solid fa-refresh"></i></button>
-                            </div>
-                        </div>
-                        <div class="chats-list" id="chatsList">
-                            <div class="chats-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading chats...</div>
-                        </div>
-                    </div>
-
                     <div class="tab-pane" id="pane-gallery">
                         <div class="gallery-header">
                             <h4><i class="fa-solid fa-images"></i> Gallery</h4>
                             <div class="gallery-actions">
-                                <div id="checkLegacyFolderBtn" class="legacy-indicator hidden" title="Legacy images found">
-                                    <span id="legacyFolderCount"></span>
-                                </div>
                                 <button id="localizeMediaBtn" class="action-btn secondary small" title="Download remote images from character card">
                                     <i class="fa-solid fa-download"></i> Download Media
                                 </button>
@@ -790,13 +667,6 @@
                         </div>
                         <div class="related-results" id="relatedResults">
                             <div class="related-loading"><i class="fa-solid fa-spinner fa-spin"></i> Finding related characters...</div>
-                        </div>
-                    </div>
-
-                    <!-- Versions Tab -->
-                    <div class="tab-pane" id="pane-versions">
-                        <div id="versionsTabContent">
-                            <!-- Populated by character-versions.js module -->
                         </div>
                     </div>
 
@@ -1283,10 +1153,6 @@ https://jannyai.com/characters/uuid_slug
                             <i class="fa-solid fa-toolbox"></i>
                             <span>Tools</span>
                         </li>
-                        <li class="help-nav-item" data-section="character-creator">
-                            <i class="fa-solid fa-plus-circle"></i>
-                            <span>Character Creator</span>
-                        </li>
                         <li class="help-nav-item" data-section="shortcuts">
                             <i class="fa-solid fa-keyboard"></i>
                             <span>Shortcuts</span>
@@ -1313,21 +1179,6 @@ https://jannyai.com/characters/uuid_slug
                             <ul>
                                 <li><strong>New Tab</strong> (default): Opens in a separate browser tab.</li>
                                 <li><strong>Embedded Panel</strong>: Runs inside SillyTavern as an overlay panel.</li>
-                            </ul>
-                        </div>
-                        <div class="info-section">
-                            <h4><i class="fa-solid fa-layer-group"></i> Launcher</h4>
-                            <ul>
-                                <li><strong>Show launcher dropdown on Characters button</strong> (default off): When off, a separate Character Library icon appears in SillyTavern's top bar and the Characters button behaves normally. When on, clicking the Characters button opens a dropdown to choose between SillyTavern's native character manager and Character Library.</li>
-                            </ul>
-                        </div>
-                        <div class="info-section">
-                            <h4><i class="fa-solid fa-sliders"></i> Embedded Panel Settings</h4>
-                            <p>These options apply when Embedded Panel mode is selected:</p>
-                            <ul>
-                                <li><strong>Launch on startup</strong>: Automatically open the embedded panel when SillyTavern loads.</li>
-                                <li><strong>Show SillyTavern top bar</strong>: Keep SillyTavern's top navigation bar visible above the panel. When off, the panel takes the full viewport height and a "Back" button inside the panel returns you to your chat.</li>
-                                <li><strong>Exclusive panels</strong>: Opening the embedded panel closes any open SillyTavern drawers, and opening an ST drawer closes the panel. Prevents panels from overlapping.</li>
                             </ul>
                         </div>
                         <div class="info-section">
@@ -1596,79 +1447,10 @@ https://jannyai.com/characters/uuid_slug
                             <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> DataCat requires the cl-helper server plugin. Install it from Settings → Online → DataCat.</p>
                             <p class="info-tip"><i class="fa-solid fa-arrows-rotate"></i> <strong>Re-extract on update checks:</strong> Toggle in Settings → Online → DataCat to force DataCat to pull fresh data from JanitorAI before each update check. Slower, but avoids comparisons against stale cached data on DataCat's side.</p>
                         </div>
-                        <div class="info-section">
-                            <h4><i class="fa-solid fa-robot"></i> Botbooru</h4>
-                            <p>Botbooru is a tag-driven character card catalog. SFW browsing and importing works without an account; logging in (Settings → Online → Botbooru, or the key button in the browse toolbar) unlocks NSFW, favorites, and follows, and applies your account's tag blacklist.</p>
-                            <ul>
-                                <li><strong>NSFW is account-gated:</strong> the NSFW toggle requires login. Include NSFL posts via Settings → Online → Botbooru → Content (only applies while NSFW is on); NSFL cards carry their own badge, distinct from NSFW</li>
-                                <li><strong>Curated sort + favorite tags:</strong> favorite tags boost matching cards in the Curated sort. Manage them in Settings → Online → Botbooru → Favorite Tags, or with the star icons in the browse Tags dropdown</li>
-                                <li><strong>Weighted tag mode (experimental):</strong> an account-side switch that replaces the simple favorite-tags list with per-tag weights (-1000 to 1000) plus always-follow / always-block flags, and unlocks extra Curated orderings (Recent, Tag Score, Only Followed). While on, the site ignores the simple list, and the dropdown stars add +100 weight entries you can fine-tune in Settings</li>
-                                <li><strong>New uploads only:</strong> a checkbox in the Features dropdown's Curated section (shown while a Curated sort is active) that excludes bumped/updated cards</li>
-                                <li><strong>Sorting:</strong> beyond Latest, Curated, and Random, popularity sorts cover favorites, views, and downloads over day, week, month, and all-time windows</li>
-                                <li><strong>Advanced Options</strong> (bottom of the Tags dropdown): minimum token count, optionally counting lorebook text, and an uploaded after/before date range</li>
-                                <li><strong>Features dropdown:</strong> My Favorites (login required), Hide Owned Characters, Hide Possible Matches, Hide AI-generated, and (Curated sorts only) New Uploads Only</li>
-                                <li><strong>Following:</strong> follow uploaders from the banner that appears when browsing their cards, then switch to the Following timeline, which has its own sort options</li>
-                            </ul>
-                            <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Username/password login needs the cl-helper plugin. Without it, paste a token manually in the login dialog; a copied "Bearer " prefix is stripped automatically.</p>
-                        </div>
-                        <div class="info-section" id="helpJanitorai">
-                            <h4><i class="fa-solid fa-broom"></i> JanitorAI</h4>
-                            <p>First-party access to janitorai.com. Roughly half of all JanitorAI characters withhold their <strong>hidden definition</strong> (the field is simply absent from the API), and this provider recovers them at the source. DataCat and JannyAI can recover hidden definitions too, but DataCat has been progressively closing itself off, and JannyAI's copies come without alternate greetings or creator browsing, so this is the complete, first-party path. Beta, and off by default.</p>
-                            <ul>
-                                <li>Browse and search janitorai.com directly, with its own sort orders (Latest, Trending, Trending 24h, Popular, Relevance)</li>
-                                <li>Filter by tags, NSFW toggle, and browse a single creator's characters</li>
-                                <li><strong>Following</strong> tab with a followed-creators manager, plus a Follow button on the creator banner</li>
-                                <li>Preview shows alternate greetings and the embedded lorebook; character linking and card updates work as they do elsewhere</li>
-                            </ul>
-                            <p><strong>It needs a real browser, and only a real browser.</strong> janitorai.com puts Cloudflare in front of everything, and passing that challenge earns a <code>cf_clearance</code> cookie that no server-side request can hold. On a normal desktop with Chrome or Edge installed, that means: <strong>Settings &rarr; Online &rarr; JanitorAI &rarr; Start now</strong>, then press <strong>Test</strong>, and you are done. The browser runs invisibly and stops itself when idle. Needs the cl-helper plugin.</p>
-                            <p class="info-tip"><i class="fa-solid fa-triangle-exclamation"></i> <strong>The Test button is the contract.</strong> Its checks measure what Cloudflare actually cares about, a real GPU above all: software rendering never clears the challenge and no flag changes that. Red checks mean your browser environment does not meet the spec yet; making it pass on servers, VMs, containers, phones, or ARM boards is power user territory and your own research (the README's JanitorAI section lists the exact requirements and the desktop endpoint runner for GPU-less hosts). Green checks with a misbehaving provider is a Character Library bug: please report that one.</p>
-                            <p><strong>Signing in is the second requirement, not an optional extra.</strong> The browser gets you to JanitorAI; an account gets you the content. Without one you get the first page of results and nothing else: no follows, and no character extraction, so no hidden definitions. It happens in Settings rather than in the browser, and only works once the browser above does, since JanitorAI's login captcha runs only on their own page.</p>
-                            <p><strong>What recovering a hidden definition does to your JanitorAI account.</strong> There is no API for it, so Character Library makes the site assemble the prompt and reads it back. For that one request it creates a throwaway persona with a random name, adds a temporary proxy preset pointed at an unroutable address so nothing is ever sent anywhere, opens one chat, and sends one message. The persona, the preset, the chat, and your original generation settings are all removed and restored afterwards. It runs only for characters whose definition is actually hidden, and only when you press <strong>Recover definition</strong> or import one.</p>
-                            <p class="info-tip"><i class="fa-solid fa-circle-info"></i> The companion userscript has nothing to do with this provider and cannot substitute for the browser. It serves <a href="#" class="help-jump" data-help-jump="helpDatacatHampter">DataCat's Hampter sorts</a> and <a href="#" class="help-jump" data-help-jump="helpJannyai">JannyAI card definitions</a> only.</p>
-                        </div>
-                        <div class="info-section" id="helpJannyai">
-                            <h4><i class="fa-solid fa-mask"></i> JannyAI</h4>
-                            <p>A mirror of JanitorAI content. It needs no browser endpoint, which makes it lighter to set up than <a href="#" class="help-jump" data-help-jump="helpJanitorai">the JanitorAI provider</a>, at the cost of alternate greetings and following. No account needed.</p>
-                            <ul>
-                                <li>Browse and search the JannyAI catalog; filter by tags, token count, and NSFW</li>
-                                <li>Character linking and card updates</li>
-                                <li>No gallery downloads, version history, or alternate greetings</li>
-                            </ul>
-                            <p><strong>Card definitions need the companion userscript.</strong> JannyAI now Cloudflare-gates its card pages, and the card page is where the character actually lives. Browsing and searching still work without it, but an import without the userscript gets you the name, avatar, tags, and the site blurb as creator's notes, with no description, no greeting, no scenario, and no example dialogue. That is a stub, not a character.</p>
-                            <p>Install it exactly as for <a href="#" class="help-jump" data-help-jump="helpDatacatHampter">DataCat's Hampter sorts</a>; one install covers both. If definitions stop loading even with it installed, your Cloudflare pass has expired: open jannyai.com in the same browser, let it load, then reopen the preview.</p>
-                        </div>
-                        <div class="info-section" id="helpSaucepan">
-                            <h4><i class="fa-solid fa-utensils"></i> Saucepan</h4>
-                            <p>Browsing saucepan.ai needs no account, but importing does. Beta, and off by default.</p>
-                            <ul>
-                                <li>Sort by New, Trending, or Popular</li>
-                                <li>Filter by tags and NSFW, and by <strong>fandom</strong>, a dimension separate from tags covering source material and franchise</li>
-                                <li><strong>Creator mode</strong> for browsing one creator's companions, ordered by message count or age</li>
-                                <li>Character linking and card updates</li>
-                            </ul>
-                            <p>Definitions are extracted natively rather than downloaded as a card file, and that extraction is what needs the token. Some companions have a <strong>locked definition</strong> that is not publicly available; the preview says so, and extraction may return an incomplete body for those.</p>
-                            <p><strong>Everything goes through the cl-helper plugin, browsing included</strong>, because saucepan.ai sends no CORS headers at all. Log in under <strong>Settings &rarr; Online &rarr; Saucepan</strong>, or paste a bearer token from your own session. Opening a character that needs authentication turns the preview's import button into <strong>Configure Token</strong>, which takes you to the same place. The token lives in cl-helper's memory and is pushed back automatically after a SillyTavern restart, so you should not need to log in again.</p>
-                        </div>
                     </div>
 
                     <!-- Card Management -->
                     <div class="help-panel" data-section="card-management">
-                        <div class="info-section">
-                            <h4><i class="fa-solid fa-clock-rotate-left"></i> Version History</h4>
-                            <p>Track changes to your character cards with snapshots and diffs:</p>
-                            <ul>
-                                <li><strong>Auto-backup:</strong> A snapshot is saved automatically before every edit, restore, or card update, so you can always undo</li>
-                                <li><strong>Manual snapshots:</strong> Save the current state of any character at any time</li>
-                                <li><strong>Diff preview:</strong> Side-by-side comparison for every card field with added/removed highlighting</li>
-                                <li><strong>Remote versions:</strong> For linked characters, browse the full published version history and restore any version</li>
-                            </ul>
-                            <p><strong>How ChubAI remote versions work:</strong></p>
-                            <ul>
-                                <li><strong>"Chub Page" entry</strong>: the current state on ChubAI, using the metadata API (with linked lorebooks resolved from the V4 Git API)</li>
-                                <li><strong>Git version history</strong>: each commit fetched from the V4 Git API (<code>card.json</code>), including the full merged lorebook</li>
-                            </ul>
-                            <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Configure max auto-backup count in Settings → General → Version History.</p>
-                        </div>
                         <div class="info-section">
                             <h4><i class="fa-solid fa-pen-to-square"></i> Card Editing</h4>
                             <p>Edit all character card fields directly in the library:</p>
@@ -1792,15 +1574,6 @@ https://jannyai.com/characters/uuid_slug
                             </ul>
                         </div>
                         <div class="info-section">
-                            <h4><i class="fa-solid fa-folder-tree"></i> Gallery Sync</h4>
-                            <p>When <strong>Unique Gallery Folders</strong> is enabled (Settings → Gallery Folders), each character gets their own gallery folder even if they share names. Folder names are computed live from <code>name + gallery_id</code>, so nothing is persisted to drift out of sync.</p>
-                            <ul>
-                                <li>The audit only flags characters missing a <code>gallery_id</code> (typically those imported outside CL)</li>
-                                <li>View the audit status from <strong>More Options (⋮) → Gallery Sync Status</strong></li>
-                                <li>One-click "Assign IDs" fixes characters without one</li>
-                            </ul>
-                        </div>
-                        <div class="info-section">
                             <h4><i class="fa-solid fa-link"></i> External Gallery Extractors</h4>
                             <p>Some character cards can link to galleries on external image hosts instead of embedding direct image URLs. Character Library walks these links, resolves the underlying images, and downloads them into the character's gallery folder.</p>
                             <p><strong>Supported hosts:</strong></p>
@@ -1821,22 +1594,6 @@ https://jannyai.com/characters/uuid_slug
 
                     <!-- Tools -->
                     <div class="help-panel" data-section="tools">
-                        <div class="info-section">
-                            <h4><i class="fa-solid fa-wand-magic-sparkles"></i> AI Recommender</h4>
-                            <p>Get AI-powered character recommendations based on a natural-language prompt:</p>
-                            <ul>
-                                <li>Open from <strong>More Options (⋮) → Card Recommender</strong></li>
-                                <li>Describe what you're looking for (e.g. "cozy fantasy characters", "dark horror scenarios")</li>
-                                <li>Samples characters from your library and sends their metadata to an LLM</li>
-                                <li>Works with your active SillyTavern Chat Completion source, or a custom OpenAI-compatible API</li>
-                                <li><strong>Batch Mode</strong> for wider library coverage: splits the pool across multiple LLM calls</li>
-                                <li>Filter the sample pool by favorites, chat history, date range, and tags</li>
-                                <li>Click any result card to expand its reasoning, or tap it to open the character</li>
-                                <li>Add individual characters to a playlist from the result card, or use <strong>Add all to playlist</strong> to save every recommendation at once</li>
-                                <li><strong>Reroll</strong> to re-run with the same prompt and settings; previously picked characters are excluded so you get fresh suggestions</li>
-                            </ul>
-                            <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> The recommender sends character names, tags, creator, taglines, and creator notes (short excerpts); optionally the description if you enable it in its settings. Conversation history is never sent.</p>
-                        </div>
                         <div class="info-section">
                             <h4><i class="fa-solid fa-list-check"></i> Multi-Select & Batch Operations</h4>
                             <p>Select multiple characters for bulk actions:</p>
@@ -1863,85 +1620,6 @@ https://jannyai.com/characters/uuid_slug
                                 <li><strong>From Online tab:</strong> Browse providers and import with one click from the preview modal</li>
                                 <li>Progress tracking and error logging for multi-character imports</li>
                                 <li>After import, characters are automatically checked for duplicates and can be auto-linked to their source</li>
-                            </ul>
-                        </div>
-                        <div class="info-section">
-                            <h4><i class="fa-solid fa-comments"></i> Chat History Browser</h4>
-                            <p>The <strong>Chats</strong> tab lets you browse all chat histories across all characters:</p>
-                            <ul>
-                                <li>Two view modes: <strong>flat grid</strong> (all chats as cards) or <strong>grouped by character</strong></li>
-                                <li>Sort by date, character name, message count, chat length, or most active character</li>
-                                <li>Each chat card shows character name, last message preview, message count, date, and AI model badge</li>
-                                <li>Click to preview the full conversation with rendered messages</li>
-                                <li>Open chats directly in SillyTavern or delete them</li>
-                            </ul>
-                        </div>
-                    </div>
-
-                    <!-- Character Creator -->
-                    <div class="help-panel" data-section="character-creator">
-                        <div class="info-section">
-                            <h4><i class="fa-solid fa-plus-circle"></i> Overview</h4>
-                            <p>Create new characters from scratch or edit existing ones with AI assistance. Open via <strong>⋮ menu → Create Character</strong>.</p>
-                            <p>Each card field (description, personality, scenario, first message, etc.) has a <strong>wand icon button</strong> that opens the <strong>AI Studio</strong> panel for that field.</p>
-                        </div>
-                        <div class="info-section">
-                            <h4><i class="fa-solid fa-wand-magic-sparkles"></i> AI Studio</h4>
-                            <p>The AI Studio is a conversational assistant for generating and refining card fields:</p>
-                            <ul>
-                                <li><strong>Multi-turn chat</strong>: Ask for rewrites, adjustments, or entirely new content. The full conversation history is sent with each request so the LLM has context</li>
-                                <li><strong>Suggestion chips</strong>: Quick-start prompts tailored to each field (e.g. "Write a mysterious backstory", "Make them sarcastic and witty"). Click one to generate immediately</li>
-                                <li><strong>Word target</strong>: Set a target word count for generations. The LLM will aim to match it</li>
-                                <li><strong>Apply to card</strong>: When satisfied with the result, click Apply to Card to write it into the card field</li>
-                                <li><strong>Undo / Redo</strong>: History stack for the current studio session. Use the toolbar buttons or <code>Ctrl+Z</code> / <code>Ctrl+Y</code> (when not focused in a text input). Opening a different field starts a fresh history</li>
-                            </ul>
-                        </div>
-                        <div class="info-section">
-                            <h4><i class="fa-solid fa-lightbulb"></i> Brainstorm Mode</h4>
-                            <p>When editing the <strong>Description</strong> field, a <strong>lightbulb icon</strong> appears in the AI Studio toolbar. Click it to enter <strong>Brainstorm Mode</strong>:</p>
-                            <ul>
-                                <li>The content editor hides and the conversation area expands to fill the panel</li>
-                                <li>The LLM becomes a <strong>collaborative design partner</strong>: it asks questions, suggests ideas, and helps you develop your character concept through back-and-forth dialogue</li>
-                                <li>Suggestion chips offer creative starting points like "a mysterious character with a hidden past" or "help me figure out what motivates this character"</li>
-                                <li>When you're happy with the concept, click <strong>Finalize</strong>. The LLM synthesizes the entire conversation into a polished character description and writes it into the content area</li>
-                                <li>Click the lightbulb again to exit brainstorm mode and return to normal editing</li>
-                            </ul>
-                            <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Brainstorm mode is great when you have a vague idea but aren't sure how to put it into words yet. Let the LLM interview you instead of staring at a blank page.</p>
-                        </div>
-                        <div class="info-section">
-                            <h4><i class="fa-solid fa-highlighter"></i> Highlight Revision</h4>
-                            <p>Select (highlight) any portion of text in the AI Studio content area to enter <strong>revision mode</strong>:</p>
-                            <ul>
-                                <li>The selection is locked and visually highlighted with a colored overlay</li>
-                                <li>A "Revising selection" badge appears above the input row</li>
-                                <li>Your next prompt targets <strong>only the highlighted section</strong>. The LLM rewrites just that segment and splices it back into the surrounding text</li>
-                                <li>Click the <strong>×</strong> on the badge to clear the selection and return to full-field mode</li>
-                            </ul>
-                            <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> This is useful for tweaking a single paragraph without regenerating the entire field.</p>
-                        </div>
-                        <div class="info-section">
-                            <h4><i class="fa-solid fa-gear"></i> Custom System Prompts & Presets</h4>
-                            <p>Click the <strong>gear icon</strong> in the AI Studio toolbar to open field-specific settings:</p>
-                            <ul>
-                                <li><strong>Custom system prompt</strong>: Override the built-in instruction for that field with your own. The placeholder shows the default prompt for reference</li>
-                                <li><strong>Context checkboxes</strong>: Toggle which other card fields are included as context when generating. For example, uncheck "Personality" when generating a description if you want a fresh take</li>
-                                <li><strong>Save as preset</strong>: Save your custom prompt as a named preset. Load or delete saved presets from the dropdown</li>
-                            </ul>
-                            <p>Presets are saved per field and persist across sessions. A <strong>dot indicator</strong> appears on the gear icon when a field has active overrides (custom prompt or disabled context fields).</p>
-                        </div>
-                        <div class="info-section">
-                            <h4><i class="fa-solid fa-plug"></i> Connection Profiles</h4>
-                            <p>If you have multiple Chat Completion sources configured in SillyTavern, a <strong>Connection Profile</strong> dropdown appears in the sidebar under AI Assist. Select which profile to use for AI generation, letting you use a different model than your chat model.</p>
-                        </div>
-                        <div class="info-section">
-                            <h4><i class="fa-solid fa-file-import"></i> Import from Library</h4>
-                            <p>Click <strong>Import from Library</strong> to load an existing character into the creator form. This populates every field including tags, avatar, alternate greetings, and lorebook. You can then modify and save as a new character or overwrite the original.</p>
-                        </div>
-                        <div class="info-section">
-                            <h4><i class="fa-solid fa-floppy-disk"></i> Save Modes</h4>
-                            <ul>
-                                <li><strong>Create Character</strong>: Saves as a brand-new character in your library</li>
-                                <li><strong>Save as Existing</strong>: Appears after importing from library. Opens a side-by-side <strong>diff review</strong> showing exactly what changed before overwriting the original card. An automatic snapshot is saved first so you can always undo</li>
                             </ul>
                         </div>
                     </div>
@@ -2046,33 +1724,6 @@ https://jannyai.com/characters/uuid_slug
     </div>
 
     <!-- DataCat -> JanitorAI batch re-link -->
-    <div id="dcRelinkModal" class="cl-modal">
-        <div class="cl-modal-content dc-relink-content">
-            <div class="cl-modal-header">
-                <h3><i class="fa-solid fa-link"></i> Migrate DataCat Links</h3>
-                <button class="cl-modal-close" id="dcRelinkCloseBtn"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <div class="cl-modal-body">
-                <div id="dcRelinkSummary" class="dc-relink-summary"></div>
-                <div class="dc-relink-options">
-                    <label class="dc-relink-option"><input type="checkbox" id="dcRelinkRemoveOld" checked> Remove the DataCat link from migrated characters</label>
-                    <label class="dc-relink-option"><input type="checkbox" id="dcRelinkVerify"> Verify each character against JanitorAI first (slower, rate-limited)</label>
-                </div>
-                <div class="dc-relink-toolbar">
-                    <span id="dcRelinkSelCount" class="dc-relink-selcount"></span>
-                    <button id="dcRelinkSelAllBtn" class="cl-btn dc-relink-mini-btn">Select all</button>
-                    <button id="dcRelinkSelNoneBtn" class="cl-btn dc-relink-mini-btn">None</button>
-                </div>
-                <div id="dcRelinkList" class="dc-relink-list"></div>
-            </div>
-            <div class="cl-modal-footer">
-                <span id="dcRelinkProgress" class="dc-relink-progress"></span>
-                <button id="dcRelinkCancelBtn" class="action-btn secondary"><i class="fa-solid fa-xmark"></i> Close</button>
-                <button id="dcRelinkRunBtn" class="action-btn primary"><i class="fa-solid fa-play"></i> Migrate Selected</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Save Confirmation Modal -->
     <div id="confirmSaveModal" class="confirm-modal hidden">
         <div class="confirm-modal-content">
@@ -2561,310 +2212,6 @@ https://jannyai.com/characters/uuid_slug
                             </div>
                         </details>
 
-                        <!-- Pygmalion provider settings -->
-                        <details class="settings-provider-section" id="settingsPygmalionSection">
-                            <summary>
-                                <i class="fa-solid fa-fire provider-icon"></i> Pygmalion
-                                <i class="fa-solid fa-chevron-right provider-chevron"></i>
-                            </summary>
-                            <div class="settings-provider-body">
-                                <div class="cl-helper-banner cl-hidden" id="pygmalionPluginBanner">
-                                    <i class="fa-solid fa-puzzle-piece"></i>
-                                    <div>
-                                        <strong>cl-helper plugin required</strong>
-                                        <span>Authentication requires the cl-helper server plugin to proxy login requests. <a href="#" class="cl-goto-info">Open cl-helper status &rarr;</a></span>
-                                    </div>
-                                </div>
-                                <div class="settings-group" id="pygmalionSettingsFields">
-                                    <div class="settings-group-title"><i class="fa-solid fa-sign-in-alt"></i> Login</div>
-                                    <div class="settings-row">
-                                        <label for="settingsPygmalionEmail">Email:</label>
-                                        <div class="settings-input-group">
-                                            <input type="email" id="settingsPygmalionEmail" placeholder="your-email@example.com" autocomplete="email">
-                                        </div>
-                                    </div>
-                                    <div class="settings-row">
-                                        <label for="settingsPygmalionPassword">Password:</label>
-                                        <div class="settings-input-group">
-                                            <input type="password" id="settingsPygmalionPassword" placeholder="Your Pygmalion password" autocomplete="current-password">
-                                            <button id="togglePygmalionPasswordVisibility" class="glass-btn icon-only" title="Show/Hide">
-                                                <i class="fa-solid fa-eye"></i>
-                                            </button>
-                                            <button id="validatePygmalionBtn" class="settings-verify-btn" title="Validate Credentials">
-                                                <i class="fa-solid fa-check"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div class="settings-row">
-                                        <label>
-                                            <input type="checkbox" id="settingsPygmalionRememberCredentials" checked> Remember credentials (auto-refresh token)
-                                        </label>
-                                        <span class="settings-hint">Credentials are stored locally and used to log in via the cl-helper server plugin. Never sent to third parties.</span>
-                                    </div>
-                                </div>
-                                <div class="settings-group">
-                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
-                                    <div class="settings-row">
-                                        <div class="provider-exclude-tags-container">
-                                            <div class="provider-exclude-tags-pills" id="pygmalionExcludeTagsPills"></div>
-                                            <input type="text" class="glass-input provider-exclude-tags-input" id="pygmalionExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
-                                        </div>
-                                        <span class="settings-hint">Tags entered here are always excluded from Pygmalion browse results.</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </details>
-
-                        <!-- JannyAI provider settings -->
-                        <details class="settings-provider-section" id="settingsJannySection">
-                            <summary>
-                                <i class="fa-solid fa-broom provider-icon"></i> JannyAI
-                                <i class="fa-solid fa-chevron-right provider-chevron"></i>
-                            </summary>
-                            <div class="settings-provider-body">
-                                <div class="settings-group">
-                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
-                                    <div class="settings-row">
-                                        <div class="provider-exclude-tags-container">
-                                            <div class="provider-exclude-tags-pills" id="jannyExcludeTagsPills"></div>
-                                            <input type="text" class="glass-input provider-exclude-tags-input" id="jannyExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
-                                        </div>
-                                        <span class="settings-hint">Tags entered here are always excluded from JannyAI browse results (filtered client-side).</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </details>
-
-                        <!-- JanitorAI provider settings -->
-                        <details class="settings-provider-section" id="settingsJanitoraiSection">
-                            <summary>
-                                <i class="fa-solid fa-broom provider-icon"></i> JanitorAI
-                                <i class="fa-solid fa-chevron-right provider-chevron"></i>
-                            </summary>
-                            <div class="settings-provider-body">
-                                <div class="cl-helper-banner cl-hidden" id="janitoraiBrowserPluginBanner">
-                                    <i class="fa-solid fa-circle-info"></i>
-                                    <span>Hidden-definition recovery needs the <strong>cl-helper</strong> plugin. <a href="#" class="cl-goto-info">Open cl-helper status &rarr;</a></span>
-                                </div>
-                                <div class="settings-group" id="janitoraiBrowserFields">
-                                    <div class="settings-group-title"><i class="fa-solid fa-window-restore"></i> Step 1: Browser</div>
-                                    <div class="settings-row">
-                                        <span class="settings-hint">Required. JanitorAI is only reachable from a real browser, so this provider is built around one. Character Library can run and manage that browser for you, or drive one you host yourself. Nothing else here works until this does, including signing in.</span>
-                                    </div>
-                                    <div class="settings-row">
-                                        <label>Browser:</label>
-                                        <select id="settingsJanitoraiBrowserMode" class="glass-select" title="Browser source">
-                                            <option value="managed">Run one for me (recommended)</option>
-                                            <option value="endpoint">Use my own browser endpoint</option>
-                                        </select>
-                                    </div>
-                                    <div class="settings-row" id="janitoraiManagedRow">
-                                        <span class="settings-hint">A hidden browser starts on the machine running SillyTavern, the first time something actually needs it, and shuts itself down after 10 minutes idle. <strong>It needs a working GPU:</strong> Cloudflare does not let software-rendered browsers through, so this will not work on a headless server or a small single-board computer. Point an endpoint at a desktop for those.</span>
-                                    </div>
-                                    <div class="settings-row" id="janitoraiManagedStatusRow">
-                                        <span id="janitoraiManagedStatus" class="settings-status-badge inactive"><i class="fa-solid fa-circle"></i> Not started</span>
-                                        <button id="janitoraiManagedStartBtn" class="settings-action-btn">Start now</button>
-                                        <button id="janitoraiManagedStopBtn" class="settings-action-btn">Stop</button>
-                                    </div>
-                                    <div class="settings-row" id="janitoraiEndpointHintRow">
-                                        <span class="settings-hint">Point this at any Chrome DevTools endpoint and Character Library drives it. Useful when SillyTavern runs somewhere without a GPU, since the built-in browser needs one: <code>run-browser.mjs</code> in <code>extras/janitorai-browser/</code> runs a browser on an ordinary desktop and prints the URL to paste here.</span>
-                                    </div>
-                                    <div class="settings-row">
-                                        <span class="settings-hint">It does two jobs. <strong>Cloudflare:</strong> janitorai.com challenges everything that is not a real browser, and passing it earns a <code>cf_clearance</code> cookie that only a browser can hold, so no server-side request ever gets through on its own. <strong>Hidden definitions:</strong> around half of all characters withhold theirs (the field is simply absent from the API) and the only way to see one is to let JanitorAI build a chat prompt and read it back.</span>
-                                    </div>
-                                    <div class="settings-row">
-                                        <span class="settings-hint"><strong>Use a throwaway JanitorAI account.</strong> Recovering a definition briefly points that account's API settings at a dummy preset and opens a chat, then puts everything back. It is tidy, but it is still your live account.</span>
-                                    </div>
-                                    <div class="settings-row">
-                                        <label>Endpoint:</label>
-                                        <div class="settings-input-group">
-                                            <input type="search" class="glass-input" id="settingsJanitoraiBrowserEndpoint" placeholder="http://localhost:9222" autocomplete="off" spellcheck="false">
-                                            <button id="testJanitoraiBrowserBtn" class="glass-btn icon-only" title="Test this endpoint">
-                                                <i class="fa-solid fa-plug-circle-check"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div class="settings-row">
-                                        <div id="janitoraiBrowserChecks" class="janitorai-check-list hidden"></div>
-                                    </div>
-                                </div>
-                                <div class="settings-group">
-                                    <div class="settings-group-title"><i class="fa-solid fa-user-lock"></i> Step 2: Account Login</div>
-                                    <div class="settings-row">
-                                        <span class="settings-hint">Also required. The browser gets you to JanitorAI; an account gets you the content. Without one you see the <strong>first page of results</strong> and nothing else: no <strong>follows</strong>, and no <strong>character extraction</strong>, which is the only way to recover a hidden definition. Sign in here rather than on the site, since the login runs through the browser above. The session refreshes itself, so you should rarely repeat this, though signing in to JanitorAI elsewhere can end it. Your email, password and session are saved in SillyTavern's settings on the server running it, not just in this browser.</span>
-                                    </div>
-                                    <div class="settings-row">
-                                        <span id="janitoraiTokenStatus" class="settings-status-badge inactive"><i class="fa-solid fa-circle"></i> Not logged in</span>
-                                    </div>
-                                    <div class="settings-row">
-                                        <label>Email:</label>
-                                        <div class="settings-input-group">
-                                            <input type="email" id="settingsJanitoraiEmail" placeholder="JanitorAI account email" autocomplete="email" spellcheck="false">
-                                        </div>
-                                    </div>
-                                    <div class="settings-row">
-                                        <label>Password:</label>
-                                        <div class="settings-input-group">
-                                            <input type="password" id="settingsJanitoraiPassword" placeholder="JanitorAI account password" autocomplete="current-password">
-                                            <button id="toggleJanitoraiPasswordVisibility" class="glass-btn icon-only" title="Show/Hide">
-                                                <i class="fa-solid fa-eye"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div class="settings-row" style="gap: var(--space-sm);">
-                                        <button id="janitoraiBrowserLoginBtn" class="settings-action-btn primary" disabled>
-                                            <i class="fa-solid fa-right-to-bracket"></i> Sign In
-                                        </button>
-                                        <button id="clearJanitoraiTokenBtn" class="settings-action-btn danger">
-                                            <i class="fa-solid fa-right-from-bracket"></i> Log Out
-                                        </button>
-                                        <span class="settings-hint" id="janitoraiBrowserLoginHint"></span>
-                                    </div>
-                                    <div class="provider-link-divider"><span>or use a session token</span></div>
-                                    <div class="settings-row">
-                                        <span class="settings-hint">Use this if you sign in to JanitorAI with <strong>Google, Discord, X or Apple</strong> (those accounts have no password to give here), or if the sign-in above keeps failing. Log in at <strong>janitorai.com</strong>, open DevTools (F12) &rarr; <strong>Application &rarr; Cookies &rarr; janitorai.com</strong>, and copy the value of the <strong>sb-auth-auth-token</strong> cookie. If you see <strong>sb-auth-auth-token.0</strong> and <strong>.1</strong> instead of one cookie, paste their values joined in order. The session refreshes itself afterwards, the same as signing in above.</span>
-                                    </div>
-                                    <div class="settings-row">
-                                        <label>Token:</label>
-                                        <div class="settings-input-group">
-                                            <input type="password" id="settingsJanitoraiToken" placeholder="Paste the sb-auth-auth-token cookie value" autocomplete="off" spellcheck="false">
-                                            <button id="toggleJanitoraiTokenVisibility" class="glass-btn icon-only" title="Show/Hide">
-                                                <i class="fa-solid fa-eye"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div class="settings-row" style="gap: var(--space-sm);">
-                                        <button id="saveJanitoraiTokenBtn" class="settings-action-btn primary">
-                                            <i class="fa-solid fa-key"></i> Use Token
-                                        </button>
-                                    </div>
-                                </div>
-                                <div class="settings-group">
-                                    <div class="settings-group-title"><i class="fa-solid fa-rotate"></i> Update Checks</div>
-                                    <div class="settings-row">
-                                        <label class="settings-checkbox-label">
-                                            <input type="checkbox" id="janitoraiExtractOnUpdateCheckbox">
-                                            <span>Recover hidden definitions on update checks</span>
-                                        </label>
-                                    </div>
-                                    <div class="settings-row">
-                                        <span class="settings-hint">Runs the browser extraction for hidden-definition characters before comparing, so definition edits show up in update checks instead of being skipped as unreadable. Much slower per character, and needs the browser plus a signed-in JanitorAI account.</span>
-                                    </div>
-                                </div>
-                                <div class="settings-group">
-                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
-                                    <div class="settings-row">
-                                        <div class="provider-exclude-tags-container">
-                                            <div class="provider-exclude-tags-pills" id="janitoraiExcludeTagsPills"></div>
-                                            <input type="text" class="glass-input provider-exclude-tags-input" id="janitoraiExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
-                                        </div>
-                                        <span class="settings-hint">Tags entered here are always excluded from JanitorAI browse results. Tags that match JanitorAI's own tag list are excluded by the server; anything else (custom tags) is filtered locally.</span>
-                                    </div>
-                                </div>
-                                <div class="settings-group">
-                                    <div class="settings-group-title"><i class="fa-solid fa-truck-ramp-box"></i> DataCat Migration</div>
-                                    <div class="settings-row">
-                                        <span class="settings-hint">Re-links DataCat-linked characters to JanitorAI directly. DataCat aggregated JanitorAI cards, so most carry their original JanitorAI identity; migrating moves update checks, previews and stats to the source.</span>
-                                    </div>
-                                    <div class="settings-row">
-                                        <button id="migrateDatacatLinksBtn" class="settings-action-btn primary">
-                                            <i class="fa-solid fa-link"></i> Migrate DataCat Links...
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </details>
-
-                        <!-- CharacterTavern provider settings -->
-                        <details class="settings-provider-section" id="settingsCtSection">
-                            <summary>
-                                <i class="fa-solid fa-mug-hot provider-icon"></i> CharacterTavern
-                                <i class="fa-solid fa-chevron-right provider-chevron"></i>
-                            </summary>
-                            <div class="settings-provider-body">
-                                <div class="cl-helper-banner cl-hidden" id="ctPluginBanner">
-                                    <i class="fa-solid fa-puzzle-piece"></i>
-                                    <div>
-                                        <strong>cl-helper plugin required</strong>
-                                        <span>Authentication requires the cl-helper server plugin to proxy login requests. <a href="#" class="cl-goto-info">Open cl-helper status &rarr;</a></span>
-                                    </div>
-                                </div>
-                                <div class="settings-group" id="ctSettingsFields">
-                                    <div class="settings-group-title"><i class="fa-solid fa-cookie-bite"></i> Session Cookies</div>
-                                    <div class="settings-row">
-                                        <label for="settingsCtCookie">Cookie String:</label>
-                                        <div class="settings-input-group">
-                                            <textarea id="settingsCtCookie" class="glass-input cl-masked-field" rows="2" placeholder="session=YOUR_VALUE_HERE" style="font-family: monospace; font-size: 12px; resize: vertical;" autocomplete="one-time-code"></textarea>
-                                            <button id="toggleCtCookieVisibility" class="glass-btn icon-only" title="Show/Hide">
-                                                <i class="fa-solid fa-eye"></i>
-                                            </button>
-                                            <button id="validateCtCookieBtn" class="settings-verify-btn" title="Validate Session">
-                                                <i class="fa-solid fa-check"></i>
-                                            </button>
-                                        </div>
-                                        <span class="settings-hint">Paste your session cookie from DevTools → Application → Cookies. Expires after ~10 days. Required for NSFW content visibility.</span>
-                                    </div>
-                                </div>
-                                <div class="settings-group">
-                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
-                                    <div class="settings-row">
-                                        <div class="provider-exclude-tags-container">
-                                            <div class="provider-exclude-tags-pills" id="ctExcludeTagsPills"></div>
-                                            <input type="text" class="glass-input provider-exclude-tags-input" id="ctExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
-                                        </div>
-                                        <span class="settings-hint">Tags entered here are always excluded from CharacterTavern browse results.</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </details>
-
-                        <!-- Wyvern provider settings -->
-                        <details class="settings-provider-section" id="settingsWyvernSection">
-                            <summary>
-                                <i class="fa-solid fa-dragon provider-icon"></i> Wyvern
-                                <i class="fa-solid fa-chevron-right provider-chevron"></i>
-                            </summary>
-                            <div class="settings-provider-body">
-                                <div class="settings-group" id="wyvernSettingsFields">
-                                    <div class="settings-group-title"><i class="fa-solid fa-sign-in-alt"></i> Login</div>
-                                    <div class="settings-row">
-                                        <label for="settingsWyvernEmail">Email:</label>
-                                        <div class="settings-input-group">
-                                            <input type="email" id="settingsWyvernEmail" placeholder="your-email@example.com" autocomplete="email">
-                                        </div>
-                                    </div>
-                                    <div class="settings-row">
-                                        <label for="settingsWyvernPassword">Password:</label>
-                                        <div class="settings-input-group">
-                                            <input type="password" id="settingsWyvernPassword" placeholder="Your Wyvern password" autocomplete="current-password">
-                                            <button id="toggleWyvernPasswordVisibility" class="glass-btn icon-only" title="Show/Hide">
-                                                <i class="fa-solid fa-eye"></i>
-                                            </button>
-                                            <button id="validateWyvernBtn" class="settings-verify-btn" title="Validate Credentials">
-                                                <i class="fa-solid fa-check"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div class="settings-row">
-                                        <label>
-                                            <input type="checkbox" id="settingsWyvernRememberCredentials" checked> Remember credentials (auto-refresh token)
-                                        </label>
-                                        <span class="settings-hint">Credentials are stored locally and used to authenticate via Firebase. Never sent to third parties.</span>
-                                    </div>
-                                </div>
-                                <div class="settings-group">
-                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
-                                    <div class="settings-row">
-                                        <div class="provider-exclude-tags-container">
-                                            <div class="provider-exclude-tags-pills" id="wyvernExcludeTagsPills"></div>
-                                            <input type="text" class="glass-input provider-exclude-tags-input" id="wyvernExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
-                                        </div>
-                                        <span class="settings-hint">Tags entered here are always excluded from Wyvern browse results.</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </details>
-
                         <!-- DataCat provider settings -->
                         <details class="settings-provider-section" id="settingsDatacatSection">
                             <summary>
@@ -2981,200 +2328,7 @@ https://jannyai.com/characters/uuid_slug
                             </div>
                         </details>
 
-                        <!-- Saucepan provider settings -->
-                        <details class="settings-provider-section" id="settingsSaucepanSection">
-                            <summary>
-                                <i class="fa-solid fa-utensils provider-icon"></i> Saucepan
-                                <span class="settings-provider-badge">Beta</span>
-                                <i class="fa-solid fa-chevron-right provider-chevron"></i>
-                            </summary>
-                            <div class="settings-provider-body">
-                                <div class="cl-helper-banner cl-hidden" id="saucepanPluginBanner">
-                                    <i class="fa-solid fa-puzzle-piece"></i>
-                                    <div>
-                                        <strong>cl-helper plugin required</strong>
-                                        <span>Saucepan requires the cl-helper server plugin for API proxying and native extraction. <a href="#" class="cl-goto-info">Open cl-helper status &rarr;</a></span>
-                                    </div>
-                                </div>
-                                <div class="settings-group" id="saucepanSettingsFields">
-                                    <div class="settings-group-title"><i class="fa-solid fa-user"></i> Account</div>
-                                    <div class="settings-row">
-                                        <span class="settings-hint">Optional for browsing; required for native extraction. Log in (or paste a Bearer token) to pull open-definition Saucepan characters directly from saucepan.ai.</span>
-                                    </div>
-                                    <div class="settings-row">
-                                        <label>Handle:</label>
-                                        <div class="settings-input-group">
-                                            <input type="text" id="settingsSaucepanHandle" placeholder="Saucepan handle" autocomplete="username">
-                                        </div>
-                                    </div>
-                                    <div class="settings-row">
-                                        <label>Password:</label>
-                                        <div class="settings-input-group">
-                                            <input type="password" id="settingsSaucepanPassword" placeholder="Password (not stored)" autocomplete="current-password">
-                                            <button id="toggleSaucepanPasswordVisibility" class="glass-btn icon-only" title="Show/Hide">
-                                                <i class="fa-solid fa-eye"></i>
-                                            </button>
-                                            <button id="saucepanLoginBtn" class="settings-verify-btn" title="Log in and store the session token">
-                                                <i class="fa-solid fa-right-to-bracket"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div class="settings-row">
-                                        <label>Token:</label>
-                                        <div class="settings-input-group">
-                                            <input type="password" id="settingsSaucepanToken" placeholder="No token" autocomplete="off" spellcheck="false">
-                                            <button id="toggleSaucepanTokenVisibility" class="glass-btn icon-only" title="Show/Hide">
-                                                <i class="fa-solid fa-eye"></i>
-                                            </button>
-                                            <button id="saveSaucepanTokenBtn" class="settings-verify-btn" title="Save pasted token">
-                                                <i class="fa-solid fa-floppy-disk"></i>
-                                            </button>
-                                            <button id="validateSaucepanBtn" class="settings-verify-btn" title="Test token">
-                                                <i class="fa-solid fa-check"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div class="settings-row" style="gap: var(--space-sm);">
-                                        <button id="saucepanClearTokenBtn" class="settings-action-btn danger">
-                                            <i class="fa-solid fa-trash-can"></i> Clear Token
-                                        </button>
-                                    </div>
-                                </div>
-                                <div class="settings-group">
-                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
-                                    <div class="settings-row">
-                                        <div class="provider-exclude-tags-container">
-                                            <div class="provider-exclude-tags-pills" id="saucepanExcludeTagsPills"></div>
-                                            <input type="text" class="glass-input provider-exclude-tags-input" id="saucepanExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </details>
-
-                        <!-- Botbooru provider settings -->
-                        <details class="settings-provider-section" id="settingsBotbooruSection">
-                            <summary>
-                                <i class="fa-solid fa-robot provider-icon"></i> Botbooru
-                                <span class="settings-provider-badge">Beta</span>
-                                <i class="fa-solid fa-chevron-right provider-chevron"></i>
-                            </summary>
-                            <div class="settings-provider-body">
-                                <div class="cl-helper-banner cl-hidden" id="botbooruPluginBanner">
-                                    <i class="fa-solid fa-puzzle-piece"></i>
-                                    <div>
-                                        <strong>cl-helper plugin required</strong>
-                                        <span>Username/password login requires the cl-helper server plugin to proxy the auth request. Manual token paste works without it. <a href="#" class="cl-goto-info">Open cl-helper status &rarr;</a></span>
-                                    </div>
-                                </div>
-                                <div class="settings-group" id="botbooruSettingsFields">
-                                    <div class="settings-group-title"><i class="fa-solid fa-sign-in-alt"></i> Login</div>
-                                    <div class="settings-row">
-                                        <label for="settingsBotbooruUsername">Username:</label>
-                                        <div class="settings-input-group">
-                                            <input type="text" id="settingsBotbooruUsername" placeholder="Botbooru username" autocomplete="username">
-                                        </div>
-                                    </div>
-                                    <div class="settings-row">
-                                        <label for="settingsBotbooruPassword">Password:</label>
-                                        <div class="settings-input-group">
-                                            <input type="password" id="settingsBotbooruPassword" placeholder="Your Botbooru password" autocomplete="current-password">
-                                            <button id="toggleBotbooruPasswordVisibility" class="glass-btn icon-only" title="Show/Hide">
-                                                <i class="fa-solid fa-eye"></i>
-                                            </button>
-                                            <button id="validateBotbooruBtn" class="settings-verify-btn" title="Log in and store the token">
-                                                <i class="fa-solid fa-check"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div class="settings-row">
-                                        <span class="settings-hint" id="botbooruLoginState"></span>
-                                    </div>
-                                </div>
-                                <div class="settings-group">
-                                    <div class="settings-group-title"><i class="fa-solid fa-download"></i> Downloads</div>
-                                    <div class="settings-row">
-                                        <label class="settings-checkbox-label">
-                                            <input type="checkbox" id="botbooruTrackDownloadsCheckbox" checked>
-                                            <span>Report downloads to Botbooru</span>
-                                        </label>
-                                    </div>
-                                    <div class="settings-row">
-                                        <span class="settings-hint">Feeds the download counters on the site when you import a card. Disable to import silently.</span>
-                                    </div>
-                                </div>
-                                <div class="settings-group">
-                                    <div class="settings-group-title"><i class="fa-solid fa-fire"></i> Content</div>
-                                    <div class="settings-row">
-                                        <label class="settings-checkbox-label">
-                                            <input type="checkbox" id="botbooruShowNsflCheckbox">
-                                            <span>Include NSFL posts</span>
-                                        </label>
-                                    </div>
-                                    <div class="settings-row">
-                                        <span class="settings-hint">Only applies while the NSFW toggle is on. Sets the matching account-side switch on your Botbooru account.</span>
-                                    </div>
-                                </div>
-                                <div class="settings-group">
-                                    <div class="settings-group-title"><i class="fa-solid fa-star"></i> Favorite Tags</div>
-                                    <div class="settings-row">
-                                        <label>
-                                            <input type="checkbox" id="botbooruWeightedModeCheckbox"> Weighted tag mode (experimental)
-                                        </label>
-                                        <span class="settings-hint">Account-side switch. Replaces the simple favorite-tags boost with per-tag weights (-1000 to 1000) plus always-follow / always-block flags, and unlocks extra Curated orderings in browse. While on, the site ignores the simple list below.</span>
-                                    </div>
-                                    <div class="settings-row hidden" id="botbooruWeightsEditorRow">
-                                        <div class="provider-exclude-tags-container">
-                                            <div id="botbooruTagWeightsList" class="botbooru-weights-list"></div>
-                                            <div class="settings-input-group">
-                                                <input type="search" class="glass-input provider-exclude-tags-input" id="botbooruTagWeightsInput" placeholder="Search a tag to add..." autocomplete="off">
-                                                <button id="botbooruTagWeightsAddBtn" class="glass-btn icon-only" title="Add tag">
-                                                    <i class="fa-solid fa-plus"></i>
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <span class="settings-hint">Positive weights boost, negative bury. Star = always follow, ban = always block. Stored on your Botbooru account.</span>
-                                    </div>
-                                    <div class="settings-row" id="botbooruBasicFavTagsRow">
-                                        <div class="provider-exclude-tags-container">
-                                            <div class="provider-exclude-tags-pills" id="botbooruFavTagsPills"></div>
-                                            <div class="settings-input-group">
-                                                <input type="search" class="glass-input provider-exclude-tags-input" id="botbooruFavTagsInput" placeholder="Type a tag" autocomplete="off">
-                                                <button id="botbooruFavTagsAddBtn" class="glass-btn icon-only" title="Add favorite tag">
-                                                    <i class="fa-solid fa-plus"></i>
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <span class="settings-hint">Favorite tags boost matching cards in the Curated sort. Stored on your Botbooru account (login required); also manageable via the star icons in the browse Tags dropdown.</span>
-                                        <span class="settings-hint hidden" id="botbooruFavTagsInertWarn"><i class="fa-solid fa-triangle-exclamation"></i> Weighted tag mode is ON: the site ignores this simple list. Use the weights editor above.</span>
-                                    </div>
-                                </div>
-                                <div class="settings-group">
-                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
-                                    <div class="settings-row">
-                                        <div class="provider-exclude-tags-container">
-                                            <div class="provider-exclude-tags-pills" id="botbooruExcludeTagsPills"></div>
-                                            <input type="text" class="glass-input provider-exclude-tags-input" id="botbooruExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
-                                        </div>
-                                        <span class="settings-hint">Tags entered here are always excluded from Botbooru browse results. Your Botbooru account's own site blacklist also applies automatically while logged in.</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </details>
-
-                        <!-- Card Updates (shared across providers) -->
-                        <div class="settings-group">
-                            <div class="settings-group-title"><i class="fa-solid fa-arrows-rotate"></i> Card Updates</div>
-                            <div class="settings-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
-                                <span class="settings-hint" style="margin-bottom: 4px;">Check all provider-linked characters for differences against the remote version. You can review each change and selectively apply updates.</span>
-                                <button id="batchCheckUpdatesBtn" class="settings-action-btn primary">
-                                    <i class="fa-solid fa-arrows-rotate"></i> Check All for Updates
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Media Section -->
+                        <!-- Media Section -->
                     <div class="settings-panel" data-section="media">
                         <div class="settings-panel-header">
                             <h4><i class="fa-solid fa-photo-film"></i> Media Localization</h4>
@@ -3429,23 +2583,6 @@ https://jannyai.com/characters/uuid_slug
                             </div>
                         </div>
                         
-                        <div class="settings-group">
-                            <div class="settings-group-title"><i class="fa-solid fa-stethoscope"></i> Integrity Check</div>
-                            <span class="settings-hint">Detect characters missing a <code>gallery_id</code>. Folder names are computed live from the card, so there's nothing else to sync.</span>
-
-                            <div id="gallerySyncStatus" class="gallery-sync-status-box" style="margin-top: 10px;">
-                                <div class="sync-status-placeholder">
-                                    <i class="fa-solid fa-circle-question"></i>
-                                    <span>Click "Run Audit" to check integrity</span>
-                                </div>
-                            </div>
-
-                            <div class="settings-row gallery-sync-buttons" style="margin-top: 10px;">
-                                <button id="gallerySyncAuditBtn" class="settings-action-btn">
-                                    <i class="fa-solid fa-magnifying-glass"></i> Run Audit
-                                </button>
-                            </div>
-                        </div>
                     </div>
                     
                     <!-- Developer Section -->
@@ -3621,6 +2758,5 @@ https://jannyai.com/characters/uuid_slug
     <script src="archive-api.js?v=1"></script>
     <script src="library.js?v=197"></script>
     <script type="module" src="modules/module-loader.js?v=47"></script>
-    <script src="library-mobile.js?v=25"></script>
 </body>
 </html>
