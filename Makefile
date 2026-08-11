@@ -1,4 +1,4 @@
-.PHONY: compile test test-js run import gallery-ids check
+.PHONY: compile test test-js run import gallery-ids check names
 
 # Every target reads .env (see .env.template) via proxy/config.py -- most
 # importantly JAI_PROXY_OUTPUT_DIR, the cards folder they all read and write.
@@ -42,3 +42,15 @@ datacat-ids:
 # `make check ARGS=--repair` rewrites the cards that would change.
 check:
 	uv run python scripts/check_cards.py $(ARGS)
+
+# Find card names that aren't names -- a tagline welded on (`Mia, your desperate
+# roommate`) or a generic placeholder hiding the real character (`Narrator`).
+# SillyTavern feeds data.name to the model as "You are <name>", so both wreck
+# the roleplay. Read-only report by default; `make names ARGS=--interactive`
+# walks the findings and applies the renames you confirm. Nothing is ever
+# renamed automatically -- the suggestions are ~87% right, not 100%.
+# Interactive decisions are appended to logs/name_repair.jsonl (diagnosis +
+# what you actually chose), which is the ground truth for improving the rules:
+# `make names ARGS=--stats` scores them against it.
+names:
+	uv run python scripts/fix_names.py $(ARGS)

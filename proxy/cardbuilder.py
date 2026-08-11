@@ -287,17 +287,10 @@ class PngWriter:
         out_dir = out_dir or self._output_dir
         return sorted(out_dir.glob(f"**/*_{fragment}.png"))
 
-    def find(self, name: str, card_id: str, out_dir: Path | None = None) -> list[Path]:
-        """On-disk card PNGs whose filename matches this name *and* id fragment
-        -- the `<name>_<id8>.png` stem a prior write produced. Narrower than
-        `existing` (which keys on the id fragment alone): it pins the match to
-        the same character name too, so a field can be backfilled into exactly
-        the card an import would otherwise skip without risking a same-fragment,
-        different-name neighbour. Empty when the id has no usable fragment (name
-        alone isn't a safe key here) or nothing matches."""
-        out_dir = out_dir or self._output_dir
-        fragment = id_fragment(card_id)
-        if not fragment:
-            return []
-        stem = _safe_filename(name)
-        return sorted(out_dir.glob(f"**/{stem}_{fragment}.png"))
+    # There is deliberately no name+fragment lookup here. One existed, to pin a
+    # gallery_id backfill to a card matching both the name and the id. It was a
+    # trap: `make names` renames a card in place (`Narrator_04355852.png` ->
+    # `Angelica_04355852.png`) while the staged export it is matched against
+    # still carries the old name, so the extra name term made the lookup miss
+    # the exact card `existing` had just matched by id. Match on the fragment --
+    # it is unique on its own across the archive. See `find_by_id`.

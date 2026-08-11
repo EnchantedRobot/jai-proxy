@@ -219,11 +219,6 @@ def _backfill_gallery_id(path: Path, gallery_id: Any) -> str:
     return "added"
 
 
-def _source_name(source: str, data: dict) -> str:
-    """The character name an import matches the on-disk filename on."""
-    return chub_mapper.name(data) if source == "chub" else datacat_mapper.name(data)
-
-
 def _adopt_on_disk_gallery_id(data: dict, card_id: str, cards_dir: Path) -> Any | None:
     """Pin an --overwrite re-import to the gallery_id already in the archive.
 
@@ -441,7 +436,15 @@ def main() -> int:
             # export may carry a gallery_id the on-disk card lacks. Backfill just
             # that one field into the matching card(s), everything else untouched.
             gid = gallery.read_id(data)
-            targets = writer.find(_source_name(source, data), cid, args.cards_dir) if gid else []
+            # Matched on the id fragment alone -- the same key `already` was
+            # computed with. Pinning the name too used to look safer, but the
+            # name on the archive card is not stable: `make names` renames a
+            # junk name (`Narrator_04355852.png` -> `Angelica_04355852.png`)
+            # while the staged export still says `Narrator`, so the name-pinned
+            # glob missed the very card it had just matched by id and the
+            # backfill was silently skipped. The fragment is unique on its own
+            # (checked across the full archive), so the name added no safety.
+            targets = writer.find_by_id(cid, args.cards_dir) if gid else []
             targets = [t for t in targets if t != path]
             added = 0
             for target in targets:

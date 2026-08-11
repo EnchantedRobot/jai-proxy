@@ -290,9 +290,9 @@ def test_png_writer_nested_layout_falls_back_to_unknown_creator(tmp_path):
 
 
 def test_existing_and_find_match_across_both_layouts(tmp_path):
-    """The lookups a bulk export skips on -- id-fragment `existing` and
-    name+fragment `find` -- glob recursively, so a folder holding cards written
-    under either layout (an archive migrated from nested to flat) still
+    """The lookups a bulk export skips on -- `existing` and `find_by_id`, both
+    keyed on the id fragment -- glob recursively, so a folder holding cards
+    written under either layout (an archive migrated from nested to flat) still
     resolves both."""
     cid = "bffaaf71-6c33-4e82-8cf2-3699f2ce4d92"
     profile = ProfileFields(name="Akane Kujo", creator="dezea")
@@ -301,7 +301,7 @@ def test_existing_and_find_match_across_both_layouts(tmp_path):
 
     flat = PngWriter(output_dir=tmp_path, layout="flat")
     assert flat.existing([cid]) == {cid}
-    assert [p.name for p in flat.find("Akane Kujo", cid)] == ["Akane_Kujo_bffaaf71.png"]
+    assert [p.name for p in flat.find_by_id(cid)] == ["Akane_Kujo_bffaaf71.png"]
 
 
 # ---------------------------------------------------------------------------

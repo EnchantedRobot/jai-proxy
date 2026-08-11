@@ -162,24 +162,31 @@ def _run_import(import_dir: Path, cards_dir: Path, monkeypatch, *extra: str) -> 
 
 
 # ---------------------------------------------------------------------------
-# PngWriter.find -- locate the card an import would skip
+# PngWriter.find_by_id -- locate the card an import would skip
 # ---------------------------------------------------------------------------
 
 
-def test_find_matches_name_and_id(tmp_path):
+def test_find_by_id_matches_on_the_fragment(tmp_path):
     cards = tmp_path / "cards"
     path = _write_existing(cards, name="Tsuko", creator="SteakedGamer", cid="4937471", data=_chub_data())
     writer = PngWriter(output_dir=cards, compress=False)
-    assert writer.find("Tsuko", "4937471") == [path]
+    assert writer.find_by_id("4937471") == [path]
+    assert writer.find_by_id("") == []  # no usable id fragment
 
 
-def test_find_wont_match_different_name(tmp_path):
+def test_find_by_id_still_matches_a_renamed_card(tmp_path):
+    """The regression this replaces a name+id lookup for: `make names` renames a
+    junk-named card in place while the staged export still carries the old name,
+    so any match that pinned the name missed the card it had just matched by id
+    and skipped the gallery_id backfill."""
     cards = tmp_path / "cards"
-    _write_existing(cards, name="Tsuko", creator="SteakedGamer", cid="4937471", data=_chub_data())
+    path = _write_existing(cards, name="Narrator", creator="SteakedGamer", cid="4937471", data=_chub_data())
+    renamed = path.with_name(f"Angelica_{path.stem.split('_')[-1]}.png")
+    path.rename(renamed)
+
     writer = PngWriter(output_dir=cards, compress=False)
-    # Same id fragment, different name -> no match (safer than patching a neighbour).
-    assert writer.find("Someone Else", "4937471") == []
-    assert writer.find("Tsuko", "") == []  # no usable id fragment
+    assert writer.find_by_id("4937471") == [renamed]
+    assert writer.existing(["4937471"]) == {"4937471"}
 
 
 # ---------------------------------------------------------------------------
