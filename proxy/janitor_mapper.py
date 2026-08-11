@@ -3,7 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from proxy.html_md import clean_tag, html_to_md
+from proxy.html_md import clean_tag
+from proxy.notes_html import clean_creator_notes
 from proxy.models import ProfileFields
 
 # JanitorAI avatars are served from this CDN prefix; the JSON carries only the
@@ -70,6 +71,13 @@ def avatar_url(character: dict[str, Any]) -> str | None:
     return f"{_AVATAR_BASE}{filename}" if filename else None
 
 
+def creator_id(character: dict[str, Any]) -> str:
+    """The JanitorAI creator's UUID, carried in the JSON alongside
+    `creator_name`. Feeds extensions.datacat.creatorId -- the field
+    SillyTavern-CharacterLibrary's datacat provider keys creator lookups on."""
+    return _s(character.get("creator_id"))
+
+
 def to_profile_fields(character: dict[str, Any]) -> ProfileFields:
     """Map a JanitorAI /hampter/characters/<id> JSON payload onto the
     ProfileFields the CardBuilder already consumes. For hidden cards the
@@ -84,7 +92,7 @@ def to_profile_fields(character: dict[str, Any]) -> ProfileFields:
         description=_s(character.get("personality")),
         scenario=_s(character.get("scenario")),
         mes_example=_s(character.get("example_dialogs")),
-        creator_notes=html_to_md(character.get("description") or ""),
+        creator_notes=clean_creator_notes(character.get("description") or ""),
     )
 
 

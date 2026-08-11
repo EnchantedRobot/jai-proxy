@@ -28,11 +28,60 @@ _BROKEN_MACRO_RE = re.compile(
 )
 
 _MACRO_TOKEN_RE = re.compile(r"\{\{\s*([\w.\-]+)\s*\}\}")
-_ST_KNOWN_MACROS = frozenset({"user", "char"})
+# SillyTavern resolves {{user}} and {{char}} everywhere; it also resolves
+# {{original}} inside system_prompt / post_history_instructions (it expands to
+# the default prompt content). Chub cards routinely carry {{original}} there, so
+# it's a legitimate macro, not an "unresolved" one -- don't warn on it.
+_ST_KNOWN_MACROS = frozenset({"user", "char", "original", "weekday", "date"})
+
+# Common misspellings of the two macro names creators hand-type. A slipped
+# keystroke -- {{usee}}, {{uesr}} -- yields a macro neither JanitorAI nor
+# SillyTavern resolves, so it renders as literal text (surfaced as an
+# "unresolved macro" warning). These tokens only ever appear inside macro
+# braces, never as prose, so mapping each to its intended name is a pure fix,
+# same as the broken-bracket repair. Keys must be lowercase.
+_MACRO_TYPOS = {
+    "use": "user",
+    "𝙐𝙨𝙚𝙧": "user",
+    "usee": "user",
+    "usser": "user",
+    "users": "user",
+    "uesr": "user",
+    "usre": "user",
+    "userr": "user",
+    "usr": "user",
+    "suer": "user",
+    "sun": "user",
+    "spouse": "user",
+    "random_user_1": "user",
+    "ob": "user",
+    "chr": "char",
+    "cahr": "char",
+    "chra": "char",
+    "charr": "char",
+    # "chars" is the plural slip (mirrors "users" -> user); "chair" is a
+    # keystroke slip of "char" seen in the wild ("{{chair}} is {{user}}'s
+    # classmate"). Both only ever match inside macro braces, never as prose.
+    "chars": "char",
+    "chair": "char",
+    "𝘾𝙝𝙖𝙧": "char",
+    "cha": "char",
+}
+
+# Same bracket tolerance as _BROKEN_MACRO_RE (1-2 braces each side) so a typo
+# with a dropped brace ({usee}) is corrected too.
+_MACRO_TYPO_RE = re.compile(
+    r"\{{1,2}\s*(" + "|".join(_MACRO_TYPOS) + r")\s*\}{1,2}",
+    re.IGNORECASE,
+)
 
 
 def _repair_macros(text: str) -> str:
     return _BROKEN_MACRO_RE.sub(lambda m: "{{" + m.group(1).lower() + "}}", text)
+
+
+def _correct_typos(text: str) -> str:
+    return _MACRO_TYPO_RE.sub(lambda m: "{{" + _MACRO_TYPOS[m.group(1).lower()] + "}}", text)
 
 
 def _fold_pronouns(text: str) -> str:
@@ -72,9 +121,11 @@ class MacroSanitizer:
     def sanitize(self, text: str | None) -> tuple[str, list[str]]:
         if not text:
             return text or "", []
-        # Repair brackets FIRST (so {obj} -> {{obj}}), then fold pronouns.
+        # Repair brackets FIRST (so {obj} -> {{obj}}), correct obvious typos
+        # ({{usee}} -> {{user}}), then fold pronouns.
         repaired = _repair_macros(text)
-        folded = _fold_pronouns(repaired)
+        corrected = _correct_typos(repaired)
+        folded = _fold_pronouns(corrected)
         return folded, _unknown_macros(folded)
 
     def reverse_names(self, text: str) -> str:

@@ -66,6 +66,38 @@ def test_code_and_hr_serialization_synthetic():
     assert "after" in md
 
 
+def test_style_and_script_content_is_dropped():
+    # Chub creator_notes wrap the blurb in a styled shell with a <style> CSS
+    # block; that CSS is not prose and must not leak into the markdown.
+    md = serialize_md(
+        BeautifulSoup(
+            "<div><style>.x{width:120px;object-fit:cover}"
+            "@keyframes p{from{opacity:0}}</style>"
+            "<script>alert(1)</script><p>real body</p></div>",
+            "html.parser",
+        )
+    )
+    assert md == "real body"
+    assert "width" not in md
+    assert "@keyframes" not in md
+    assert "alert" not in md
+
+
+def test_doctype_and_meta_document_wrapper_is_dropped():
+    # Some Chub notes are a full HTML document; the <!DOCTYPE>/<head> shell must
+    # not leak (a bare <!DOCTYPE html> otherwise surfaces as the literal "html").
+    md = serialize_md(
+        BeautifulSoup(
+            "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
+            "<title>Profile</title></head><body><p>real body</p></body></html>",
+            "html.parser",
+        )
+    )
+    assert md == "real body"
+    assert "html" not in md
+    assert "Profile" not in md  # <title> text (inside <head>) dropped
+
+
 def test_link_serialization_keeps_only_http_links():
     md = serialize_md(
         BeautifulSoup(

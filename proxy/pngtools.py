@@ -13,10 +13,13 @@ exactly (re-saving via Pillow would inflate it back). Mirrors the approach in
 
 from __future__ import annotations
 
+import base64
+import json
 import struct
 import subprocess
 import zlib
 from pathlib import Path
+from typing import Any
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # Every flavour of textual chunk. We strip all of them before re-injecting so a
@@ -48,6 +51,62 @@ def _text_chunk(keyword: str, text: str) -> bytes:
     return _encode_chunk(b"tEXt", payload)
 
 
+def read_text_chunks(png: bytes) -> dict[str, str]:
+    """Return the `tEXt` chunks of `png` as {keyword: text}. The inverse of
+    inject_text_chunks -- used to read an already-embedded character card back
+    out of a PNG (e.g. a datacat export in the import pipeline). Only plain
+    `tEXt` is decoded; the card writers here (and datacat's) use tEXt, so
+    compressed zTXt/iTXt variants are not expected and are skipped. Later
+    chunks win on a duplicate keyword."""
+    if png[:8] != _PNG_SIGNATURE:
+        raise ValueError("not a PNG stream")
+    out: dict[str, str] = {}
+    for ctype, cdata in _iter_chunks(png):
+        if ctype == b"tEXt":
+            keyword, _, text = cdata.partition(b"\x00")
+            out[keyword.decode("latin-1")] = text.decode("latin-1")
+    return out
+
+
+def read_envelope(png: bytes) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """Return `(envelope, data)` for the character card embedded in a tavern
+    PNG, or None if it carries no readable card. Prefers the V3 `ccv3` chunk,
+    falls back to the V2 `chara` chunk (card writers here, datacat, and Chub all
+    write both with identical content). The chunk payload is base64(JSON); the
+    JSON nests the card fields under `data` (with a top-level V2 mirror), so
+    `data` is that nested object -- or the whole envelope when there's no `data`
+    key.
+
+    Keeping the outer envelope is what a *patching* caller needs: mutate `data`,
+    then hand both back to embed_card to rewrite the card with its spec header
+    intact. Readers that only want the fields want extract_embedded_card."""
+    try:
+        chunks = read_text_chunks(png)
+    except ValueError:
+        return None
+    payload = chunks.get("ccv3") or chunks.get("chara")
+    if not payload:
+        return None
+    try:
+        obj = json.loads(base64.b64decode(payload))
+    except (ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(obj, dict):
+        return None
+    data = obj.get("data")
+    return obj, data if isinstance(data, dict) else obj
+
+
+def extract_embedded_card(png: bytes) -> dict[str, Any] | None:
+    """Return just the character-card `data` object embedded in a tavern PNG, or
+    None if the PNG carries no readable card.
+
+    The single reader shared by every import source (datacat_mapper, chub_mapper)
+    -- the inverse of the card `to_dict`/inject_text_chunks the writers produce."""
+    parsed = read_envelope(png)
+    return parsed[1] if parsed is not None else None
+
+
 def inject_text_chunks(png: bytes, texts: dict[str, str]) -> bytes:
     """Return `png` with `texts` written as tEXt chunks immediately after IHDR,
     stripping any pre-existing text chunks first. Placement before IDAT means
@@ -66,6 +125,31 @@ def inject_text_chunks(png: bytes, texts: dict[str, str]) -> bytes:
             out.extend(_text_chunk(k, v) for k, v in texts.items())
             injected = True
     return b"".join(out)
+
+
+def embed_card(png: bytes, envelope: dict[str, Any], data: dict[str, Any]) -> bytes:
+    """Return `png` with `data` re-embedded under `envelope`'s spec header,
+    preserving every non-text (pixel) chunk exactly -- inject_text_chunks
+    rewrites only the tEXt chunks, so a pngquant-compressed IDAT survives
+    byte-for-byte. Rebuilds the canonical envelope (spec header + V2 top-level
+    mirror) CharacterCardV3.to_dict emits, so a patched card is shaped exactly
+    like a freshly built one. The write half of read_envelope -- used by the
+    in-place card patchers in scripts/."""
+    new_envelope = {
+        "spec": envelope.get("spec", "chara_card_v3"),
+        "spec_version": envelope.get("spec_version", "3.0"),
+        "data": data,
+    }
+    new_envelope.update(data)  # V2-compat top-level mirror
+    payload = base64.b64encode(json.dumps(new_envelope).encode("utf-8")).decode("ascii")
+    return inject_text_chunks(png, {"chara": payload, "ccv3": payload})
+
+
+def non_text_chunks(png: bytes) -> list[tuple[bytes, bytes]]:
+    """Every chunk of `png` that isn't text -- i.e. the pixels and headers. An
+    in-place card patch must leave this list byte-identical; comparing it before
+    and after is how scripts/ prove a rewrite touched only the embedded card."""
+    return [(t, d) for t, d in _iter_chunks(png) if t not in _TEXT_CHUNK_TYPES]
 
 
 def quantize(png: bytes, pngquant_bin: Path, *, timeout: float = 60.0) -> bytes | None:

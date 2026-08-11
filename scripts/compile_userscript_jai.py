@@ -29,6 +29,7 @@ MODULES = [
     "scheduler.js",
     "export.js",
     "bulk.js",
+    "hide-captured.js",
     "bootstrap.js",
 ]
 

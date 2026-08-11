@@ -141,6 +141,9 @@ class BuildRequest(BaseModel):
 
 class BuildResponse(BaseModel):
     ok: bool
+    # True when the card was already on disk and the build was skipped: `path`
+    # then points at the file that was already there, and nothing was written.
+    duplicate: bool = False
     path: str | None = None
     warnings: list[str] = Field(default_factory=list)
     fields_present: dict[str, bool] = Field(default_factory=dict)
@@ -172,6 +175,25 @@ class ExistingRequest(BaseModel):
 
 class ExistingResponse(BaseModel):
     existing: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# /lorebooks/existing -- "which of these lorebook ids do we already have
+# cached?" A lorebook is reused across many characters and fetching one is the
+# slow part of an export (saucepan needs one request per chapter), so the
+# userscript asks this first and only fetches the misses; the cached ones ride
+# into the build by id (see LorebookCache).
+# ---------------------------------------------------------------------------
+
+
+class LorebookExistingRequest(BaseModel):
+    source: str
+    ids: list[str] = Field(default_factory=list)
+
+
+class LorebookExistingResponse(BaseModel):
+    cached: list[str] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

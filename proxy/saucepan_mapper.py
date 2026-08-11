@@ -162,6 +162,12 @@ def companion_id(raw: dict[str, Any]) -> str:
     return (raw.get("id") or _companion(raw).get("id") or "").strip()
 
 
+def creator_id(raw: dict[str, Any]) -> str:
+    """The saucepan author's UUID (`author_id`, the `author_handle` sibling).
+    Feeds extensions.datacat.creatorId -- same role as janitor_mapper.creator_id."""
+    return (_companion(raw).get("author_id") or "").strip()
+
+
 def page_name(raw: dict[str, Any]) -> str:
     """The card-title blurb (display_name, e.g. "Eve | I Did Nothing Wrong") --
     kept as metadata; the real character name is companion.name."""

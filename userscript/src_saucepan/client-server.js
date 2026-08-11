@@ -40,4 +40,24 @@
       });
       return JSON.parse(text);
     },
+
+    // Ask which of these lorebook ids the server already has cached. Returns
+    // {cached, missing}: skip fetching `cached` (they ride into the build by id),
+    // fetch only `missing` from saucepan.
+    async lorebooksExisting(source, ids) {
+      const { text } = await this._request({
+        method: "POST",
+        path: "/lorebooks/existing",
+        body: { source, ids },
+      });
+      return JSON.parse(text);
+    },
+
+    // Wipe the server's lorebook cache (the CLEAR affordance). Exported PNGs are
+    // untouched -- this only drops the fetch-skipping cache so the next export
+    // re-pulls fresh lorebooks.
+    async clearLorebooks() {
+      const { text } = await this._request({ method: "POST", path: "/clear-lorebooks" });
+      return JSON.parse(text);
+    },
   };

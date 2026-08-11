@@ -184,3 +184,17 @@ def test_avatar_url_builds_cdn_url():
 def test_avatar_url_none_when_absent():
     assert mapper.avatar_url({}) is None
     assert mapper.avatar_url({"avatar": ""}) is None
+
+
+# ---------------------------------------------------------------------------
+# creator_id -- feeds extensions.datacat.creatorId.
+# ---------------------------------------------------------------------------
+
+
+def test_creator_id_reads_the_json_field():
+    akane = load("open_akane_kujo")
+    assert mapper.creator_id(akane) == "866c0877-ea3d-4bc6-a906-13c5d9601f9d"
+
+
+def test_creator_id_empty_when_absent():
+    assert mapper.creator_id({}) == ""

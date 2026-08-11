@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import re
 
-from bs4 import BeautifulSoup, Comment
-from bs4.element import NavigableString, PageElement, Tag
+from bs4 import BeautifulSoup
+from bs4.element import NavigableString, PageElement, PreformattedString, Tag
 
 # ---------------------------------------------------------------------------
 # Small text utilities (ported from janitorai-export.user.js)
@@ -56,6 +56,12 @@ def clean_tag(t: str) -> str:
 # converts a character's `description` blurb into creator_notes. The character
 # definition itself (personality/scenario/example_dialogs) and the greetings
 # arrive as authored markdown in the JSON and need no conversion.
+#
+# Callers reach this through proxy.notes_html.clean_creator_notes, which sends
+# blurbs that carry real layout (Chub's grid-and-panel documents) down a
+# structure-preserving path instead -- flattening one of those to markdown
+# destroys it. Shallow styled prose, which is what every other source authors,
+# still lands here.
 # ---------------------------------------------------------------------------
 
 
@@ -66,7 +72,11 @@ def _children(node: PageElement) -> list[PageElement]:
 
 
 def rich_to_md(node: PageElement) -> str:
-    if isinstance(node, Comment):
+    # PreformattedString covers the non-prose special strings -- comments, and
+    # the <!DOCTYPE>/declaration/CDATA nodes a full-document creator_notes blurb
+    # carries (a bare <!DOCTYPE html> otherwise leaks the literal text "html").
+    # Must precede the NavigableString branch, which it subclasses.
+    if isinstance(node, PreformattedString):
         return ""
     if isinstance(node, NavigableString):
         return str(node)
@@ -78,6 +88,13 @@ def rich_to_md(node: PageElement) -> str:
     def inner() -> str:
         return "".join(rich_to_md(child) for child in _children(node))
 
+    # Non-content elements: drop them whole. Their text children aren't prose --
+    # <style>/<script> hold raw CSS/JS that would otherwise leak in verbatim
+    # (Chub creator_notes wrap the whole blurb in a styled shell with a big
+    # <style> block SillyTavern can't use). The generic wrapper fallback below
+    # would spill that text, so intercept it here.
+    if tag in ("style", "script", "head", "noscript", "template"):
+        return ""
     if tag == "br":
         return "\n"
     if tag == "hr":

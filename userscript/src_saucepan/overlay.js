@@ -1,10 +1,11 @@
   // ---------------------------------------------------------------------------
   // Overlay widgets — a single fixed-position container (#saucepan-export-root)
   // holds, top to bottom: a transient status line, the purple Export button,
-  // and the connection pill. Mirrors the JanitorAI bridge. Hidden companions ARE
-  // detected (pill shows `hidden ✗`), but there's no CLEAR affordance: a hidden
-  // saucepan definition can't be captured (the definition API returns a decoy
-  // error and this bridge doesn't relay chat), so there's no cache to clear.
+  // and the connection pill (with an inline CLEAR affordance). Mirrors the
+  // JanitorAI bridge. Hidden companions ARE detected (pill shows `hidden ✗`) but
+  // still can't export their definition. CLEAR wipes the server's lorebook cache
+  // (the fetch-skipping speed cache), not any captured definition — saucepan has
+  // no chat-capture path. Exported PNGs are never affected.
   // ---------------------------------------------------------------------------
   const OVERLAY_STYLE = `
     #saucepan-export-root {
@@ -28,6 +29,11 @@
       border-radius: 999px; background: #222; color: #fff; border: 1px solid #444;
       opacity: 0.9;
     }
+    #saucepan-export-pill .saucepan-clear {
+      pointer-events: auto; cursor: pointer; color: #ff9d9d; font-weight: bold;
+      letter-spacing: 0.5px; border-left: 1px solid #555; padding-left: 8px;
+    }
+    #saucepan-export-pill .saucepan-clear:hover { color: #ff6b6b; }
   `;
 
   // ---------------------------------------------------------------------------
@@ -68,14 +74,44 @@
   };
 
   // ---------------------------------------------------------------------------
-  // Pill — connection indicator. No CLEAR affordance: nothing is captured
-  // server-side for saucepan, so there's no cache to clear.
+  // Pill — connection indicator + inline CLEAR affordance. CLEAR wipes the
+  // server's lorebook cache so the next export re-fetches lorebooks fresh;
+  // exported PNGs are untouched. flash() shows transient feedback that the
+  // scheduler's setStatus() won't overwrite until the hold expires.
   // ---------------------------------------------------------------------------
   const Pill = {
     _statusEl: null,
+    _holdUntil: 0,
 
     setStatus(text) {
-      if (this._statusEl) this._statusEl.textContent = text;
+      if (!this._statusEl || Date.now() < this._holdUntil) return;
+      this._statusEl.textContent = text;
+    },
+
+    flash(text, ms) {
+      if (!this._statusEl) return;
+      this._statusEl.textContent = text;
+      this._holdUntil = Date.now() + ms;
+    },
+
+    async clear() {
+      if (
+        !window.confirm(
+          "Clear the jai-proxy lorebook cache? The next export will re-fetch " +
+            "each lorebook fresh from saucepan. Exported PNGs are not affected."
+        )
+      ) {
+        return;
+      }
+      this.flash("⏳ clearing…", 4000);
+      try {
+        const result = await ServerClient.clearLorebooks();
+        log("cleared lorebook cache ->", result.removed);
+        this.flash(`✅ cleared ${result.removed}`, 3000);
+      } catch (err) {
+        warn("clear failed", err);
+        this.flash("⚠️ clear failed", 6000);
+      }
     },
   };
 
@@ -112,7 +148,12 @@
       pill.id = "saucepan-export-pill";
       const pillStatus = document.createElement("span");
       pillStatus.textContent = "⚪ saucepan";
-      pill.append(pillStatus);
+      const clear = document.createElement("span");
+      clear.className = "saucepan-clear";
+      clear.textContent = "CLEAR";
+      clear.title = "Clear the server's lorebook cache (next export re-fetches fresh)";
+      clear.addEventListener("click", () => Pill.clear());
+      pill.append(pillStatus, clear);
 
       root.append(status, btn, pill);
       document.body.appendChild(root);

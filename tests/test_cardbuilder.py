@@ -8,7 +8,7 @@ import pytest
 from PIL import Image
 
 from proxy import janitor_mapper, pngtools
-from proxy.cardbuilder import CardBuilder, PngWriter, _id_fragment, _safe_filename
+from proxy.cardbuilder import CardBuilder, PngWriter, _safe_filename, id_fragment
 from proxy.config import settings
 from proxy.macros import MacroSanitizer
 from proxy.models import CaptureRecord, CharacterBook, LoreEntry, ProfileFields
@@ -161,18 +161,33 @@ def test_safe_filename_strips_unsafe_characters():
 
 
 def test_id_fragment_takes_first_uuid_segment():
-    assert _id_fragment("bffaaf71-6c33-4e82-8cf2-3699f2ce4d92") == "bffaaf71"
+    assert id_fragment("bffaaf71-6c33-4e82-8cf2-3699f2ce4d92") == "bffaaf71"
     # Non-UUID / shorter ids pass through (capped at 8 chars).
-    assert _id_fragment("abc123") == "abc123"
-    assert _id_fragment("0123456789") == "01234567"
+    assert id_fragment("abc123") == "abc123"
+    assert id_fragment("0123456789") == "01234567"
     # Nothing usable -> empty, so the filename degrades to just the name.
-    assert _id_fragment(None) == ""
-    assert _id_fragment("   ") == ""
+    assert id_fragment(None) == ""
+    assert id_fragment("   ") == ""
 
 
 # ---------------------------------------------------------------------------
 # PngWriter -- round trip: write -> reopen -> read chunks back -> JSON equal.
 # ---------------------------------------------------------------------------
+
+
+def _decode(path: Path) -> dict:
+    """The card envelope embedded in a written PNG."""
+    with Image.open(path) as reopened:
+        return json.loads(base64.b64decode(reopened.text["ccv3"]))
+
+
+def _pop_gallery_id(envelope: dict) -> str:
+    """Remove the write-time gallery_id from a decoded envelope -- from the
+    `data` object and its V2 top-level mirror both -- and return it, so what's
+    left can be compared against the card as it was before the write."""
+    gid = envelope["data"]["extensions"].pop("gallery_id")
+    envelope["extensions"].pop("gallery_id")
+    return gid
 
 
 def test_png_writer_round_trips_card_json(tmp_path):
@@ -181,17 +196,20 @@ def test_png_writer_round_trips_card_json(tmp_path):
     greetings = janitor_mapper.greetings(akane)
     card, _ = CardBuilder().build(profile, greetings=greetings, capture=None, book=None)
 
-    writer = PngWriter(output_dir=tmp_path)
+    writer = PngWriter(output_dir=tmp_path, layout="flat")
     path = writer.write(card, _png_bytes(), card_id="bffaaf71-6c33-4e82-8cf2-3699f2ce4d92")
 
-    # Foldered by creator, name suffixed with the 8-char id fragment.
-    assert path.parent == tmp_path / "dezea"
+    # Flat by default (SillyTavern doesn't recurse), name suffixed with the
+    # 8-char id fragment that keeps it unique across creators.
+    assert path.parent == tmp_path
     assert path.name == "Akane_Kujo_bffaaf71.png"
     assert path.exists()
 
     reopened = Image.open(path)
     assert reopened.text["chara"] == reopened.text["ccv3"]
     decoded = json.loads(base64.b64decode(reopened.text["ccv3"]))
+    # The gallery_id is minted by the write itself; everything else round-trips.
+    assert len(_pop_gallery_id(decoded)) == 12
     assert decoded == card.to_dict()
     assert decoded["data"]["name"] == "Akane Kujo"
     assert decoded["data"]["first_mes"].startswith("**Scenario: Welcome to Kamii University!**")
@@ -243,14 +261,118 @@ def test_png_writer_downscales_oversized_avatar(tmp_path):
 
 
 def test_png_writer_creates_output_dir_if_missing(tmp_path):
-    out_dir = tmp_path / "nested" / "cards"
+    out_dir = tmp_path / "deep" / "cards"
     profile = ProfileFields(name="Nested")
     card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
 
-    path = PngWriter(output_dir=out_dir).write(card, _png_bytes())
+    path = PngWriter(output_dir=out_dir, layout="flat").write(card, _png_bytes())
     assert path.exists()
-    # No creator on the card -> foldered under "unknown_creator".
-    assert path.parent == out_dir / "unknown_creator"
+    assert path.parent == out_dir
+
+
+def test_png_writer_nested_layout_folders_by_creator(tmp_path):
+    profile = ProfileFields(name="Akane Kujo", creator="dezea")
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+
+    writer = PngWriter(output_dir=tmp_path, layout="nested")
+    path = writer.write(card, _png_bytes(), card_id="bffaaf71-6c33-4e82-8cf2-3699f2ce4d92")
+
+    assert path.parent == tmp_path / "dezea"
+    assert path.name == "Akane_Kujo_bffaaf71.png"
+
+
+def test_png_writer_nested_layout_falls_back_to_unknown_creator(tmp_path):
+    profile = ProfileFields(name="Orphan")
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+
+    path = PngWriter(output_dir=tmp_path, layout="nested").write(card, _png_bytes())
+    assert path.parent == tmp_path / "unknown_creator"
+
+
+def test_existing_and_find_match_across_both_layouts(tmp_path):
+    """The lookups a bulk export skips on -- `existing` and `find_by_id`, both
+    keyed on the id fragment -- glob recursively, so a folder holding cards
+    written under either layout (an archive migrated from nested to flat) still
+    resolves both."""
+    cid = "bffaaf71-6c33-4e82-8cf2-3699f2ce4d92"
+    profile = ProfileFields(name="Akane Kujo", creator="dezea")
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+    PngWriter(output_dir=tmp_path, layout="nested").write(card, _png_bytes(), card_id=cid)
+
+    flat = PngWriter(output_dir=tmp_path, layout="flat")
+    assert flat.existing([cid]) == {cid}
+    assert [p.name for p in flat.find_by_id(cid)] == ["Akane_Kujo_bffaaf71.png"]
+
+
+# ---------------------------------------------------------------------------
+# gallery_id -- stamped at write time (the one choke point every save path,
+# native and import, funnels through) so a card drops into its own gallery
+# folder in SillyTavern-CharacterLibrary. See proxy/gallery.py.
+# ---------------------------------------------------------------------------
+
+
+def test_png_writer_stamps_gallery_id_into_data_and_top_level_mirror(tmp_path):
+    profile = ProfileFields(name="Gallery", creator="dezea")
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+
+    decoded = _decode(PngWriter(output_dir=tmp_path).write(card, _png_bytes()))
+    gid = decoded["data"]["extensions"]["gallery_id"]
+
+    assert len(gid) == 12 and gid.isalnum()
+    assert decoded["extensions"]["gallery_id"] == gid  # V2 mirror stays in step
+
+
+def test_png_writer_gives_two_cards_different_gallery_ids(tmp_path):
+    writer = PngWriter(output_dir=tmp_path)
+    ids = set()
+    for name in ("One", "Two"):
+        card, _ = CardBuilder().build(ProfileFields(name=name), [], capture=None, book=None)
+        ids.add(_decode(writer.write(card, _png_bytes()))["data"]["extensions"]["gallery_id"])
+    assert len(ids) == 2
+
+
+def test_png_writer_keeps_a_gallery_id_the_payload_already_carries(tmp_path):
+    # The import path for a Chub card: its whole extensions block is passed
+    # through as a raw dict, gallery_id included. That id is the link to an
+    # existing gallery -- the write must not replace it.
+    data = {"name": "Tsuko", "extensions": {"gallery_id": "f1AMBFO5oPUr", "chub": {"id": 1}}}
+    payload = {"spec": "chara_card_v3", "spec_version": "3.0", "data": data}
+    payload.update(data)
+
+    path = PngWriter(output_dir=tmp_path).write_payload(
+        payload, _png_bytes(), creator="dezea", name="Tsuko"
+    )
+    assert _decode(path)["data"]["extensions"]["gallery_id"] == "f1AMBFO5oPUr"
+
+
+def test_png_writer_reuses_the_gallery_id_of_the_card_it_overwrites(tmp_path):
+    # Re-exporting a character overwrites its card; a fresh id there would
+    # orphan the gallery folder CharacterLibrary already keyed to the old one.
+    writer = PngWriter(output_dir=tmp_path)
+    profile = ProfileFields(name="Akane Kujo", creator="dezea")
+    cid = "bffaaf71-6c33-4e82-8cf2-3699f2ce4d92"
+
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+    first = writer.write(card, _png_bytes(), card_id=cid)
+    original = _decode(first)["data"]["extensions"]["gallery_id"]
+
+    card2, _ = CardBuilder().build(profile, greetings=["hi"], capture=None, book=None)
+    second = writer.write(card2, _png_bytes(), card_id=cid)
+
+    assert second == first  # same character -> same path, overwritten
+    assert _decode(second)["data"]["extensions"]["gallery_id"] == original
+
+
+def test_png_writer_mints_a_new_gallery_id_when_the_target_is_unreadable(tmp_path):
+    # A stray non-card PNG sitting at the target path must not break the write.
+    profile = ProfileFields(name="Clobber", creator="dezea")
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+    stray = tmp_path / "dezea" / "Clobber.png"
+    stray.parent.mkdir(parents=True)
+    stray.write_bytes(_png_bytes())
+
+    decoded = _decode(PngWriter(output_dir=tmp_path).write(card, _png_bytes()))
+    assert len(decoded["data"]["extensions"]["gallery_id"]) == 12
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +419,9 @@ def test_png_writer_card_survives_quantization(tmp_path):
     reopened = Image.open(path)
     assert reopened.format == "PNG"
     assert reopened.text["chara"] == reopened.text["ccv3"]
-    assert json.loads(base64.b64decode(reopened.text["ccv3"])) == card.to_dict()
+    decoded = json.loads(base64.b64decode(reopened.text["ccv3"]))
+    _pop_gallery_id(decoded)  # minted by the write, so not on the pre-write card
+    assert decoded == card.to_dict()
 
 
 def test_png_writer_compression_shrinks_output_file(tmp_path):

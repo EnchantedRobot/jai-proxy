@@ -76,6 +76,26 @@
       });
       return JSON.parse(text);
     },
+
+    // Ask which of these lorebook ids the server already has cached. Returns
+    // {cached, missing}: skip fetching `cached` (they ride into the build by id),
+    // fetch only `missing` from saucepan.
+    async lorebooksExisting(source, ids) {
+      const { text } = await this._request({
+        method: "POST",
+        path: "/lorebooks/existing",
+        body: { source, ids },
+      });
+      return JSON.parse(text);
+    },
+
+    // Wipe the server's lorebook cache (the CLEAR affordance). Exported PNGs are
+    // untouched -- this only drops the fetch-skipping cache so the next export
+    // re-pulls fresh lorebooks.
+    async clearLorebooks() {
+      const { text } = await this._request({ method: "POST", path: "/clear-lorebooks" });
+      return JSON.parse(text);
+    },
   };
 
   // ---------------------------------------------------------------------------
@@ -180,19 +200,26 @@
       return !!inner && inner.open_definition === false;
     },
 
-    // The full raw export for a companion id: {id, definition, companion,
-    // lorebooks}. Exactly the shape POST /build-saucepan expects.
+    // The raw export for a companion id: {id, definition, companion, lorebooks,
+    // cached_lorebook_ids}. Exactly the shape POST /build-saucepan expects.
     //
-    // onProgress(p) is called as fetching advances, so the overlay can show a
-    // live count instead of a static "Fetching…". It fires with one of:
-    //   {phase:"definition"} | {phase:"companion"} | {phase:"lore", done, total}
+    // opts.lorebookIds — the lorebook ids to actually fetch (the cache MISSES;
+    //   defaults to every lorebook on the page when omitted). Fetching a
+    //   lorebook is the slow part of an export — one request per chapter — so
+    //   skipping the ones the server already has is the whole speed-up.
+    // opts.cachedLorebookIds — ids the server already has; stamped onto the
+    //   export as `cached_lorebook_ids` so the build pulls them from cache.
+    // opts.onProgress(p) — called as fetching advances so the overlay can show a
+    //   live count. Fires with one of:
+    //     {phase:"definition"} | {phase:"companion"} | {phase:"lore", done, total}
     // Chapters are still fetched one at a time (a steady serial trickle, the
     // same request pattern the page itself makes) rather than in a burst, to
-    // stay well under any saucepan rate limit — the count just makes the wait
-    // legible, it isn't a speed-up.
-    async fetchExport(id, onProgress) {
-      const report = typeof onProgress === "function" ? onProgress : () => {};
-      const out = { id };
+    // stay well under any saucepan rate limit.
+    async fetchExport(id, opts = {}) {
+      const report = typeof opts.onProgress === "function" ? opts.onProgress : () => {};
+      const fetchIds = opts.lorebookIds || this.lorebookIds();
+      const cachedIds = opts.cachedLorebookIds || [];
+      const out = { id, cached_lorebook_ids: cachedIds };
 
       report({ phase: "definition" });
       out.definition = await apiGet(`/api/v1/companion/definition?companion_id=${id}`);
@@ -200,12 +227,12 @@
       report({ phase: "companion" });
       out.companion = await this.fetchCompanion(id);
 
-      // Read every lorebook's chapter LIST first (one cheap call each). These
-      // carry the chapter counts, so summing them gives a real denominator for
-      // the progress count before any chapter body is fetched.
+      // Read each MISSING lorebook's chapter LIST first (one cheap call each).
+      // These carry the chapter counts, so summing them gives a real denominator
+      // for the progress count before any chapter body is fetched.
       const books = [];
       let total = 0;
-      for (const lid of this.lorebookIds()) {
+      for (const lid of fetchIds) {
         const list = await apiGet(`/api/v2/lorebooks/${lid}/chapters`);
         const chapters = (list && list.chapters) || [];
         books.push({ id: lid, list, chapters });
@@ -224,7 +251,10 @@
         }
         out.lorebooks.push({ id: book.id, list: book.list, chapters });
       }
-      log(`fetched export for ${id} — lorebooks: ${out.lorebooks.length}`);
+      log(
+        `fetched export for ${id} — lorebooks fetched: ${out.lorebooks.length}, ` +
+          `from cache: ${cachedIds.length}`
+      );
       return out;
     },
   };
@@ -249,20 +279,48 @@
         return;
       }
 
-      const export_ = await SaucepanClient.fetchExport(id, (p) => {
-        if (p.phase === "lore") {
-          ExportStatus.show(`Fetching lore ${p.done} / ${p.total}…`);
-        } else if (p.phase === "companion") {
-          ExportStatus.show("Fetching companion…");
-        } else {
-          ExportStatus.show("Fetching…");
+      // Ask the server which of this companion's lorebooks it already has cached,
+      // so we fetch only the misses (a lorebook is one saucepan request PER
+      // chapter — the slow part — and creators reuse "standard" lorebooks across
+      // many characters). A failed/unreachable check just fetches everything.
+      const allIds = SaucepanClient.lorebookIds();
+      let cached = [];
+      let missing = allIds;
+      if (allIds.length) {
+        try {
+          const split = await ServerClient.lorebooksExisting("saucepan", allIds);
+          cached = split.cached || [];
+          missing = split.missing || allIds;
+        } catch (err) {
+          warn("lorebook cache check failed; fetching all", err);
         }
+      }
+
+      const export_ = await SaucepanClient.fetchExport(id, {
+        lorebookIds: missing,
+        cachedLorebookIds: cached,
+        onProgress: (p) => {
+          if (p.phase === "lore") {
+            ExportStatus.show(`Fetching lore ${p.done} / ${p.total}…`);
+          } else if (p.phase === "companion") {
+            const note = cached.length ? ` (${cached.length} cached)` : "";
+            ExportStatus.show(`Fetching companion${note}…`);
+          } else {
+            ExportStatus.show("Fetching…");
+          }
+        },
       });
 
       ExportStatus.show("Building on server…");
       const res = await ServerClient.build({ character: export_ });
       const warnings = res.warnings || [];
-      if (res.ok) {
+      if (res.ok && res.duplicate) {
+        // Already on disk -- the server wrote nothing. Say so rather than "✓
+        // Saved", which would claim an export that didn't happen.
+        log("already saved:", res.path);
+        ExportStatus.show("• Already saved");
+        holdMs = 4000;
+      } else if (res.ok) {
         log("built:", res.path, "warnings:", warnings);
         if (warnings.length) {
           const n = warnings.length;
@@ -291,10 +349,11 @@
   // ---------------------------------------------------------------------------
   // Overlay widgets — a single fixed-position container (#saucepan-export-root)
   // holds, top to bottom: a transient status line, the purple Export button,
-  // and the connection pill. Mirrors the JanitorAI bridge. Hidden companions ARE
-  // detected (pill shows `hidden ✗`), but there's no CLEAR affordance: a hidden
-  // saucepan definition can't be captured (the definition API returns a decoy
-  // error and this bridge doesn't relay chat), so there's no cache to clear.
+  // and the connection pill (with an inline CLEAR affordance). Mirrors the
+  // JanitorAI bridge. Hidden companions ARE detected (pill shows `hidden ✗`) but
+  // still can't export their definition. CLEAR wipes the server's lorebook cache
+  // (the fetch-skipping speed cache), not any captured definition — saucepan has
+  // no chat-capture path. Exported PNGs are never affected.
   // ---------------------------------------------------------------------------
   const OVERLAY_STYLE = `
     #saucepan-export-root {
@@ -318,6 +377,11 @@
       border-radius: 999px; background: #222; color: #fff; border: 1px solid #444;
       opacity: 0.9;
     }
+    #saucepan-export-pill .saucepan-clear {
+      pointer-events: auto; cursor: pointer; color: #ff9d9d; font-weight: bold;
+      letter-spacing: 0.5px; border-left: 1px solid #555; padding-left: 8px;
+    }
+    #saucepan-export-pill .saucepan-clear:hover { color: #ff6b6b; }
   `;
 
   // ---------------------------------------------------------------------------
@@ -358,14 +422,44 @@
   };
 
   // ---------------------------------------------------------------------------
-  // Pill — connection indicator. No CLEAR affordance: nothing is captured
-  // server-side for saucepan, so there's no cache to clear.
+  // Pill — connection indicator + inline CLEAR affordance. CLEAR wipes the
+  // server's lorebook cache so the next export re-fetches lorebooks fresh;
+  // exported PNGs are untouched. flash() shows transient feedback that the
+  // scheduler's setStatus() won't overwrite until the hold expires.
   // ---------------------------------------------------------------------------
   const Pill = {
     _statusEl: null,
+    _holdUntil: 0,
 
     setStatus(text) {
-      if (this._statusEl) this._statusEl.textContent = text;
+      if (!this._statusEl || Date.now() < this._holdUntil) return;
+      this._statusEl.textContent = text;
+    },
+
+    flash(text, ms) {
+      if (!this._statusEl) return;
+      this._statusEl.textContent = text;
+      this._holdUntil = Date.now() + ms;
+    },
+
+    async clear() {
+      if (
+        !window.confirm(
+          "Clear the jai-proxy lorebook cache? The next export will re-fetch " +
+            "each lorebook fresh from saucepan. Exported PNGs are not affected."
+        )
+      ) {
+        return;
+      }
+      this.flash("⏳ clearing…", 4000);
+      try {
+        const result = await ServerClient.clearLorebooks();
+        log("cleared lorebook cache ->", result.removed);
+        this.flash(`✅ cleared ${result.removed}`, 3000);
+      } catch (err) {
+        warn("clear failed", err);
+        this.flash("⚠️ clear failed", 6000);
+      }
     },
   };
 
@@ -402,7 +496,12 @@
       pill.id = "saucepan-export-pill";
       const pillStatus = document.createElement("span");
       pillStatus.textContent = "⚪ saucepan";
-      pill.append(pillStatus);
+      const clear = document.createElement("span");
+      clear.className = "saucepan-clear";
+      clear.textContent = "CLEAR";
+      clear.title = "Clear the server's lorebook cache (next export re-fetches fresh)";
+      clear.addEventListener("click", () => Pill.clear());
+      pill.append(pillStatus, clear);
 
       root.append(status, btn, pill);
       document.body.appendChild(root);

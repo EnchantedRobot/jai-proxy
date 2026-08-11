@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+import logging
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -8,6 +9,7 @@ from PIL import Image
 
 import proxy.server as server_module
 from proxy.config import settings
+from proxy.dashboard import Dashboard
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -63,6 +65,9 @@ def make_client(fake: FakeMLXClient, tmp_path=None) -> TestClient:
     server_module.capture_store = server_module.CaptureStore(captures_dir=tmp_path)
     server_module.png_writer = server_module.PngWriter(output_dir=tmp_path)
     server_module.avatar_fetcher = FakeAvatarFetcher()
+    server_module.lorebook_cache = server_module.LorebookCache(
+        cache_dir=(tmp_path / ".lorecache") if tmp_path else None
+    )
     return TestClient(server_module.app)
 
 
@@ -206,9 +211,9 @@ def test_build_exports_open_card_png(tmp_path):
     assert body["fields_present"]["alternate_greetings"] is True
 
     path = Path(body["path"])
-    # Foldered by creator, name suffixed with the card-id fragment.
+    # Flat in the cards folder, name suffixed with the card-id fragment.
     assert path.exists()
-    assert path.parent == tmp_path / "dezea"
+    assert path.parent == tmp_path
     assert path.name == "Akane_Kujo_abc123.png"
 
     data = _decode(path)
@@ -230,6 +235,74 @@ def test_build_exports_open_card_png(tmp_path):
     # embedded as data.name.
     assert jai["pageName"] == "The Girl in Every Yearbook | Akane Kujo"
     assert "linkedAt" in jai
+
+    # extensions.datacat rides alongside jai -- same provenance, datacat's own
+    # shape (sourceKind "janitor", creatorId from the JSON's creator_id) --
+    # so the card is CharacterLibrary/datacat-linkable straight off the wire.
+    datacat = data["extensions"]["datacat"]
+    assert datacat["id"] == "abc123"
+    assert datacat["sourceKind"] == "janitor"
+    assert datacat["creatorId"] == "866c0877-ea3d-4bc6-a906-13c5d9601f9d"
+    assert datacat["creatorName"] == "dezea"
+    assert datacat["pageName"] == jai["pageName"]
+    assert datacat["linkedAt"] == jai["linkedAt"]
+
+    # A served card is CharacterLibrary-ready: it leaves with its own gallery id.
+    gallery_id = data["extensions"]["gallery_id"]
+    assert len(gallery_id) == 12 and gallery_id.isalnum()
+
+
+def test_rebuilding_a_saved_card_skips_the_write(tmp_path, caplog):
+    client = make_client(FakeMLXClient(), tmp_path)
+    payload = {
+        "character": {"name": "Akane Kujo", "id": "abc123"},
+        "character_json": _character("open_akane_kujo"),
+        "avatar_url": "https://ella.janitorai.com/bot-avatars/example.webp",
+    }
+
+    dashboard = Dashboard(title="jai-proxy", address="http://x")
+    server_module.DASHBOARD = dashboard
+    try:
+        with caplog.at_level(logging.INFO, logger="jai_proxy.server"):
+            first = client.post("/build", json=payload).json()
+            path = Path(first["path"])
+            stamped = path.read_bytes()
+            second = client.post("/build", json=payload).json()
+    finally:
+        server_module.DASHBOARD = None
+
+    assert first["duplicate"] is False
+    # Skipped, not overwritten: same path reported back, file untouched. Only by
+    # deleting it does a re-export happen.
+    assert second == {**first, "duplicate": True, "warnings": [], "fields_present": {}}
+    assert path.read_bytes() == stamped
+
+    saved, dup = list(dashboard.feed.rows)
+    assert (saved["duplicate"], dup["duplicate"]) == (False, True)
+    assert dup["filename"] == "Akane_Kujo_abc123.png"
+    assert (dashboard.feed.succeeded, dashboard.feed.duplicates) == (1, 1)
+
+    # The plain-log path (no TTY) says the same thing, and names the file so a
+    # card can be found on disk straight from the log line.
+    lines = [r.getMessage() for r in caplog.records if "card:" in r.getMessage()]
+    assert lines == [
+        "saved janitor card: Akane Kujo by dezea (Akane_Kujo_abc123.png)",
+        "already have janitor card: Akane Kujo by dezea (Akane_Kujo_abc123.png)",
+    ]
+
+
+def test_rebuilding_after_deleting_the_card_writes_it_again(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    payload = {
+        "character": {"name": "Akane Kujo", "id": "abc123"},
+        "character_json": _character("open_akane_kujo"),
+    }
+    path = Path(client.post("/build", json=payload).json()["path"])
+    path.unlink()
+
+    again = client.post("/build", json=payload).json()
+    assert again["duplicate"] is False
+    assert Path(again["path"]).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -254,8 +327,8 @@ def test_build_saucepan_exports_open_card_png(tmp_path):
     assert body["fields_present"]["character_book"] is True
 
     path = Path(body["path"])
-    # Foldered by creator handle, name suffixed with the companion-id fragment.
-    assert path.parent == tmp_path / "desslok"
+    # Flat in the cards folder, name suffixed with the companion-id fragment.
+    assert path.parent == tmp_path
     assert path.name == "Eve_04a0c1ac.png"
 
     data = _decode(path)
@@ -277,6 +350,14 @@ def test_build_saucepan_exports_open_card_png(tmp_path):
     assert jai["source_url"] == "https://saucepan.ai/companion/04a0c1ac-187b-4aa0-8f5b-885533be748d"
     assert jai["creatorName"] == "desslok"
     assert jai["pageName"] == "Eve | I Did Nothing Wrong"
+
+    datacat = data["extensions"]["datacat"]
+    assert datacat["id"] == jai["id"]
+    assert datacat["sourceKind"] == "saucepan"
+    assert datacat["creatorId"] == "cba8693b-3a04-42fe-883d-27df186ca711"
+    assert datacat["creatorName"] == "desslok"
+    assert datacat["pageName"] == jai["pageName"]
+    assert datacat["linkedAt"] == jai["linkedAt"]
 
 
 def test_build_saucepan_response_formatting_lands_in_scenario(tmp_path):
@@ -313,6 +394,93 @@ def test_build_saucepan_hidden_card_warns_but_exports_public_fields(tmp_path):
     assert data["creator"] == "GreatN"
     assert data["extensions"]["jai"]["sourceKind"] == "saucepan_core"
     assert data["mes_example"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Lorebook cache -- /lorebooks/existing + /clear-lorebooks + the cache-aware
+# /build-saucepan path (fetch only the misses, reference cached lorebooks by id).
+# ---------------------------------------------------------------------------
+
+
+def test_lorebooks_existing_splits_cached_and_missing(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    eve = _saucepan("04a0c1ac")
+    lb_ids = [b["id"] for b in eve["lorebooks"]]
+
+    # Nothing cached yet: every id is missing.
+    resp = client.post("/lorebooks/existing", json={"source": "saucepan", "ids": lb_ids})
+    assert resp.status_code == 200
+    assert resp.json() == {"cached": [], "missing": lb_ids}
+
+    # A full build warms the cache write-through; now both come back cached.
+    assert client.post("/build-saucepan", json={"character": eve}).json()["ok"] is True
+    resp = client.post(
+        "/lorebooks/existing",
+        json={"source": "saucepan", "ids": lb_ids + ["never-seen"]},
+    )
+    assert resp.json() == {"cached": lb_ids, "missing": ["never-seen"]}
+
+
+def test_lorebooks_existing_namespaces_by_source(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    eve = _saucepan("04a0c1ac")
+    lb_ids = [b["id"] for b in eve["lorebooks"]]
+    client.post("/build-saucepan", json={"character": eve})
+
+    # The same ids under a different source are a miss -- id spaces don't cross.
+    resp = client.post("/lorebooks/existing", json={"source": "janitor", "ids": lb_ids})
+    assert resp.json() == {"cached": [], "missing": lb_ids}
+
+
+def test_build_saucepan_reuses_cached_lorebooks_by_id(tmp_path):
+    # The heart of the cache: after one build warms the lorebooks, a second build
+    # that fetches NO lorebooks but references them by `cached_lorebook_ids` must
+    # reproduce the identical character_book -- proving a cache-loaded lorebook is
+    # indistinguishable from a freshly fetched one.
+    client = make_client(FakeMLXClient(), tmp_path)
+    eve = _saucepan("04a0c1ac")
+    lb_ids = [b["id"] for b in eve["lorebooks"]]
+
+    first = client.post("/build-saucepan", json={"character": eve}).json()
+    first_book = _decode(first["path"])["character_book"]
+    assert len(first_book["entries"]) == 19
+
+    eve_cached = {k: v for k, v in eve.items() if k != "lorebooks"}
+    eve_cached["lorebooks"] = []
+    eve_cached["cached_lorebook_ids"] = lb_ids
+    second = client.post("/build-saucepan", json={"character": eve_cached}).json()
+
+    assert second["ok"] is True
+    assert _decode(second["path"])["character_book"] == first_book
+
+
+def test_build_saucepan_skips_uncached_referenced_lorebook(tmp_path):
+    # A referenced-but-uncached id is skipped (graceful degrade), not an error --
+    # the safety net if the cache was cleared between the /existing check and the
+    # build.
+    client = make_client(FakeMLXClient(), tmp_path)
+    eve = _saucepan("04a0c1ac")
+    stripped = {k: v for k, v in eve.items() if k != "lorebooks"}
+    stripped["lorebooks"] = []
+    stripped["cached_lorebook_ids"] = ["totally-unknown-id"]
+
+    body = client.post("/build-saucepan", json={"character": stripped}).json()
+    assert body["ok"] is True
+    assert body["fields_present"]["character_book"] is False
+
+
+def test_clear_lorebooks_wipes_cache(tmp_path):
+    client = make_client(FakeMLXClient(), tmp_path)
+    eve = _saucepan("04a0c1ac")
+    lb_ids = [b["id"] for b in eve["lorebooks"]]
+    client.post("/build-saucepan", json={"character": eve})
+
+    assert client.get("/health").json()["lorebooks"] == 2
+    assert client.post("/clear-lorebooks").json() == {"ok": True, "removed": 2}
+    assert client.get("/health").json()["lorebooks"] == 0
+
+    resp = client.post("/lorebooks/existing", json={"source": "saucepan", "ids": lb_ids})
+    assert resp.json() == {"cached": [], "missing": lb_ids}
 
 
 # ---------------------------------------------------------------------------
@@ -401,8 +569,7 @@ def test_build_names_card_from_chat_name_not_title_blurb(tmp_path):
 
     assert resp.status_code == 200
     path = Path(resp.json()["path"])
-    # chat_name drives the filename stem; creator folders it; id suffixes it.
-    assert path.parent.name == "somecreator"
+    # chat_name drives the filename stem; the id fragment suffixes it.
     assert path.name == "Chatname_deadbeef.png"
 
     data = _decode(path)
