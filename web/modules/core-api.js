@@ -14,28 +14,6 @@ export function getSTContext() {
     return window.getSTContext?.() || null;
 }
 
-export function resolveProxyForProfile(profile) {
-    return window.resolveProxyForProfile?.(profile);
-}
-
-// Shared LLM client (see library.js "SHARED LLM CLIENT"). Each AI module passes its own
-// resolved profile + the per-feature options; the body/proxy/parse logic is centralized.
-export function getLlmSettings() {
-    return window.getLlmSettings?.() ?? Promise.resolve({ profiles: [], activeSource: '', activeModel: '', activePreset: null, selectedProfileId: '', hasProfiles: false, error: true });
-}
-
-export function callLLM(messages, opts) {
-    return window.callLLM?.(messages, opts);
-}
-
-export function callCustomLLM(messages, opts) {
-    return window.callCustomLLM?.(messages, opts);
-}
-
-export function extractLlmContent(data, opts) {
-    return window.extractLlmContent?.(data, opts);
-}
-
 // ========================================
 // STATE ACCESS
 // ========================================
@@ -1129,15 +1107,6 @@ export function getExtensionDeleteValue() {
 }
 
 /**
- * Get the linked world info name for a character
- * @param {string} avatar - Character avatar filename
- * @returns {string|null} The world info name or null
- */
-export function getCharacterWorldName(avatar) {
-    return window.getCharacterWorldName?.(avatar) || null;
-}
-
-/**
  * Fetch world info data from ST
  * @param {string} worldName - The world name to fetch
  * @returns {Promise<Object|null>} World info data or null
@@ -1162,55 +1131,6 @@ export function saveWorldInfoData(worldName, data) {
  */
 export function listWorldInfoFiles() {
     return window.listWorldInfoFiles?.() || Promise.resolve([]);
-}
-
-/**
- * Create a new (empty) world info file.
- * @param {string} worldName
- * @returns {Promise<boolean>} Success
- */
-export function createWorldInfo(worldName) {
-    return window.createWorldInfo?.(worldName) || Promise.resolve(false);
-}
-
-/**
- * Delete a world info file.
- * @param {string} worldName
- * @returns {Promise<boolean>} Success
- */
-export function deleteWorldInfo(worldName) {
-    return window.deleteWorldInfo?.(worldName) || Promise.resolve(false);
-}
-
-/**
- * Rename a world info file (copy-new + delete-old).
- * @param {string} oldName
- * @param {string} newName
- * @returns {Promise<boolean>} Success
- */
-export function renameWorldInfo(oldName, newName) {
-    return window.renameWorldInfo?.(oldName, newName) || Promise.resolve(false);
-}
-
-/**
- * Import a native ST world JSON object under a destination name.
- * @param {string} worldName
- * @param {Object} worldData - must contain an `entries` object
- * @returns {Promise<boolean>} Success
- */
-export function importWorldInfoData(worldName, worldData) {
-    return window.importWorldInfoData?.(worldName, worldData) || Promise.resolve(false);
-}
-
-/**
- * Merge remote V2 lorebook entries into the character's linked /worlds file.
- * Matched entries get updated; new entries are added; user entries are preserved.
- * @param {string} avatar - Character avatar filename
- * @param {Object} remoteBook - Remote V2 character_book object
- * @returns {Promise<boolean>} Success
- */
-export function mergeRemoteLorebookIntoWorldFile(avatar, remoteBook) {
-    return window.mergeRemoteLorebookIntoWorldFile?.(avatar, remoteBook) || Promise.resolve(false);
 }
 
 /**
@@ -1256,54 +1176,6 @@ export function getCharAdditionalLorebooks(...args) {
  */
 export function setCharAdditionalLorebooks(...args) {
     return window.setCharAdditionalLorebooks?.(...args) || Promise.resolve(false);
-}
-
-/**
- * Re-point charLore references after a world rename.
- * @param {string} oldName
- * @param {string} newName
- * @returns {Promise<number|null>} Touched entries, or null when the bridge is unreachable
- */
-export function charLoreRenameWorld(...args) {
-    return window.charLoreRenameWorld?.(...args) ?? Promise.resolve(null);
-}
-
-/**
- * Drop charLore references to a deleted world.
- * @param {string} name
- * @returns {Promise<number|null>} Touched entries, or null when the bridge is unreachable
- */
-export function charLoreRemoveWorld(...args) {
-    return window.charLoreRemoveWorld?.(...args) ?? Promise.resolve(null);
-}
-
-/**
- * Set/clear a single-character chat's bound lorebook (chat_metadata.world_info).
- * Owned by the chats module; proxied here for the Lorebook Manager.
- * @param {Object} char - { avatar, name }
- * @param {string} chatFile - chat file name
- * @param {string|null} worldName - world to bind, or null/'' to clear
- * @returns {Promise<boolean>} Success
- */
-export function setChatBoundWorld(char, chatFile, worldName) {
-    return window.chatsModule?.setChatBoundWorld?.(char, chatFile, worldName) || Promise.resolve(false);
-}
-
-/**
- * List a character's chats WITH chat_metadata (each entry exposes its bound lorebook).
- * @param {Object} char - { avatar, name }
- * @returns {Promise<Array>} chat entries
- */
-export function listCharacterChatsWithMeta(char) {
-    return window.chatsModule?.listCharacterChatsWithMeta?.(char) || Promise.resolve([]);
-}
-
-/**
- * List ALL single-character chats (across every character) that bind a lorebook.
- * @returns {Promise<Array<{avatar, charName, char, file_name, world}>>}
- */
-export function listAllChatsWithMeta() {
-    return window.chatsModule?.listAllChatsWithMeta?.() || Promise.resolve([]);
 }
 
 // ========================================
@@ -1553,25 +1425,14 @@ export default {
     applyCardFieldUpdates,
     writeCardFields,
     getExtensionDeleteValue,
-    getCharacterWorldName,
     getWorldInfoData,
     saveWorldInfoData,
     listWorldInfoFiles,
-    createWorldInfo,
-    deleteWorldInfo,
-    renameWorldInfo,
-    importWorldInfoData,
-    mergeRemoteLorebookIntoWorldFile,
     canEditCharLore,
     getAllCharLore,
     charLoreKey,
     getCharAdditionalLorebooks,
     setCharAdditionalLorebooks,
-    charLoreRenameWorld,
-    charLoreRemoveWorld,
-    setChatBoundWorld,
-    listCharacterChatsWithMeta,
-    listAllChatsWithMeta,
 
     // Provider Registry (generic)
     getAllProviders,
@@ -1597,9 +1458,4 @@ export default {
     // Host window / Embedded mode
     getHostWindow,
     getSTContext,
-    resolveProxyForProfile,
-    getLlmSettings,
-    callLLM,
-    callCustomLLM,
-    extractLlmContent,
 };

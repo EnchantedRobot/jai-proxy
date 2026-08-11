@@ -409,12 +409,6 @@
                             </details>
                         </div>
 
-                        <div class="lorebook-box" id="modalLinkedLorebookBox" style="display:none; margin-top: 16px;">
-                            <details class="detail-collapsible">
-                                <summary><i class="fa-solid fa-book-atlas"></i> Linked Lorebook: <span id="linkedLorebookName"></span> (<span id="linkedLorebookEntryCount">0</span> entries)</summary>
-                                <div id="modalLinkedLorebookContent" class="scrolling-text detail-collapsible-body"></div>
-                            </details>
-                        </div>
                     </div>
 
                     <div class="tab-pane" id="pane-edit">
@@ -543,36 +537,6 @@
                             </div>
                         </div>
 
-                        <div class="edit-section linked-lorebook-section" id="linkedLorebookEditRow">
-                            <h4 class="section-header">
-                                <i class="fa-solid fa-book-atlas"></i> Linked Lorebook
-                            </h4>
-                            <div class="linked-lorebook-card">
-                                <div class="linked-lorebook-bar">
-                                    <div class="linked-lorebook-tile" id="linkedLorebookTile"><i class="fa-solid fa-book-bookmark"></i></div>
-                                    <div class="linked-lorebook-info">
-                                        <span class="linked-lorebook-name" id="linkedLorebookEditName" title=""></span>
-                                        <span class="linked-lorebook-meta" id="linkedLorebookEditMeta"></span>
-                                    </div>
-                                    <div class="linked-lorebook-actions">
-                                        <button type="button" id="linkLorebookBtn" class="action-btn secondary small" title="Link an external lorebook to this character">
-                                            <i class="fa-solid fa-link"></i> <span id="linkLorebookBtnLabel">Link</span>
-                                        </button>
-                                        <button type="button" id="unlinkLorebookBtn" class="action-btn danger small" title="Unlink this lorebook from the character">
-                                            <i class="fa-solid fa-link-slash"></i> Unlink
-                                        </button>
-                                    </div>
-                                </div>
-                                <div class="linked-lorebook-aux" id="auxLorebooksEditRow">
-                                    <span class="linked-lorebook-aux-label" title="Extra lorebooks SillyTavern activates alongside the primary one. Stored in SillyTavern's settings, not on the card."><i class="fa-solid fa-book-medical"></i> Additional</span>
-                                    <div class="linked-lorebook-aux-pills" id="auxLorebooksPills"></div>
-                                    <button type="button" id="addAuxLorebookBtn" class="action-btn secondary small" title="Add an additional lorebook for this character">
-                                        <i class="fa-solid fa-plus"></i> Add
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-
                         <div class="edit-section lorebook-edit-section">
                             <h4 class="section-header">
                                 <i class="fa-solid fa-book"></i> Embedded Lorebook
@@ -675,24 +639,6 @@
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Provider Link Modal -->
-    <div id="linkLorebookModal" class="cl-modal cl-modal-drawer cl-drawer-partial">
-        <div class="cl-modal-content lorebook-link-modal-content">
-            <div class="cl-modal-header">
-                <h3><i class="fa-solid fa-book-atlas cl-modal-header-icon"></i> Link Lorebook</h3>
-                <button class="cl-modal-close" id="linkLorebookCloseBtn" title="Close"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <div class="cl-modal-body lorebook-link-body">
-                <div class="lorebook-link-subhead" id="linkLorebookSubhead"></div>
-                <div class="lorebook-link-search-wrap">
-                    <i class="fa-solid fa-magnifying-glass"></i>
-                    <input type="search" id="linkLorebookSearch" class="cl-input lorebook-link-search" placeholder="Search lorebooks..." autocomplete="off">
-                </div>
-                <div class="lorebook-link-list" id="linkLorebookList"></div>
             </div>
         </div>
     </div>
@@ -1654,10 +1600,8 @@ https://jannyai.com/characters/uuid_slug
                             <p>The <strong>⋮ More Options</strong> button in the topbar contains additional tools:</p>
                             <ul>
                                 <li><strong>Import Characters</strong>: Import from URL or local PNG file</li>
-                                <li><strong>Create Character</strong>: AI-assisted character creation (see Character Creator section)</li>
                                 <li><strong>Find Duplicates</strong>: Scan your library for potential duplicate characters</li>
                                 <li><strong>Auto-Link Characters</strong>: Bulk-link unlinked characters to providers</li>
-                                <li><strong>Card Recommender</strong>: AI-powered character recommendations</li>
                                 <li><strong>Gallery Sync Status</strong>: Check whether all characters have a gallery_id assigned</li>
                                 <li><strong>Help & Tips</strong>: This modal</li>
                                 <li><strong>Settings</strong>: Configure gallery folders, media localization, and provider settings</li>
@@ -2321,8 +2265,9 @@ https://jannyai.com/characters/uuid_slug
                                 </div>
                             </div>
                         </details>
+                    </div>
 
-                        <!-- Media Section -->
+                    <!-- Media Section -->
                     <div class="settings-panel" data-section="media">
                         <div class="settings-panel-header">
                             <h4><i class="fa-solid fa-photo-film"></i> Media Localization</h4>

@@ -784,288 +784,6 @@ async function fetchStSettings() {
     }
 }
 
-// Mirrors ST's name-to-url proxy lookup; "None" forced empty to stop shared-entry leak.
-async function resolveProxyForProfile(profile) {
-    try {
-        const st = await fetchStSettings();
-        const settings = st?.settings;
-        if (!settings) return { url: '', password: '' };
-        const oai = settings.oai_settings || {};
-        const proxies = settings.proxies || oai.proxies || [];
-
-        if (profile) {
-            if (!profile.proxy || profile.proxy === 'None') return { url: '', password: '' };
-            const entry = proxies.find(p => p.name === profile.proxy);
-            return { url: entry?.url || '', password: entry?.password || '' };
-        }
-        return { url: oai.reverse_proxy || '', password: oai.proxy_password || '' };
-    } catch {
-        return { url: '', password: '' };
-    }
-}
-
-// Anthropic-format responses use content blocks: [{type, text}, ...] instead of a string.
-function flattenContentBlocks(blocks) {
-    if (!Array.isArray(blocks)) return '';
-    return blocks
-        .filter(b => b?.type === 'text' && typeof b?.text === 'string')
-        .map(b => b.text)
-        .join('');
-}
-
-// ========================================
-// SHARED LLM CLIENT
-// DRY core for the AI features (character-creator / recommender / css-assistant /
-// lorebook-manager). Each module keeps its own profile-select DOM; the request body,
-// proxy, endpoint loop and response parsing live here so the bodies can't drift. The
-// per-module differences (temperature, token cap, non-JSON handling, truncation check,
-// raw capture) are options.
-// ========================================
-
-const LLM_GENERATE_ENDPOINTS = ['/backends/chat-completions/generate', '/openai/generate'];
-
-// chat-completion source -> the preset key holding its model name (profile-less fallback).
-const SOURCE_MODEL_KEY = {
-    openai: 'openai_model', claude: 'claude_model', openrouter: 'openrouter_model',
-    ai21: 'ai21_model', makersuite: 'google_model', vertexai: 'vertexai_model',
-    mistralai: 'mistralai_model', custom: 'custom_model', cohere: 'cohere_model',
-    perplexity: 'perplexity_model', groq: 'groq_model', siliconflow: 'siliconflow_model',
-    electronhub: 'electronhub_model', chutes: 'chutes_model', nanogpt: 'nanogpt_model',
-    deepseek: 'deepseek_model', aimlapi: 'aimlapi_model', xai: 'xai_model',
-    pollinations: 'pollinations_model', cometapi: 'cometapi_model', moonshot: 'moonshot_model',
-    fireworks: 'fireworks_model', azure_openai: 'azure_openai_model', zai: 'zai_model',
-};
-
-// Resolve a CC preset's model name from its source-specific key (openai_model, claude_model, ...).
-function resolvePresetModel(preset) {
-    const key = SOURCE_MODEL_KEY[preset?.chat_completion_source];
-    return key ? (preset?.[key] || '') : '';
-}
-
-function isLlmAuthError(message) {
-    const m = String(message || '').toLowerCase();
-    return m.includes('unauthorized') || m.includes('401') || m.includes('invalid api key') || m.includes('authentication');
-}
-
-// lone UTF-16 halves crash Python-strict encoders (LiteLLM and friends); strip before send.
-function stripLlmSurrogates(str) {
-    if (!str) return str;
-    return String(str)
-        .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, '')
-        .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
-}
-
-// Universal CC-response parser. Shapes tried in priority order; null-content short-circuits.
-function extractLlmContent(data, { checkFinishReason = false } = {}) {
-    if (data?.error) {
-        const msg = typeof data.error === 'string' ? data.error : (data.error.message || JSON.stringify(data.error));
-        throw new Error(`API error: ${String(msg).slice(0, 300)}`);
-    }
-    if (checkFinishReason && data?.choices?.[0]?.finish_reason === 'length') {
-        const partial = data?.choices?.[0]?.message?.content;
-        const len = typeof partial === 'string' ? partial.length : 0;
-        throw new Error(`Response truncated by token limit (got ${len} chars before cutoff). Try again with a shorter request, or split the work into multiple snippets.`);
-    }
-    const msg = data?.choices?.[0]?.message;
-    if (msg && typeof msg.content === 'string') return msg.content;
-    if (msg && 'content' in msg && msg.content == null) return '';
-    const msgBlocks = flattenContentBlocks(msg?.content);
-    if (msgBlocks) return msgBlocks;
-    if (typeof data?.choices?.[0]?.text === 'string') return data.choices[0].text;
-    const delta = data?.choices?.[0]?.delta;
-    if (delta && typeof delta.content === 'string') return delta.content;
-    if (typeof data?.message?.content === 'string') return data.message.content;
-    if (typeof data?.content === 'string') return data.content;
-    const rootBlocks = flattenContentBlocks(data?.content);
-    if (rootBlocks) return rootBlocks;
-    if (typeof data?.response === 'string') return data.response;
-    if (typeof data?.output?.text === 'string') return data.output.text;
-    if (typeof data?.result === 'string') return data.result;
-    if (typeof data === 'string') return data;
-    debugLog?.('[LLM] Unrecognized response shape:', JSON.stringify(data).slice(0, 500));
-    throw new Error('Unexpected API response format');
-}
-
-// Fetch ST settings: the active CC source/model/preset + the list of CC connection profiles.
-// Each AI module calls this, then populates its own <select> from `profiles`.
-async function getLlmSettings() {
-    const out = { profiles: [], activeSource: '', activeModel: '', activePreset: null, selectedProfileId: '', hasProfiles: false, error: false };
-    try {
-        const st = await fetchStSettings();
-        if (!st) { out.error = true; return out; }
-        const { data, settings } = st;
-
-        const presetName = settings?.preset_settings_openai;
-        if (presetName && Array.isArray(data.openai_setting_names) && Array.isArray(data.openai_settings)) {
-            const idx = data.openai_setting_names.indexOf(presetName);
-            if (idx >= 0) {
-                try {
-                    const preset = typeof data.openai_settings[idx] === 'string' ? JSON.parse(data.openai_settings[idx]) : data.openai_settings[idx];
-                    out.activePreset = preset;
-                    out.activeSource = preset?.chat_completion_source || '';
-                    out.activeModel = resolvePresetModel(preset);
-                } catch { /* corrupt preset */ }
-            }
-        }
-        const cm = settings?.extension_settings?.connectionManager;
-        out.hasProfiles = (cm?.profiles || []).length > 0;
-        out.profiles = (cm?.profiles || []).filter(p => p.mode === 'cc');
-        out.selectedProfileId = cm?.selectedProfile || '';
-    } catch (e) {
-        console.error('[LLM] getLlmSettings failed:', e);
-        out.error = true;
-    }
-    return out;
-}
-
-/**
- * Single ST chat-completions call. Builds the body from the caller-resolved profile plus
- * active-preset fallback, resolves the named proxy, POSTs to the generate endpoints, parses.
- * @param {Array<{role,content}>} messages
- * @param {Object} opts profile, activeSource, activeModel, activePreset, temperature, maxTokens,
- *   signal, returnRawOnNonJson, checkFinishReason, onRaw(text), debugTag, extraUnreachableHint
- * @returns {Promise<string>} extracted content
- */
-async function callLLM(messages, opts = {}) {
-    const {
-        profile = null, activeSource = '', activeModel = '', activePreset = null,
-        temperature = 0.7, maxTokens = 4000, signal,
-        returnRawOnNonJson = false, checkFinishReason = false, stripSurrogates = false,
-        onRaw, debugTag = 'LLM', extraUnreachableHint = '',
-    } = opts;
-
-    const source = profile?.api || activeSource;
-    const model = profile?.model || activeModel;
-    if (!source) {
-        throw new Error(
-            'No Chat Completion source detected. Make sure SillyTavern has a Chat Completion API ' +
-            '(OpenAI, Claude, OpenRouter, etc.) selected and connected, then reopen this modal.'
-        );
-    }
-
-    const clean = stripSurrogates
-        ? messages.map(m => ({ role: m.role, content: stripLlmSurrogates(m.content) }))
-        : messages;
-    const body = { messages: clean, temperature, max_tokens: maxTokens, stream: false, chat_completion_source: source };
-    if (model) body.model = model;
-    if (profile) {
-        if (profile['secret-id']) body.secret_id = profile['secret-id'];
-        if (profile['api-url']) {
-            body.custom_url = profile['api-url'];
-            body.vertexai_region = profile['api-url'];
-            body.zai_endpoint = profile['api-url'];
-            body.siliconflow_endpoint = profile['api-url'];
-            body.minimax_endpoint = profile['api-url'];
-        }
-        if (profile['prompt-post-processing']) body.custom_prompt_post_processing = profile['prompt-post-processing'];
-    } else if (activePreset?.custom_url) {
-        body.custom_url = activePreset.custom_url;
-    }
-
-    const proxy = await resolveProxyForProfile(profile);
-    if (proxy?.url) body.reverse_proxy = proxy.url;
-    if (proxy?.password) body.proxy_password = proxy.password;
-
-    debugLog?.(`[${debugTag}] Sending request:`, {
-        source, model: body.model, customUrl: body.custom_url || null,
-        reverseProxy: body.reverse_proxy || null, hasProxyPassword: !!body.proxy_password,
-        hasSecretId: !!body.secret_id, profileName: profile?.name, messageCount: clean.length,
-    });
-
-    const cancelled = () => { const e = new Error('Generation cancelled.'); e.isCancelled = true; return e; };
-
-    for (const endpoint of LLM_GENERATE_ENDPOINTS) {
-        let response;
-        try {
-            response = await apiRequest(endpoint, 'POST', body, { signal });
-        } catch (err) {
-            if (err.name === 'AbortError') throw cancelled();
-            continue;
-        }
-        if (response.status === 404) continue;
-        if (!response.ok) {
-            const errText = await response.text().catch(() => '');
-            throw new Error(`API returned ${response.status}: ${errText.slice(0, 300)}`);
-        }
-
-        let responseText;
-        try {
-            responseText = await response.text();
-        } catch (err) {
-            if (err.name === 'AbortError') throw cancelled();
-            throw err;
-        }
-        if (typeof onRaw === 'function') { try { onRaw(responseText); } catch { /* non-fatal */ } }
-
-        let data;
-        try {
-            data = JSON.parse(responseText);
-        } catch {
-            if (returnRawOnNonJson) return responseText;
-            debugLog?.(`[${debugTag}] Non-JSON response:`, responseText.slice(0, 500));
-            throw new Error(`API returned non-JSON response: ${responseText.slice(0, 200)}`);
-        }
-
-        if (isLlmAuthError(data?.error?.message)) {
-            throw new Error(
-                'Authentication failed. Open SillyTavern → Connection Manager and click the "Update" ' +
-                'button on the selected connection profile to refresh its credentials, then retry.'
-            );
-        }
-        if (data?.error) console.warn(`[${debugTag}] ST returned error envelope:`, data);
-        return extractLlmContent(data, { checkFinishReason });
-    }
-    throw new Error(
-        'Could not reach SillyTavern\'s Chat Completion API. ' +
-        'Make sure you have a Chat Completion API (OpenAI, Claude, etc.) configured and connected in SillyTavern.' +
-        (extraUnreachableHint ? ' ' + extraUnreachableHint : '')
-    );
-}
-
-// Append the OpenAI chat-completions path unless the URL already ends with it.
-function resolveCustomEndpoint(base) {
-    const u = (base || '').trim().replace(/\/+$/, '');
-    return /\/chat\/completions$/i.test(u) ? u : `${u}/chat/completions`;
-}
-
-/**
- * Direct call to a user-supplied OpenAI-compatible endpoint (no ST proxy/profile). Shares
- * the response parser with callLLM. Used by the recommender's Custom API mode.
- * @param {Array<{role,content}>} messages
- * @param {Object} opts url, apiKey, model, temperature, maxTokens, signal, onRaw(text),
- *   stripSurrogates, debugTag
- * @returns {Promise<string>} extracted content
- */
-async function callCustomLLM(messages, opts = {}) {
-    const { url, apiKey = '', model = '', temperature = 0.7, maxTokens = 2000, signal, onRaw, stripSurrogates = false, debugTag = 'LLM' } = opts;
-    if (!url) throw new Error('Custom API endpoint URL is required. Configure it in Settings.');
-
-    const endpoint = resolveCustomEndpoint(url);
-    const headers = { 'Content-Type': 'application/json' };
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-    const clean = stripSurrogates ? messages.map(m => ({ role: m.role, content: stripLlmSurrogates(m.content) })) : messages;
-    const body = { messages: clean, temperature, max_tokens: maxTokens };
-    if (model) body.model = model;
-
-    debugLog?.(`[${debugTag}] Custom API request:`, { endpoint, model: model || '(default)', temperature, messageCount: clean.length });
-
-    const response = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal });
-    if (!response.ok) {
-        const errText = await response.text().catch(() => '');
-        throw new Error(`Custom API returned ${response.status}: ${errText.slice(0, 200)}`);
-    }
-    const responseText = await response.text();
-    if (typeof onRaw === 'function') { try { onRaw(responseText); } catch { /* non-fatal */ } }
-    let data;
-    try {
-        data = JSON.parse(responseText);
-    } catch {
-        debugLog?.(`[${debugTag}] Non-JSON custom response:`, responseText.slice(0, 500));
-        throw new Error(`Custom API returned non-JSON response: ${responseText.slice(0, 200)}`);
-    }
-    return extractLlmContent(data);
-}
-
 // Fire-and-forget; 3s timeout. Active chat panel refreshes only when chid matches.
 async function notifySTCharacterEdited(avatar) {
     if (!avatar) return;
@@ -9184,9 +8902,9 @@ function openCharModalElevated(char, navList) {
     const charModal = document.getElementById('charModal');
     if (!charModal) return;
     // Pin existing visible modals so char-modal-above only elevates new ones. Includes other
-    // open .modal-overlay modals (eg the Lorebook Manager): on mobile library-mobile.css forces
-    // every .modal-overlay to z-index:200 !important, so without pinning the manager would tie/win
-    // against the elevated charModal. 2000 keeps them below charModal's 10002 but above page chrome.
+    // open .modal-overlay modals: on mobile library-mobile.css forces every .modal-overlay to
+    // z-index:200 !important, so without pinning one would tie/win against the elevated charModal.
+    // 2000 keeps them below charModal's 10002 but above page chrome.
     const pinnedModals = [
         ...document.querySelectorAll('.confirm-modal:not(.hidden), .cl-modal.visible, .modal-overlay:not(.hidden)'),
     ].filter(m => m !== charModal);
@@ -9444,11 +9162,6 @@ async function openModal(char, { navList } = {}) {
         if (skLb) skLb.style.display = 'none';
     }
 
-    // Linked Lorebook (external world file via extensions.world) - async, shown below embedded.
-    // Extensions may be absent on open under ST lazy loading; hide until hydrate, then re-populate.
-    if (extensionsReady(char)) populateLinkedLorebookBox(char);
-    else { const lb = document.getElementById('modalLinkedLorebookBox'); if (lb) lb.style.display = 'none'; }
-
     // Edit pane is populated lazily on first Edit tab click (see populateEditPane)
     _editPanePopulated = false;
     
@@ -9578,7 +9291,6 @@ async function openModal(char, { navList } = {}) {
         if (extensionsReady(char)) {
             updateProviderLinkIndicator(char);
             renderProviderTaglineRow(char);
-            populateLinkedLorebookBox(char);
         }
 
         // Hydrate failed: an honest error beats painting undefined as an empty card.
@@ -11642,9 +11354,6 @@ function refreshModalDisplay() {
     
     paintModalHeavyContent(char, creatorNotes, _modalOpenGen);
 
-    // Linked Lorebook (external world file via extensions.world) - async, shown below embedded
-    populateLinkedLorebookBox(char);
-
     // Update tags in sidebar
     renderSidebarTags(getTags(char), !isEditLocked);
 }
@@ -11774,15 +11483,6 @@ function setEditLock(locked) {
             btn.style.opacity = '0.5';
         });
 
-        // Linked-lorebook change buttons follow the lock; Manage stays enabled (its navigation, not an edit).
-        const linkLbBtn = document.getElementById('linkLorebookBtn');
-        const unlinkLbBtn = document.getElementById('unlinkLorebookBtn');
-        if (linkLbBtn) linkLbBtn.disabled = true;
-        if (unlinkLbBtn) unlinkLbBtn.disabled = true;
-        const addAuxLbBtn = document.getElementById('addAuxLorebookBtn');
-        if (addAuxLbBtn) addAuxLbBtn.disabled = true;
-        document.getElementById('auxLorebooksEditRow')?.classList.add('locked');
-
         // Hide tag input and show non-editable tags
         if (tagInputWrapper) tagInputWrapper.classList.add('hidden');
         if (tagsContainer) tagsContainer.classList.remove('editable');
@@ -11828,14 +11528,6 @@ function setEditLock(locked) {
             btn.style.pointerEvents = '';
             btn.style.opacity = '';
         });
-
-        const linkLbBtn = document.getElementById('linkLorebookBtn');
-        const unlinkLbBtn = document.getElementById('unlinkLorebookBtn');
-        if (linkLbBtn) linkLbBtn.disabled = false;
-        if (unlinkLbBtn) unlinkLbBtn.disabled = false;
-        const addAuxLbBtn = document.getElementById('addAuxLorebookBtn');
-        if (addAuxLbBtn) addAuxLbBtn.disabled = false;
-        document.getElementById('auxLorebooksEditRow')?.classList.remove('locked');
 
         // Show tag input and make tags editable
         if (tagInputWrapper) tagInputWrapper.classList.remove('hidden');
@@ -12383,270 +12075,6 @@ function initSectionExpandButtons() {
         });
     }
 
-    // ARCHIVE FORK: the "Manage" button and its handler are gone with the
-    // Lorebook Manager -- see the world-file helpers below for why the archive
-    // has nothing to manage.
-
-    // Unlink the external world from this character (clears data.extensions.world).
-    const unlinkLbBtn = document.getElementById('unlinkLorebookBtn');
-    if (unlinkLbBtn) {
-        unlinkLbBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            unlinkLorebookFromCharacter();
-        });
-    }
-
-    // Link / Change: open the world picker (mirrors the chat-lore picker).
-    const linkLbBtn = document.getElementById('linkLorebookBtn');
-    if (linkLbBtn) {
-        linkLbBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            openLinkLorebookPicker('primary');
-        });
-    }
-
-    // Additional lorebooks: same picker in aux mode, pill X removes.
-    const addAuxBtn = document.getElementById('addAuxLorebookBtn');
-    if (addAuxBtn) {
-        addAuxBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            openLinkLorebookPicker('aux');
-        });
-    }
-    document.getElementById('auxLorebooksPills')?.addEventListener('click', (e) => {
-        const x = e.target.closest('[data-aux-remove]');
-        if (!x || isEditLocked) return;
-        e.preventDefault();
-        e.stopPropagation();
-        removeAuxLorebookFromCharacter(x.dataset.auxRemove);
-    });
-
-    // Link-lorebook picker modal: static modal, listeners attach once (this init runs once at boot).
-    const linkLbModal = document.getElementById('linkLorebookModal');
-    if (linkLbModal) {
-        document.getElementById('linkLorebookCloseBtn')?.addEventListener('click', closeLinkLorebookPicker);
-        linkLbModal.addEventListener('click', (e) => { if (e.target === linkLbModal) closeLinkLorebookPicker(); });
-        document.getElementById('linkLorebookSearch')?.addEventListener('input', renderLinkLorebookList);
-        document.getElementById('linkLorebookList')?.addEventListener('click', (e) => {
-            const row = e.target.closest('[data-world]');
-            if (!row) return;
-            if (_linkLorebookMode === 'aux') addAuxLorebookToCharacter(row.dataset.world);
-            else linkLorebookToCharacter(row.dataset.world);
-        });
-        window.registerOverlay?.({
-            id: 'linkLorebookModal',
-            tier: 4,
-            close: () => closeLinkLorebookPicker(),
-            visible: (el) => el.classList.contains('visible'),
-        });
-    }
-}
-
-/**
- * Unlink the primary external lorebook (data.extensions.world) from the active character.
- * ST's unlinked state is an empty-string world, not a deleted key, so we write ''.
- * Does NOT touch the embedded character_book or the world file itself.
- */
-async function unlinkLorebookFromCharacter() {
-    if (!activeChar) return;
-    const worldName = activeChar.data?.extensions?.world || '';
-    if (!worldName) return;
-    const ok = await showConfirm({
-        title: 'Unlink lorebook?',
-        message: `Unlink "${worldName}" from ${getCharacterName(activeChar) || 'this character'}? The lorebook file is kept; only this character's link is removed.`,
-        confirmLabel: 'Unlink',
-        cancelLabel: 'Cancel',
-        danger: true,
-    });
-    if (!ok) return;
-    const success = await applyCardFieldUpdates(activeChar.avatar, { 'extensions.world': '' }, { awaitNotify: true });
-    if (!success) { showToast('Failed to unlink lorebook', 'error'); return; }
-    // Refresh the Edit-tab buttons and the detail-modal Linked Lorebook box.
-    populateLorebookEditor(activeChar.data?.character_book || activeChar.character_book);
-    populateLinkedLorebookBox(activeChar);
-    showToast(`Unlinked "${worldName}".`, 'success', 5000);
-}
-
-// The link picker below is a near-copy of the chat-lore picker in chats.js (openChatLorePicker
-// and friends). If a third world-picker ever lands its worth pulling them into one shared helper,
-// but for two it isnt worth the churn yet.
-let _linkLorebookWorlds = [];
-// 'primary' sets data.extensions.world; 'aux' appends to the charLore extraBooks list.
-let _linkLorebookMode = 'primary';
-let _linkLorebookAuxBooks = [];
-
-/**
- * Open the picker to link or change the character's external lorebook (data.extensions.world),
- * or to add an additional (charLore) lorebook when mode is 'aux'.
- * Immediate write, not part of the field-edit save flow (same model as unlink).
- * @param {'primary'|'aux'} mode
- */
-async function openLinkLorebookPicker(mode = 'primary') {
-    if (!activeChar) return;
-    const gen = _modalOpenGen;
-    _linkLorebookMode = mode === 'aux' ? 'aux' : 'primary';
-    _linkLorebookAuxBooks = _linkLorebookMode === 'aux'
-        ? await window.getCharAdditionalLorebooks(activeChar.avatar)
-        : [];
-    _linkLorebookWorlds = await window.listWorldInfoFiles();
-    // Modal swapped or closed during the fetches: do not open a picker whose aux
-    // checkmarks belong to the previous character.
-    if (gen !== _modalOpenGen) return;
-    renderLinkLorebookPicker();
-    document.getElementById('linkLorebookModal')?.classList.add('visible');
-    setTimeout(() => document.getElementById('linkLorebookSearch')?.focus(), 60);
-}
-
-function closeLinkLorebookPicker() {
-    document.getElementById('linkLorebookModal')?.classList.remove('visible');
-}
-
-function renderLinkLorebookPicker() {
-    const current = activeChar?.data?.extensions?.world || '';
-    const sub = document.getElementById('linkLorebookSubhead');
-    if (sub) {
-        if (_linkLorebookMode === 'aux') {
-            sub.innerHTML = `Add an <strong>additional</strong> lorebook for ${escapeHtml(getCharacterName(activeChar) || 'this character')}. Already-added books are checked.`;
-        } else {
-            sub.innerHTML = current
-                ? `Linked to <strong>${escapeHtml(current)}</strong>. Pick another to change it.`
-                : `Pick a lorebook to link to ${escapeHtml(getCharacterName(activeChar) || 'this character')}.`;
-        }
-    }
-    const searchEl = document.getElementById('linkLorebookSearch');
-    if (searchEl) searchEl.value = '';
-    renderLinkLorebookList();
-}
-
-function renderLinkLorebookList() {
-    const listEl = document.getElementById('linkLorebookList');
-    if (!listEl) return;
-    const current = activeChar?.data?.extensions?.world || '';
-    const q = (document.getElementById('linkLorebookSearch')?.value || '').trim().toLowerCase();
-    // Match + show by file_id (filename): thats what ST stores in extensions.world, not the internal JSON name.
-    const worlds = (_linkLorebookWorlds || []).filter(w => !q || w.file_id.toLowerCase().includes(q));
-    if (!worlds.length) {
-        listEl.innerHTML = `<div class="lorebook-link-empty">${(_linkLorebookWorlds || []).length ? 'No matches.' : 'No lorebooks found. Create one in the Lorebook Manager first.'}</div>`;
-        return;
-    }
-    listEl.innerHTML = worlds.map(w => {
-        const isCurrent = _linkLorebookMode === 'aux'
-            ? _linkLorebookAuxBooks.includes(w.file_id)
-            : w.file_id === current;
-        return `
-            <button class="lorebook-link-row${isCurrent ? ' current' : ''}" data-world="${escapeHtml(w.file_id)}">
-                <i class="fa-solid fa-book"></i>
-                <span class="lorebook-link-row-name">${escapeHtml(w.file_id)}</span>
-                ${isCurrent ? '<i class="fa-solid fa-check lorebook-link-row-check"></i>' : ''}
-            </button>`;
-    }).join('');
-}
-
-/**
- * Link an external world file to the active character (sets data.extensions.world).
- * Refreshes the same two surfaces the unlink path does.
- */
-async function linkLorebookToCharacter(fileId) {
-    if (!activeChar || !fileId) return;
-    const current = activeChar.data?.extensions?.world || '';
-    if (current === fileId) { closeLinkLorebookPicker(); return; }
-    const success = await applyCardFieldUpdates(activeChar.avatar, { 'extensions.world': fileId }, { awaitNotify: true });
-    if (!success) { showToast('Failed to link lorebook', 'error'); return; }
-    closeLinkLorebookPicker();
-    populateLorebookEditor(activeChar.data?.character_book || activeChar.character_book);
-    populateLinkedLorebookBox(activeChar);
-    showToast(`Linked "${fileId}".`, 'success', 5000);
-}
-
-let _auxRowRunId = 0;
-
-/**
- * Fill the Additional row under the primary link: pills for the character's charLore
- * extraBooks. Read-only (no Add, no X) when the ST window is unreachable, since that is
- * the only write path for charLore.
- */
-async function populateAuxLorebooksRow() {
-    const row = document.getElementById('auxLorebooksEditRow');
-    const pills = document.getElementById('auxLorebooksPills');
-    const addBtn = document.getElementById('addAuxLorebookBtn');
-    if (!row || !pills || !activeChar) return;
-    const canEdit = window.canEditCharLore();
-    row.classList.toggle('locked', isEditLocked);
-    if (addBtn) {
-        addBtn.disabled = isEditLocked;
-        addBtn.classList.toggle('hidden', !canEdit);
-    }
-    row.title = canEdit ? '' : 'Additional lorebooks are read-only here. Open the Library from SillyTavern to edit them.';
-    const gen = _modalOpenGen;
-    const run = ++_auxRowRunId;
-    let books = [];
-    try { books = await window.getCharAdditionalLorebooks(activeChar.avatar); } catch { /* renders as none */ }
-    if (gen !== _modalOpenGen || run !== _auxRowRunId) return;
-    // Without the bridge and without books the row is pure noise (nothing shown, nothing addable).
-    row.classList.toggle('hidden', !canEdit && !books.length);
-    if (!books.length) {
-        pills.innerHTML = `<span class="linked-lorebook-aux-none">None</span>`;
-        return;
-    }
-    pills.innerHTML = books.map(b => `
-        <span class="aux-lorebook-pill" title="${escapeHtml(b)}">
-            <i class="fa-solid fa-book"></i>
-            <span class="aux-lorebook-pill-name">${escapeHtml(b)}</span>
-            ${canEdit ? `<button type="button" class="aux-lorebook-pill-x" data-aux-remove="${escapeHtml(b)}" title="Remove this additional lorebook">&times;</button>` : ''}
-        </span>`).join('');
-}
-
-/**
- * Append a world to the active character's additional lorebooks (charLore extraBooks).
- * @param {string} fileId
- */
-async function addAuxLorebookToCharacter(fileId) {
-    if (!activeChar || !fileId) return;
-    if (!window.canEditCharLore()) {
-        showToast('Open the Library from SillyTavern to edit additional lorebooks', 'warning');
-        return;
-    }
-    // Capture the write target up front; the awaits below must not retarget on a modal swap.
-    const avatar = activeChar.avatar;
-    const books = await window.getCharAdditionalLorebooks(avatar);
-    if (books.includes(fileId)) { closeLinkLorebookPicker(); return; }
-    const ok = await window.setCharAdditionalLorebooks(avatar, [...books, fileId]);
-    if (!ok) { showToast('Failed to add additional lorebook', 'error'); return; }
-    closeLinkLorebookPicker();
-    populateAuxLorebooksRow();
-    populateLinkedLorebookBox(activeChar);
-    showToast(`Added "${fileId}" as an additional lorebook.`, 'success', 5000);
-}
-
-/**
- * Remove one world from the active character's additional lorebooks.
- * @param {string} fileId
- */
-async function removeAuxLorebookFromCharacter(fileId) {
-    if (!activeChar || !fileId) return;
-    if (!window.canEditCharLore()) {
-        showToast('Open the Library from SillyTavern to edit additional lorebooks', 'warning');
-        return;
-    }
-    // Capture the write target up front; the confirm + awaits must not retarget on a modal swap.
-    const avatar = activeChar.avatar;
-    const ok = await showConfirm({
-        title: 'Remove additional lorebook?',
-        message: `Remove "${fileId}" from ${getCharacterName(activeChar) || 'this character'}'s additional lorebooks? The lorebook file is kept.`,
-        confirmLabel: 'Remove',
-        cancelLabel: 'Cancel',
-        danger: true,
-    });
-    if (!ok) return;
-    const books = await window.getCharAdditionalLorebooks(avatar);
-    const success = await window.setCharAdditionalLorebooks(avatar, books.filter(b => b !== fileId));
-    if (!success) { showToast('Failed to remove additional lorebook', 'error'); return; }
-    populateAuxLorebooksRow();
-    populateLinkedLorebookBox(activeChar);
-    showToast(`Removed "${fileId}".`, 'success', 5000);
 }
 
 /**
@@ -15035,43 +14463,6 @@ function populateLorebookEditor(characterBook) {
     const container = document.getElementById('lorebookEntriesEdit');
     const countEl = document.getElementById('lorebookEditCount');
 
-    // The Linked Lorebook row is its own section (linked = a separate world file, embedded =
-    // in-card entries). Always shown now: linked state shows the name + Change/Manage/Unlink, the
-    // unlinked state shows a muted placeholder + the Link button.
-    const linkedWorld = activeChar?.data?.extensions?.world || '';
-    const linkedRow = document.getElementById('linkedLorebookEditRow');
-    if (linkedRow) {
-        const nameEl = document.getElementById('linkedLorebookEditName');
-        const metaEl = document.getElementById('linkedLorebookEditMeta');
-        const tileEl = document.getElementById('linkedLorebookTile');
-        const linkLabel = document.getElementById('linkLorebookBtnLabel');
-        const unlinkBtn = document.getElementById('unlinkLorebookBtn');
-        if (linkedWorld) {
-            if (nameEl) { nameEl.textContent = linkedWorld; nameEl.title = linkedWorld; nameEl.classList.remove('is-unlinked'); }
-            tileEl?.classList.remove('is-unlinked');
-            if (metaEl) {
-                metaEl.textContent = 'Primary lorebook';
-                metaEl.dataset.world = linkedWorld;
-                // Entry count rides the read-view's render cache (warm from modal open);
-                // gen + world checks drop stale resolutions after nav or a link change.
-                const gen = _modalOpenGen;
-                getRenderedWorldCached(linkedWorld).then(r => {
-                    if (gen !== _modalOpenGen || metaEl.dataset.world !== linkedWorld) return;
-                    metaEl.textContent = `Primary lorebook · ${r.count} ${r.count === 1 ? 'entry' : 'entries'}`;
-                }).catch(() => { /* count stays off the meta line */ });
-            }
-            if (linkLabel) linkLabel.textContent = 'Change';
-            unlinkBtn?.classList.remove('hidden');
-        } else {
-            if (nameEl) { nameEl.textContent = 'No lorebook linked'; nameEl.title = ''; nameEl.classList.add('is-unlinked'); }
-            tileEl?.classList.add('is-unlinked');
-            if (metaEl) { metaEl.textContent = 'Link a standalone lorebook file'; delete metaEl.dataset.world; }
-            if (linkLabel) linkLabel.textContent = 'Link';
-            unlinkBtn?.classList.add('hidden');
-        }
-        populateAuxLorebooksRow();
-    }
-
     if (!container) return;
 
     container.innerHTML = '';
@@ -15523,89 +14914,6 @@ function renderLorebookEntryHtml(entry, index) {
 function renderLorebookEntriesHtml(entries) {
     if (!entries || !entries.length) return '';
     return entries.map((entry, i) => renderLorebookEntryHtml(entry, i)).join('');
-}
-
-// Rendered linked-world box cache, keyed by world name -> { count, html }. The detail-modal
-// refresh fires populateLinkedLorebookBox after every save, even for edits unrelated to the
-// lorebook, so without this a character linked to a large world refetches+re-renders that whole
-// world on every Save. Busted on any world-file write (saveWorldInfoData) so it can't go stale.
-const _linkedWorldRenderCache = new Map();
-window.invalidateLinkedWorldRenderCache = function(worldName) {
-    if (worldName) _linkedWorldRenderCache.delete(worldName);
-    else _linkedWorldRenderCache.clear();
-};
-
-// Fetch + render one world through the shared cache. World files store entries as an
-// object keyed by uid; flatten to an array for the renderer.
-async function getRenderedWorldCached(worldName) {
-    const cached = _linkedWorldRenderCache.get(worldName);
-    if (cached) return cached;
-    let data = null;
-    try { data = await window.getWorldInfoData(worldName); } catch (_) { /* missing or unreadable */ }
-    const entries = data?.entries ? Object.values(data.entries).filter(e => e && typeof e === 'object') : [];
-    const out = { count: entries.length, html: entries.length ? renderLorebookEntriesHtml(entries) : '' };
-    _linkedWorldRenderCache.set(worldName, out);
-    return out;
-}
-
-// Same-gen ordering token: aux add/remove re-populate without a modal navigation, so the
-// gen guard alone lets a slow older run land after a fresher one; last-started wins instead.
-let _linkedBoxRunId = 0;
-
-/**
- * Populate the "Linked Lorebook" box in the detail modal from the card's primary
- * link (data.extensions.world) plus the character's additional (charLore) books.
- * Mirrors the embedded-lorebook box, shown directly below it. Fetches world files
- * async so it never blocks modal paint; the gen guard drops the result if the user
- * navigated to another character first.
- * @param {Object} char
- */
-async function populateLinkedLorebookBox(char) {
-    const box = document.getElementById('modalLinkedLorebookBox');
-    if (!box) return;
-    // Reset like every async modal surface: hidden until this char's data lands, so a slow
-    // no-opener settings fetch can't leave the previous character's box painted.
-    box.style.display = 'none';
-    const worldName = char?.data?.extensions?.world || '';
-
-    const gen = _modalOpenGen;
-    const run = ++_linkedBoxRunId;
-    const stale = () => gen !== _modalOpenGen || run !== _linkedBoxRunId;
-    let auxBooks = [];
-    try { auxBooks = await window.getCharAdditionalLorebooks(char?.avatar) || []; } catch (_) { /* shown without aux */ }
-    if (stale()) return;
-    // A book that is both primary and additional renders once, as the primary.
-    auxBooks = auxBooks.filter(b => b && b !== worldName);
-    if (!worldName && !auxBooks.length) { box.style.display = 'none'; return; }
-
-    const nameEl = document.getElementById('linkedLorebookName');
-    const countEl = document.getElementById('linkedLorebookEntryCount');
-    const contentEl = document.getElementById('modalLinkedLorebookContent');
-    if (nameEl) nameEl.textContent = worldName || 'Additional only';
-
-    const primary = worldName ? await getRenderedWorldCached(worldName) : { count: 0, html: '' };
-    if (stale()) return; // navigated away or superseded mid-fetch
-    const auxRendered = [];
-    for (const b of auxBooks) {
-        const r = await getRenderedWorldCached(b);
-        if (stale()) return;
-        auxRendered.push({ name: b, ...r });
-    }
-
-    const total = primary.count + auxRendered.reduce((n, r) => n + r.count, 0);
-    // Nothing renderable anywhere (empty or missing files) hides the box, same as the
-    // old primary-only behavior.
-    if (total === 0) { box.style.display = 'none'; return; }
-
-    const auxHtml = auxRendered.map(r => `
-        <details class="detail-collapsible linked-aux-book">
-            <summary><i class="fa-solid fa-book"></i> ${escapeHtml(r.name)} (${r.count} ${r.count === 1 ? 'entry' : 'entries'}) <span class="linked-aux-tag">Additional</span></summary>
-            <div class="detail-collapsible-body">${r.html}</div>
-        </details>`).join('');
-
-    if (countEl) countEl.innerText = total;
-    if (contentEl) contentEl.innerHTML = primary.html + auxHtml;
-    box.style.display = 'block';
 }
 
 // Handles both class systems (cl-modal uses .visible, confirm-modal uses .hidden).
@@ -26595,11 +25903,6 @@ window.isMultiSelectEnabled = isMultiSelectEnabled;
 // Host window / ST context access
 window.getHostWindow = getHostWindow;
 window.getSTContext = getSTContext;
-window.resolveProxyForProfile = resolveProxyForProfile;
-window.callLLM = callLLM;
-window.callCustomLLM = callCustomLLM;
-window.getLlmSettings = getLlmSettings;
-window.extractLlmContent = extractLlmContent;
 
 // Settings
 window.getSetting = getSetting;
@@ -26651,25 +25954,10 @@ window.getExtensionDeleteValue = getExtensionDeleteValue;
 // WORLD INFO API
 // ========================================
 
-/**
- * Get the linked world info name for a character.
- * Checks extensions.world first, falls back to character_book.name
- * (the name ST conventionally uses when creating a world from the embedded lorebook).
- * @param {string} avatar - Character avatar filename
- * @returns {string|null} The world info name or null
- */
-window.getCharacterWorldName = function(avatar) {
-    const char = allCharacters.find(c => c.avatar === avatar);
-    if (!char) return null;
-    return char.data?.extensions?.world
-        || char.data?.character_book?.name
-        || null;
-};
-
 /*
  * ARCHIVE FORK: the standalone world-file helpers, answered locally.
  *
- * These six wrapped SillyTavern's `/api/worldinfo/{get,edit,list,delete}`, which
+ * These wrapped SillyTavern's `/api/worldinfo/{get,edit,list,delete}`, which
  * read and wrote `.json` files in ST's `worlds/` directory. The archive has no
  * such directory and will not grow one: a standalone World Info file is a
  * SillyTavern concept, and this archive's lorebooks live *inside* their cards as
@@ -26677,16 +25965,15 @@ window.getCharacterWorldName = function(avatar) {
  * path. That is a format the archive owns; a sidecar file store beside it is
  * host compatibility, which is the thing this migration exists to cut.
  *
- * So they answer without a request rather than posting into a 501. The callers
- * that remain -- the link picker, the linked-lorebook box, the bundle
- * exporter's dangling-world check -- all handle "there are none" already, and
- * this way they get that answer quietly instead of through a console error per
- * call. The `/api/worldinfo/` route in archive-api.js stays as the backstop for
- * anything that reaches for the endpoint directly.
+ * So they answer without a request rather than posting into a 501. The one
+ * caller that remains -- the bundle exporter's linked-lorebook include option --
+ * already handles "there are none". The `/api/worldinfo/` route in
+ * archive-api.js stays as the backstop for anything that reaches for the
+ * endpoint directly.
  *
- * The Lorebook Manager module (a full-screen editor for these files, plus the
- * only remaining consumer of the shared LLM client, whose AI features posted to
- * SillyTavern's own generate endpoint) was deleted with them.
+ * The Lorebook Manager module and the in-modal Linked Lorebook feature (which
+ * let a character point at one of these external files) were both deleted;
+ * create/delete/rename went with them since nothing links to a world file anymore.
  */
 
 /** @returns {Promise<Object|null>} Always null: the archive stores no world files. */
@@ -26702,21 +25989,6 @@ window.saveWorldInfoData = async function() {
 /** @returns {Promise<Array>} Always empty: the archive has no world files to list. */
 window.listWorldInfoFiles = async function() {
     return [];
-};
-
-/** @returns {Promise<boolean>} Always false. */
-window.createWorldInfo = async function() {
-    return false;
-};
-
-/** @returns {Promise<boolean>} Always false. */
-window.deleteWorldInfo = async function() {
-    return false;
-};
-
-/** @returns {Promise<boolean>} Always false. */
-window.renameWorldInfo = async function() {
-    return false;
 };
 
 // ========================================
@@ -26824,194 +26096,6 @@ window.setCharAdditionalLorebooks = async function(avatar, books) {
     } catch {
         return false;
     }
-};
-
-// Sweeps for the manager's rename/delete flows. Return the touched-entry count, or
-// null when the bridge is unreachable (distinct from 0 = nothing referenced the world).
-window.charLoreRenameWorld = async function(oldName, newName) {
-    const bridge = getCharLoreBridge();
-    if (!bridge) return null;
-    try { return await bridge.renameWorld(oldName, newName); } catch { return null; }
-};
-
-window.charLoreRemoveWorld = async function(name) {
-    const bridge = getCharLoreBridge();
-    if (!bridge) return null;
-    try { return await bridge.removeWorld(name); } catch { return null; }
-};
-
-/**
- * Import a world file from a parsed JSON object (already in native { entries } shape).
- * Routes through /worldinfo/edit rather than the multipart /worldinfo/import so we
- * control the destination name directly. Caller is responsible for format conversion;
- * we only accept native ST world JSON here.
- * @param {string} worldName - destination name (no .json)
- * @param {Object} worldData - must contain an `entries` object
- * @returns {Promise<boolean>} Success
- */
-window.importWorldInfoData = async function(worldName, worldData) {
-    if (!worldName || !worldData || typeof worldData !== 'object') return false;
-    if (!worldData.entries || typeof worldData.entries !== 'object') return false;
-    return window.saveWorldInfoData(worldName, worldData);
-};
-
-/**
- * Merge remote V2 lorebook entries into the character's linked /worlds file.
- * Matched entries get their V2-spec fields updated; new entries are added;
- * user-only entries are preserved untouched.
- *
- * /worlds entries with no Chub match are left alone - they may be user-created
- * or creator-removed, but the safe choice for both cases is to keep them.
- * Only V2-spec fields (keys, content, enabled, etc.) are written on matched
- * entries; ST-internal fields (probability, depth, group, vectorized…) are
- * preserved so user customizations survive.
- *
- * @param {string} avatar - Character avatar filename
- * @param {Object} remoteBook - Remote V2 character_book object { entries: [...], ... }
- * @returns {Promise<boolean>} Success
- */
-window.mergeRemoteLorebookIntoWorldFile = async function(avatar, remoteBook) {
-    const worldName = window.getCharacterWorldName(avatar);
-    if (!worldName) return false;
-    const worldData = await window.getWorldInfoData(worldName);
-    if (!worldData?.entries) return false;
-
-    const remoteEntries = remoteBook?.entries || [];
-    if (remoteEntries.length === 0) return true;
-
-    // Build a quick lookup of world entries by expanded keys for matching
-    const worldList = Object.values(worldData.entries).filter(e => e && typeof e === 'object');
-
-    const expandKeys = (keys) => {
-        const set = new Set();
-        for (const k of (keys || [])) {
-            for (const part of String(k).split(',')) {
-                const t = part.toLowerCase().trim();
-                if (t) set.add(t);
-            }
-        }
-        return set;
-    };
-
-    const jaccard = (a, b) => {
-        if (a.size === 0 || b.size === 0) return 0;
-        let inter = 0;
-        for (const k of a) { if (b.has(k)) inter++; }
-        const union = new Set([...a, ...b]).size;
-        return union > 0 ? inter / union : 0;
-    };
-
-    const nameMatch = (wa, rb) => {
-        const a = (wa.comment || '').toLowerCase().trim();
-        const b = (rb.name || rb.comment || '').toLowerCase().trim();
-        if (!a || !b) return 0;
-        if (a === b) return 1;
-        if (a.includes(b) || b.includes(a)) return 0.8;
-        return 0;
-    };
-
-    // Match each remote entry against world entries
-    const matchedWorldUids = new Set();
-    const unmatched = [];
-
-    for (const remote of remoteEntries) {
-        const rKeys = expandKeys(remote.keys);
-        let bestUid = null;
-        let bestScore = 0;
-
-        for (const we of worldList) {
-            if (matchedWorldUids.has(we.uid)) continue;
-            const wKeys = expandKeys(we.key);
-            let score = jaccard(rKeys, wKeys);
-            if (score === 0) score = nameMatch(we, remote);
-            if (score > bestScore) {
-                bestScore = score;
-                bestUid = we.uid;
-            }
-        }
-
-        if (bestUid != null && bestScore > 0.3) {
-            matchedWorldUids.add(bestUid);
-            // Update the matched world entry's V2-spec fields
-            const target = worldData.entries[bestUid];
-            if (remote.keys !== undefined) target.key = remote.keys;
-            if (remote.secondary_keys !== undefined) target.keysecondary = remote.secondary_keys;
-            if (remote.content !== undefined) target.content = remote.content;
-            if (remote.enabled !== undefined) target.disable = !remote.enabled;
-            if (remote.selective !== undefined) target.selective = remote.selective;
-            if (remote.constant !== undefined) target.constant = remote.constant;
-            if (remote.insertion_order !== undefined) target.order = remote.insertion_order;
-            if (remote.name !== undefined) target.comment = remote.name;
-            if (remote.case_sensitive !== undefined) target.caseSensitive = remote.case_sensitive;
-        } else {
-            unmatched.push(remote);
-        }
-    }
-
-    // Add unmatched remote entries as new world entries
-    const existingUids = Object.keys(worldData.entries).map(Number).filter(n => !isNaN(n));
-    let nextUid = existingUids.length > 0 ? Math.max(...existingUids) + 1 : 0;
-
-    for (const entry of unmatched) {
-        const uid = nextUid++;
-        worldData.entries[uid] = {
-            uid,
-            key: entry.keys || [],
-            keysecondary: entry.secondary_keys || [],
-            comment: entry.name || entry.comment || '',
-            content: entry.content || '',
-            constant: entry.constant ?? false,
-            selective: entry.selective ?? true,
-            selectiveLogic: 0,
-            addMemo: !!(entry.name || entry.comment),
-            order: entry.insertion_order ?? 100,
-            position: entry.position === 'before_char' ? 0 : entry.position === 'after_char' ? 1 : Number(entry.position) || 0,
-            disable: !(entry.enabled ?? true),
-            excludeRecursion: false,
-            preventRecursion: false,
-            delayUntilRecursion: false,
-            probability: 100,
-            useProbability: true,
-            depth: 4,
-            group: '',
-            groupOverride: false,
-            groupWeight: 100,
-            scanDepth: null,
-            caseSensitive: entry.case_sensitive ?? null,
-            matchWholeWords: null,
-            useGroupScoring: null,
-            automationId: '',
-            role: 0,
-            vectorized: false,
-            sticky: null,
-            cooldown: null,
-            delay: null,
-            displayIndex: uid,
-            extensions: {
-                position: entry.position === 'before_char' ? 0 : entry.position === 'after_char' ? 1 : Number(entry.position) || 0,
-                exclude_recursion: false,
-                display_index: uid,
-                probability: 100,
-                useProbability: true,
-                depth: 4,
-                selectiveLogic: 0,
-                group: '',
-                group_override: false,
-                group_weight: 100,
-                prevent_recursion: false,
-                delay_until_recursion: false,
-                scan_depth: null,
-                case_sensitive: entry.case_sensitive ?? null,
-                match_whole_words: null,
-                use_group_scoring: null,
-                automation_id: '',
-                role: 0,
-                vectorized: false,
-            },
-        };
-    }
-
-    return await window.saveWorldInfoData(worldName, worldData);
 };
 
 /**
