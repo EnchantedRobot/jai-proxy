@@ -107,9 +107,13 @@ consumer, `lorebook-manager.js`, whose AI features call SillyTavern's
 ## How it is wired
 
 ```
-index.html  ->  archive-api.js   (ours, loaded first)
-            ->  library.js       (vendored + trimmed)
-            ->  modules/*        (vendored + trimmed)
+index.html  ->  archive-api.js       (ours, loaded first)
+            ->  library-sections/*   (vendored + trimmed; library.js cut into
+                                       ~42 files at its own `// ====` section
+                                       comments, loaded in order as classic
+                                       scripts sharing one global scope --
+                                       navigation split, not real modules)
+            ->  modules/*            (vendored + trimmed)
 ```
 
 `archive-api.js` wraps `window.fetch` and translates the SillyTavern URL space
@@ -150,8 +154,12 @@ built. Those call sites are patched in place; everything reachable through
 
 ### `library.js`
 
+Split into `library-sections/NN-*.js` (see the wiring diagram above); the
+filename `library.js` below refers to that pre-split monolith the edits were
+made against.
+
 Every edit is marked in place with a comment beginning `ARCHIVE FORK`, so
-`grep -n 'ARCHIVE FORK' library.js` is the authoritative list.
+`grep -rn 'ARCHIVE FORK' library-sections/` is the authoritative list.
 
 1. **`prepareCharacterKeys()`** — takes `char.token_estimate` from the server
    when present. The list endpoint sends no prose, so `computeTokenEstimate()`
