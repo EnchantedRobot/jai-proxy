@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from proxy import dashboard as dashboard_mod
 from proxy import janitor_mapper, saucepan_mapper
+from proxy.api import v1_router
 from proxy.avatar import AvatarFetcher
 from proxy.capture_store import CaptureStore
 from proxy.cardbuilder import CardBuilder, PngWriter
@@ -39,6 +40,11 @@ logger = logging.getLogger("jai_proxy.server")
 DASHBOARD: dashboard_mod.Dashboard | None = None
 
 app = FastAPI(title="jai-proxy")
+
+# The archive's own contract: browse, download, export. Deliberately namespaced
+# under /api/v1 and deliberately not shaped like SillyTavern's /api -- see
+# proxy/api/__init__.py for why that distinction is the point.
+app.include_router(v1_router)
 
 app.add_middleware(
     CORSMiddleware,

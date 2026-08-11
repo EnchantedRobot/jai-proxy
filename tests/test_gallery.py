@@ -81,3 +81,34 @@ def test_ensure_id_creates_extensions_when_missing_or_not_a_dict():
     for data in ({}, {"extensions": None}, {"extensions": "junk"}):
         gid = gallery.ensure_id(data)
         assert data["extensions"]["gallery_id"] == gid
+
+
+# --- folder_name ------------------------------------------------------------
+# The convention CharacterLibrary computes live, reimplemented so the archive can
+# find the 3,804 folders that already exist. Verified against the live archive at
+# 3,785 of 3,839 cards, the remainder being cards whose images were never pulled.
+
+
+def test_folder_name_is_name_plus_id():
+    assert gallery.folder_name("Abbie", "kzbYR2QbpncC") == "Abbie_kzbYR2QbpncC"
+
+
+def test_folder_name_replaces_only_the_reserved_characters():
+    """Deliberately *not* the card-filename sanitizer: a card named `A.D.A` is the
+    file `A_D_A_<id8>.png` but the gallery folder `A.D.A_<gallery_id>`, and dots,
+    spaces, commas and curly apostrophes all survive."""
+    assert gallery.folder_name("A.D.A", "x" * 12) == "A.D.A_xxxxxxxxxxxx"
+    assert gallery.folder_name("A Mother’s Claim, A Hunger", "y" * 12) == (
+        "A Mother’s Claim, A Hunger_yyyyyyyyyyyy"
+    )
+    assert gallery.folder_name('Bad<>:"/\\|?*Name', "z" * 12) == "Bad_________Name_zzzzzzzzzzzz"
+
+
+def test_folder_name_trims_surrounding_whitespace():
+    assert gallery.folder_name("  Padded  ", "q" * 12) == "Padded_qqqqqqqqqqqq"
+
+
+def test_no_gallery_id_means_no_folder():
+    """Rather than a name every id-less card would collide on."""
+    assert gallery.folder_name("Abbie", None) == ""
+    assert gallery.folder_name("Abbie", "") == ""

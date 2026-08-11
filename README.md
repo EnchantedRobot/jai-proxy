@@ -248,6 +248,61 @@ make gallery-ids              # read-only report: which cards lack an id
 make gallery-ids ARGS=--apply # mint and patch them in (pixels preserved)
 ```
 
+## The archive API (`/api/v1`)
+
+The archive itself lives in `data/` — `characters/` (the cards), `galleries/`
+(their images), `cache/thumbs/` (browse-grid derivatives) — and is served by a
+read-only HTTP contract of its own:
+
+| Endpoint | What it gives you |
+| --- | --- |
+| `GET /api/v1/characters` | list + filter: `q`, `tag` (repeatable, ANDed), `creator`, `source`, `has_lorebook`, `has_gallery`, `health`, `sort`, `limit`/`offset` (`limit=0` = everything) |
+| `GET /api/v1/characters/{filename}` | one card in full — the entire embedded V3 `data`, plus its gallery measured on disk |
+| `GET /api/v1/characters/{filename}/png` | the card file, byte for byte — this is the single-card export |
+| `GET /api/v1/characters/{filename}/thumb` | a ~10 KB derivative, generated on a cache miss |
+| `GET /api/v1/facets` | every tag / creator / source with counts, for the filter UI |
+| `GET /api/v1/stats` | archive and index health, including thumbnail coverage |
+| `POST /api/v1/refresh` | force a rescan (endpoints already refresh themselves) |
+
+Two decisions worth knowing, because both were the alternative being rejected:
+
+**It is deliberately not SillyTavern's `/api` shape.** Answering
+`/characters/edit-attribute` and friends would let CharacterLibrary's frontend be
+vendored with no JavaScript changes at all — and would sign this server up to
+impersonate SillyTavern's internals forever. What is worth keeping is *format*
+compatibility (V3 PNG, the bundle zip, the `gallery_id` convention); none of that
+requires matching anyone else's URLs. See `proxy/api/__init__.py`.
+
+**There is no database.** A full scan — decode every PNG's tEXt chunk, base64,
+JSON — costs ~1.3 s across all 3,839 cards, and the stat sweep that keeps the
+index honest costs 21 ms. So the index is a dict in memory, rebuilt at startup and
+re-validated per request on `(mtime, size)`; the filesystem stays the only source
+of truth. A card acquired, renamed or deleted outside the process appears in the
+grid within one debounce interval with no reindex step (`proxy/archive.py`).
+
+Cards that fail to parse are recorded rather than skipped — `GET
+/api/v1/characters?health=broken` lists them with the reason, because an archive
+silently dropping the files it cannot read is the failure an archive exists to
+prevent.
+
+### Thumbnails
+
+The grid cannot serve 800 KB originals, but it did not need a thumbnailer either:
+both caches were inherited at cutover (SillyTavern's `thumbnails/avatar`, keyed by
+the exact card filename, and CharacterLibrary's `cl_thumbs`) and covered 99.6% of
+the archive on arrival. `make thumbs` closes the rest:
+
+```bash
+make thumbs               # report: missing, miscased, stale
+make thumbs ARGS=--apply  # render the misses, retire the orphans
+```
+
+**Every inherited avatar thumb is JPEG data behind a `.png` extension** — all
+4,663 of them. The media type is therefore always sniffed from the file's magic
+number and never derived from its name; generated thumbs keep the same convention
+so the cache stays uniform and drop-in compatible in both directions
+(`proxy/thumbs.py`).
+
 ## Tests
 
 ```bash
@@ -275,9 +330,16 @@ is verified live.
 
 ## Status
 
-`uv run pytest` green (283). Server-side JSON refactor complete; datacat + Chub.ai
+`uv run pytest` green (518). Server-side JSON refactor complete; datacat + Chub.ai
 bulk import live; live end-to-end verification of the userscript export flows is
 pending.
+
+Mid-migration to a standalone **character archive** that runs beside SillyTavern
+rather than inside it. Landed: `data/` holds the archive (3,839 cards), the
+read-only browse API above, and 100% thumbnail coverage. Next: vendor
+CharacterLibrary's frontend into `web/` against this API, bundle `.zip` export,
+and a mock responder to replace `mlx_client.py` — MLX is macOS-only and is the
+last thing blocking a container.
 
 Deliberately out of scope unless a real need surfaces: true token-by-token
 streaming (the server wraps MLX's full reply as a single SSE chunk, which

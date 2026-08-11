@@ -1,0 +1,221 @@
+"""Thumbnails for the browse grid.
+
+The archive averages 800 KB a card, so a 40-card viewport is 32 MB of PNG. The
+grid cannot serve originals; it needs a small derivative of every card. What it
+does *not* need is a thumbnailer built from scratch, because two populated caches
+came across at cutover and cover 99.6% of the archive between them:
+
+    data/cache/thumbs/avatar/    <- SillyTavern's thumbnails/avatar
+                                    4,663 files, 10.3 KB average, keyed by the
+                                    *exact* card filename. 3,823 of 3,839 cards
+                                    already have one; 16 need generating, and
+                                    840 belong to cards that no longer exist.
+    data/cache/thumbs/gallery/   <- CharacterLibrary's user/cl_thumbs
+                                    3,446 folders on the <Name>_<gallery_id>
+                                    convention.
+
+So the job is inherit, generate on miss, prune the orphans -- and one trap.
+
+**Every inherited avatar thumb is JPEG data behind a `.png` extension.** All
+4,663 of them: 96x144, progressive JPEG, named `<card>.png` because SillyTavern
+names the thumb after the card and never revisits the extension. Deriving a
+`Content-Type` from the extension therefore serves `image/png` for JPEG bytes on
+99.6% of the archive. Browsers sniff and cope, but caches and any non-browser
+client are entitled not to, so the media type here is always read from the file's
+magic number and never from its name.
+
+Thumbs generated on a miss keep both halves of that convention -- the card's
+filename and JPEG bytes -- rather than "fixing" the extension. A cache where one
+file in 240 is addressed differently from the rest is a worse bug than an
+inaccurate extension that is never trusted anyway, and the sniff makes the
+inaccuracy harmless. The cache stays drop-in compatible with SillyTavern's in
+both directions.
+
+The whole directory is a cache: deleting it costs one regeneration pass, never
+data.
+"""
+
+from __future__ import annotations
+
+import io
+import logging
+from dataclasses import dataclass
+from pathlib import Path
+
+from PIL import Image
+
+from proxy import pngtools
+from proxy.config import settings
+
+logger = logging.getLogger("jai_proxy.thumbs")
+
+# SillyTavern's avatar thumbnail geometry, matched deliberately. The inherited
+# cache is 3,823 files at 96x144 and a generated thumb has to sit beside them
+# without the grid showing two sizes -- so this is fixed by the inheritance, not
+# chosen. Raising it means regenerating the whole cache and throwing away the
+# 99.6% head start, which is a separate decision from getting the grid working.
+THUMB_SIZE = (96, 144)
+_JPEG_QUALITY = 90
+
+_MAGIC: tuple[tuple[bytes, str], ...] = (
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"BM", "image/bmp"),
+)
+_FALLBACK_MEDIA_TYPE = "application/octet-stream"
+
+
+@dataclass(frozen=True, slots=True)
+class ThumbFile:
+    """A thumbnail on disk, with the media type its *bytes* say it is."""
+
+    path: Path
+    media_type: str
+
+
+def sniff_media_type(header: bytes) -> str:
+    """The media type of an image from its leading bytes. WebP needs both ends of
+    its 12-byte RIFF header checked, hence the special case; everything else is a
+    plain prefix. Unrecognized bytes get the generic type rather than a guess --
+    an unknown thumb is a bug to notice, not to paper over with `image/png`."""
+    for magic, media_type in _MAGIC:
+        if header.startswith(magic):
+            return media_type
+    if header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+        return "image/webp"
+    return _FALLBACK_MEDIA_TYPE
+
+
+def media_type_of(path: Path) -> str:
+    """Sniff a thumb file's media type. Never trusts the extension -- see the
+    module docstring: the inherited avatar cache is JPEG named `.png`."""
+    try:
+        with path.open("rb") as fh:
+            return sniff_media_type(fh.read(12))
+    except OSError:
+        return _FALLBACK_MEDIA_TYPE
+
+
+class ThumbnailStore:
+    """The thumbnail cache: look up, generate on miss, prune orphans."""
+
+    def __init__(self, root: Path | None = None, archive_dir: Path | None = None) -> None:
+        self.root = root or settings.thumbs_dir
+        self.archive_dir = archive_dir or settings.archive_dir
+
+    @property
+    def avatar_dir(self) -> Path:
+        return self.root / "avatar"
+
+    @property
+    def gallery_dir(self) -> Path:
+        return self.root / "gallery"
+
+    def avatar_path(self, filename: str) -> Path:
+        """Where a card's avatar thumb lives. Keyed by the exact card filename,
+        extension included, which is SillyTavern's convention and what makes the
+        inherited cache usable without a rename pass."""
+        return self.avatar_dir / filename
+
+    def avatar(self, filename: str, *, generate: bool = True) -> ThumbFile | None:
+        """A card's avatar thumbnail, generating it if the cache misses.
+
+        Returns None only when the thumb is absent *and* cannot be made -- an
+        unparseable card, an unreadable file. Callers fall back to serving the
+        full PNG, which is correct but heavy, so a None is worth logging."""
+        path = self.avatar_path(filename)
+        if path.is_file():
+            return ThumbFile(path, media_type_of(path))
+        if not generate:
+            return None
+        return self.generate_avatar(filename)
+
+    def generate_avatar(self, filename: str) -> ThumbFile | None:
+        """Render one card's avatar thumb and cache it. Overwrites any existing
+        thumb, so this doubles as the repair path for a stale or corrupt one."""
+        source = self.archive_dir / filename
+        try:
+            data = _render_thumb(source.read_bytes())
+        except (OSError, ValueError, TypeError, Image.DecompressionBombError) as exc:
+            logger.warning("thumbs: cannot render %s: %s", filename, exc)
+            return None
+        path = self.avatar_path(filename)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Write-then-rename: a browse grid requests dozens of thumbs at once and a
+        # reader must never see a half-written file.
+        temporary = path.with_name(path.name + ".part")
+        temporary.write_bytes(data)
+        temporary.replace(path)
+        return ThumbFile(path, sniff_media_type(data))
+
+    # --- maintenance ---------------------------------------------------------
+
+    def missing(self, filenames: list[str]) -> list[str]:
+        """Which of these cards have no avatar thumb yet."""
+        return [name for name in filenames if not self.avatar_path(name).is_file()]
+
+    def stale(self, filenames: list[str]) -> list[Path]:
+        """Avatar thumbs whose card is gone -- renamed or deleted. 840 of these
+        came across at cutover, the residue of every `make names` rename and
+        every card removed from the archive over its life."""
+        known = set(filenames)
+        try:
+            entries = sorted(self.avatar_dir.iterdir())
+        except OSError:
+            return []
+        return [p for p in entries if p.is_file() and p.name not in known]
+
+
+def _render_thumb(card_png: bytes) -> bytes:
+    """A card PNG's pixels as a THUMB_SIZE JPEG, cover-cropped.
+
+    The card's text chunks are irrelevant here -- only the pixels matter -- but
+    they are why the source is large, and why `Image.open` on a 1.2 MB card is
+    still the cheap part next to the resize.
+
+    Cover-crop rather than letterbox: the grid is a uniform 2:3 tile and a card
+    avatar is already a portrait, so scaling to fill and trimming the overflow
+    centre-weighted loses less of the subject than padding would. Matches what
+    the inherited cache did, so a generated thumb is indistinguishable from an
+    inherited one in the grid.
+    """
+    image = Image.open(io.BytesIO(card_png))
+    image.load()
+    # JPEG has no alpha. Flatten onto white rather than dropping the channel, so a
+    # transparent-background avatar comes out white-backed instead of black.
+    if image.mode in ("RGBA", "LA", "P"):
+        image = image.convert("RGBA")
+        flattened = Image.new("RGB", image.size, (255, 255, 255))
+        flattened.paste(image, mask=image.split()[-1])
+        image = flattened
+    else:
+        image = image.convert("RGB")
+
+    target_w, target_h = THUMB_SIZE
+    src_w, src_h = image.size
+    scale = max(target_w / src_w, target_h / src_h)
+    resized = image.resize(
+        (max(1, round(src_w * scale)), max(1, round(src_h * scale))),
+        Image.LANCZOS,
+    )
+    left = (resized.width - target_w) // 2
+    # Bias the vertical crop upward: on a portrait avatar the face is above
+    # centre, and a centred crop of a tall image is the classic way to serve a
+    # grid full of torsos.
+    top = (resized.height - target_h) // 3
+    cropped = resized.crop((left, top, left + target_w, top + target_h))
+
+    buffer = io.BytesIO()
+    cropped.save(buffer, "JPEG", quality=_JPEG_QUALITY, optimize=True, progressive=True)
+    return buffer.getvalue()
+
+
+def has_embedded_card(png: bytes) -> bool:
+    """Whether these bytes carry a character card. Only used by the maintenance
+    script, to tell a real card apart from a stray image in the archive."""
+    try:
+        return pngtools.read_envelope(png) is not None
+    except (ValueError, TypeError):
+        return False

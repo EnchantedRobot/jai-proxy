@@ -1,4 +1,4 @@
-.PHONY: compile test test-js run import gallery-ids check names
+.PHONY: compile test test-js run import gallery-ids check names thumbs
 
 # Every target reads .env (see .env.template) via proxy/config.py -- most
 # importantly JAI_PROXY_OUTPUT_DIR, the cards folder they all read and write.
@@ -54,3 +54,12 @@ check:
 # `make names ARGS=--stats` scores them against it.
 names:
 	uv run python scripts/fix_names.py $(ARGS)
+
+# Tidy the browse grid's thumbnail cache (data/cache/thumbs/avatar): render the
+# cards that have no thumb, retire the thumbs whose card is gone, and fix the
+# ones whose name differs from their card's only by case -- macOS resolves those
+# anyway, so they look fine here and would silently miss in a Linux container.
+# The API also generates on miss, so this only ever moves work off first paint.
+# Read-only report by default; `make thumbs ARGS=--apply` writes.
+thumbs:
+	uv run python scripts/sync_thumbs.py $(ARGS)

@@ -1,0 +1,134 @@
+"""Response schemas for `/api/v1`.
+
+Separate from `proxy/models.py`, which holds the request/response bodies of the
+capture-and-build endpoints the userscripts talk to. Those are an internal
+protocol between two halves of one tool; these are the archive's public contract,
+consumed by a frontend that is versioned independently, and mixing the two would
+make an incidental change to a build payload look like a breaking API change.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class CardOut(BaseModel):
+    """A card as the browse grid sees it: metadata, counts, and no prose.
+
+    `description_chars` and the `has_*` flags are here instead of the text itself
+    so a list of 3,839 cards stays small enough to send whole -- they answer "is
+    this card substantial?" and "what is missing from it?", which is what a grid
+    and a data-quality pass actually ask.
+    """
+
+    id: str = Field(description="The card's filename on disk, e.g. `Abbie_0d162f5f.png`.")
+    name: str
+    creator: str
+    page_name: str = Field(description="The source page's title blurb, e.g. `Offer You Can't Refuse | Abbie`.")
+    tags: list[str]
+    source_kind: str = Field(description="Which importer wrote it: janitor_core, chub_import, datacat_import, saucepan_core, jannyai_import.")
+    source_url: str
+    card_id: str = Field(description="The source's own id for the character.")
+    fragment: str = Field(description="The `_<id8>` slice of card_id that the filename carries.")
+    gallery_id: str
+    character_version: str
+    greetings: int = Field(description="Primary greeting plus alternates.")
+    lore_entries: int
+    description_chars: int
+    has_creator_notes: bool
+    has_example_dialogue: bool
+    size: int = Field(description="Card PNG size in bytes.")
+    modified: datetime
+    thumb_url: str
+    png_url: str
+    error: str | None = Field(
+        default=None,
+        description="Why this card could not be parsed. Null for healthy cards; a card with an error has only its file fields filled in.",
+    )
+
+
+class CardListOut(BaseModel):
+    """A page of cards. `total` is the size of the filtered set, not the archive,
+    so a client can page without asking twice."""
+
+    total: int
+    limit: int
+    offset: int
+    items: list[CardOut]
+
+
+class GalleryOut(BaseModel):
+    """A character's image gallery on disk.
+
+    `folder` is computed from the card's current name plus its gallery_id -- the
+    convention CharacterLibrary uses -- so `exists: false` with a non-empty
+    folder means either no images were ever downloaded or the card was renamed
+    out from under its folder. See `proxy.gallery.folder_name`.
+    """
+
+    gallery_id: str
+    folder: str
+    exists: bool
+    images: int
+    bytes: int
+
+
+class CardDetailOut(CardOut):
+    """One card in full: the summary plus the entire embedded V3 card.
+
+    `card` is the card's `data` object verbatim, straight off the PNG rather than
+    out of the index -- descriptions, greetings, lorebook, every extension block.
+    Unrewritten on purpose: an archive's detail view should show what is actually
+    embedded, not this server's interpretation of it.
+    """
+
+    spec: str
+    spec_version: str
+    card: dict[str, Any]
+    gallery: GalleryOut
+
+
+class FacetValue(BaseModel):
+    value: str
+    count: int
+
+
+class FacetsOut(BaseModel):
+    """Every value the filters can take, with counts, over the whole archive.
+    Computed on the unfiltered set so a filter UI does not shrink its own
+    options as you use it."""
+
+    tags: list[FacetValue]
+    creators: list[FacetValue]
+    sources: list[FacetValue]
+
+
+class ThumbStatsOut(BaseModel):
+    cached: int = Field(description="Avatar thumbs present in the cache.")
+    missing: int = Field(description="Indexed cards with no thumb yet; generated on first request.")
+    stale: int = Field(description="Thumbs whose card is gone -- prune with scripts/prune_thumbs.py.")
+
+
+class IndexStatsOut(BaseModel):
+    scanned: int
+    parsed: int = Field(description="Cards re-read on the last refresh, i.e. new or changed.")
+    unchanged: int
+    removed: int
+    seconds: float
+
+
+class StatsOut(BaseModel):
+    """The archive at a glance, and the health of the index behind it."""
+
+    cards: int
+    unreadable: int = Field(description="Cards present but unparseable. Listed at /api/v1/characters?health=broken.")
+    bytes: int
+    creators: int
+    tags: int
+    galleries: int = Field(description="Cards whose gallery folder exists on disk.")
+    archive_dir: str
+    thumbs: ThumbStatsOut
+    index: IndexStatsOut

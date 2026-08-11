@@ -23,6 +23,7 @@ re-exporting a character keeps the id the card already on disk carries.
 
 from __future__ import annotations
 
+import re
 import secrets
 import string
 from typing import Any
@@ -31,10 +32,37 @@ from typing import Any
 _ALPHABET = string.ascii_uppercase + string.ascii_lowercase + string.digits
 _LENGTH = 12
 
+# The characters CharacterLibrary replaces in a gallery folder name -- Windows'
+# reserved set, and nothing more. Notably *not* the same sanitizer the card
+# filename uses: a card named `A.D.A` is the file `A_D_A_<id8>.png` but the
+# gallery folder `A.D.A_<gallery_id>`, so the two must not share a helper.
+_FOLDER_UNSAFE_RE = re.compile(r'[<>:"/\\|?*]')
+
 
 def generate_id() -> str:
     """A fresh 12-character alphanumeric gallery id, e.g. 'aB3xY9kLmN2p'."""
     return "".join(secrets.choice(_ALPHABET) for _ in range(_LENGTH))
+
+
+def folder_name(name: str, gallery_id: Any) -> str:
+    """The gallery folder for a character: `<sanitized name>_<gallery_id>`.
+
+    CharacterLibrary derives this from the character's *current* name every time
+    it needs it, which is why a rename orphans a gallery -- the folder keeps the
+    old name and nothing looks for it there (`scripts/repair_galleries.py` exists
+    to clean up after exactly that). Reimplemented here, verbatim, because the
+    archive has to keep computing it the same way to find the 3,804 folders that
+    already exist and to stay drop-in compatible on export.
+
+    Verified against the live archive: 3,785 of 3,839 cards resolve to a folder
+    that exists, and the remainder are cards whose images were never downloaded.
+
+    A card with no gallery_id has no gallery folder, and gets "" rather than a
+    name that would collide with every other id-less card.
+    """
+    if gallery_id in (None, ""):
+        return ""
+    return f"{_FOLDER_UNSAFE_RE.sub('_', name.strip())}_{gallery_id}"
 
 
 def read_id(data: dict[str, Any]) -> Any | None:

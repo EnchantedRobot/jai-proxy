@@ -15,6 +15,11 @@ wheels/
 # jai-proxy output archive -- only used when JAI_PROXY_OUTPUT_DIR is unset
 /cards/
 
+# The archive itself. Lives in-tree so dev sees the same layout the
+# container sees (./data/...), but is never committed.
+/data/*
+!/data/.gitkeep
+
 # Server working state: definition captures + lorebook cache
 /state/
 

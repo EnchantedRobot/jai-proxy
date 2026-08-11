@@ -41,6 +41,23 @@ class Settings(BaseSettings):
     #             fragment, so they don't collide across creators.
     card_layout: Literal["flat", "nested"] = "flat"
 
+    # --- The archive ----------------------------------------------------------
+    # The character archive this server browses and exports from. Distinct from
+    # output_dir on purpose: output_dir is where a *build* drops a new card (and
+    # may still point at SillyTavern's characters folder), while these three are
+    # the archive proper -- the thing the browse API reads. They default under
+    # the repo's own `data/`, which is gitignored, so the layout a developer sees
+    # is byte-for-byte the layout the container sees at its volume mount and no
+    # code has to branch on environment. Absolute (via ROOT) rather than
+    # cwd-relative so `uv run python -m proxy.server` works from any directory.
+    archive_dir: Path = ROOT / "data" / "characters"
+    galleries_dir: Path = ROOT / "data" / "galleries"
+    # Thumbnail caches, both inherited at cutover: `avatar/` from SillyTavern's
+    # thumbnails/avatar (keyed by the exact card filename) and `gallery/` from
+    # CharacterLibrary's cl_thumbs (keyed by <Name>_<gallery_id>). Pure cache --
+    # deletable, regenerated on miss.
+    thumbs_dir: Path = ROOT / "data" / "cache" / "thumbs"
+
     # Server-side working state, deliberately *not* under output_dir: that may
     # point at SillyTavern's characters folder, which is not ours to litter.
     captures_dir: Path = Path("./state/captures")
@@ -81,5 +98,8 @@ class Settings(BaseSettings):
 
 settings = Settings()
 settings.output_dir.mkdir(parents=True, exist_ok=True)
+settings.archive_dir.mkdir(parents=True, exist_ok=True)
+settings.galleries_dir.mkdir(parents=True, exist_ok=True)
+settings.thumbs_dir.mkdir(parents=True, exist_ok=True)
 settings.captures_dir.mkdir(parents=True, exist_ok=True)
 settings.lorebook_cache_dir.mkdir(parents=True, exist_ok=True)
