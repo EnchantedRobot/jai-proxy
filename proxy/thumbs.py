@@ -55,6 +55,9 @@ logger = logging.getLogger("jai_proxy.thumbs")
 # chosen. Raising it means regenerating the whole cache and throwing away the
 # 99.6% head start, which is a separate decision from getting the grid working.
 THUMB_SIZE = (96, 144)
+# CharacterLibrary's gallery-thumb edge, likewise fixed by the 3,446 inherited
+# folders rather than chosen: their files are named `<image>_384.jpg`.
+GALLERY_THUMB_SIZE = 384
 _JPEG_QUALITY = 90
 
 _MAGIC: tuple[tuple[bytes, str], ...] = (
@@ -113,35 +116,88 @@ class ThumbnailStore:
     def gallery_dir(self) -> Path:
         return self.root / "gallery"
 
-    def avatar_path(self, filename: str) -> Path:
+    def avatar_path(self, filename: str, size: int | None = None) -> Path:
         """Where a card's avatar thumb lives. Keyed by the exact card filename,
         extension included, which is SillyTavern's convention and what makes the
-        inherited cache usable without a rename pass."""
-        return self.avatar_dir / filename
+        inherited cache usable without a rename pass.
 
-    def avatar(self, filename: str, *, generate: bool = True) -> ThumbFile | None:
+        `size` is the *height* of a larger derivative, and lands in its own
+        sibling directory rather than beside the inherited files. The inherited
+        cache is 3,839 files at one fixed geometry and it is worth keeping
+        exactly as it is: mixing sizes into it would mean either a rename pass
+        over the lot or a directory where the size of a file is unknowable from
+        its name. `size=None` -- the default -- is that inherited cache.
+        """
+        if size is None:
+            return self.avatar_dir / filename
+        return self.root / f"avatar_{size}" / filename
+
+    def gallery_path(self, folder: str, filename: str, size: int = GALLERY_THUMB_SIZE) -> Path:
+        """Where a gallery image's thumb lives: `<folder>/<file>_<size>.jpg`.
+
+        CharacterLibrary's `cl_thumbs` convention, kept verbatim -- the size is
+        in the *name* rather than a subdirectory, so one folder holds every size
+        ever requested for its images. 3,446 folders came across on this scheme
+        and renaming them would throw away 780 MB of already-rendered thumbs.
+        """
+        return self.gallery_dir / folder / f"{filename}_{size}.jpg"
+
+    def gallery(
+        self, source: Path, folder: str, filename: str, size: int = GALLERY_THUMB_SIZE
+    ) -> ThumbFile | None:
+        """A gallery image's thumbnail, generating it if the cache misses.
+
+        `source` is passed in rather than derived because the galleries live
+        outside this store's roots -- the store owns the cache, not the images.
+        """
+        path = self.gallery_path(folder, filename, size)
+        if path.is_file():
+            return ThumbFile(path, media_type_of(path))
+        return self.generate_gallery(source, folder, filename, size)
+
+    def generate_gallery(
+        self, source: Path, folder: str, filename: str, size: int = GALLERY_THUMB_SIZE
+    ) -> ThumbFile | None:
+        """Render one gallery image's thumb and cache it. Returns None for
+        anything Pillow cannot open -- a gallery holds video and audio too, and
+        those are the caller's problem to present, not this one's to guess at."""
+        try:
+            data = _render_thumb(source.read_bytes(), size=(size, size), cover=False)
+        except (OSError, ValueError, TypeError, Image.DecompressionBombError) as exc:
+            logger.info("thumbs: cannot render gallery image %s/%s: %s", folder, filename, exc)
+            return None
+        path = self.gallery_path(folder, filename, size)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(path.name + ".part")
+        temporary.write_bytes(data)
+        temporary.replace(path)
+        return ThumbFile(path, sniff_media_type(data))
+
+    def avatar(
+        self, filename: str, *, size: int | None = None, generate: bool = True
+    ) -> ThumbFile | None:
         """A card's avatar thumbnail, generating it if the cache misses.
 
         Returns None only when the thumb is absent *and* cannot be made -- an
         unparseable card, an unreadable file. Callers fall back to serving the
         full PNG, which is correct but heavy, so a None is worth logging."""
-        path = self.avatar_path(filename)
+        path = self.avatar_path(filename, size)
         if path.is_file():
             return ThumbFile(path, media_type_of(path))
         if not generate:
             return None
-        return self.generate_avatar(filename)
+        return self.generate_avatar(filename, size)
 
-    def generate_avatar(self, filename: str) -> ThumbFile | None:
+    def generate_avatar(self, filename: str, size: int | None = None) -> ThumbFile | None:
         """Render one card's avatar thumb and cache it. Overwrites any existing
         thumb, so this doubles as the repair path for a stale or corrupt one."""
         source = self.archive_dir / filename
         try:
-            data = _render_thumb(source.read_bytes())
+            data = _render_thumb(source.read_bytes(), size=_avatar_box(size))
         except (OSError, ValueError, TypeError, Image.DecompressionBombError) as exc:
             logger.warning("thumbs: cannot render %s: %s", filename, exc)
             return None
-        path = self.avatar_path(filename)
+        path = self.avatar_path(filename, size)
         path.parent.mkdir(parents=True, exist_ok=True)
         # Write-then-rename: a browse grid requests dozens of thumbs at once and a
         # reader must never see a half-written file.
@@ -168,20 +224,39 @@ class ThumbnailStore:
         return [p for p in entries if p.is_file() and p.name not in known]
 
 
-def _render_thumb(card_png: bytes) -> bytes:
-    """A card PNG's pixels as a THUMB_SIZE JPEG, cover-cropped.
+def _avatar_box(size: int | None) -> tuple[int, int]:
+    """The crop box for an avatar thumb of the given height.
 
-    The card's text chunks are irrelevant here -- only the pixels matter -- but
-    they are why the source is large, and why `Image.open` on a 1.2 MB card is
-    still the cheap part next to the resize.
-
-    Cover-crop rather than letterbox: the grid is a uniform 2:3 tile and a card
-    avatar is already a portrait, so scaling to fill and trimming the overflow
-    centre-weighted loses less of the subject than padding would. Matches what
-    the inherited cache did, so a generated thumb is indistinguishable from an
-    inherited one in the grid.
+    Fixed at THUMB_SIZE's 2:3 aspect whatever the height, because the grid tile
+    is 2:3 and a thumb that does not match it either letterboxes or gets
+    stretched by the browser. So one number is enough to ask for a bigger one.
     """
-    image = Image.open(io.BytesIO(card_png))
+    if size is None:
+        return THUMB_SIZE
+    width, height = THUMB_SIZE
+    return (max(1, round(size * width / height)), size)
+
+
+def _render_thumb(
+    source: bytes, *, size: tuple[int, int] = THUMB_SIZE, cover: bool = True
+) -> bytes:
+    """An image's pixels as a small JPEG.
+
+    Two callers, two geometries. A *card* avatar is cover-cropped to a fixed 2:3
+    tile (`cover=True`): the grid is uniform, the source is already a portrait,
+    and scaling to fill then trimming the overflow loses less of the subject than
+    padding would. A *gallery* image is fitted inside a square instead
+    (`cover=False`) -- galleries hold every aspect ratio there is, and cropping a
+    wide illustration to a square is destroying the picture to make a tile.
+
+    Either way this matches what the inherited caches already contain, so a
+    generated thumb is indistinguishable from an inherited one beside it.
+
+    For a card the text chunks are irrelevant here -- only the pixels matter --
+    but they are why the source is large, and why `Image.open` on a 1.2 MB card
+    is still the cheap part next to the resize.
+    """
+    image = Image.open(io.BytesIO(source))
     image.load()
     # JPEG has no alpha. Flatten onto white rather than dropping the channel, so a
     # transparent-background avatar comes out white-backed instead of black.
@@ -193,22 +268,26 @@ def _render_thumb(card_png: bytes) -> bytes:
     else:
         image = image.convert("RGB")
 
-    target_w, target_h = THUMB_SIZE
+    target_w, target_h = size
     src_w, src_h = image.size
-    scale = max(target_w / src_w, target_h / src_h)
+    # Cover fills the box and overflows; contain fits inside it. `min` also means
+    # a gallery image smaller than the box is left alone rather than upscaled
+    # into a blur.
+    scale = max(target_w / src_w, target_h / src_h) if cover else min(1.0, min(target_w / src_w, target_h / src_h))
     resized = image.resize(
         (max(1, round(src_w * scale)), max(1, round(src_h * scale))),
         Image.LANCZOS,
     )
-    left = (resized.width - target_w) // 2
-    # Bias the vertical crop upward: on a portrait avatar the face is above
-    # centre, and a centred crop of a tall image is the classic way to serve a
-    # grid full of torsos.
-    top = (resized.height - target_h) // 3
-    cropped = resized.crop((left, top, left + target_w, top + target_h))
+    if cover:
+        left = (resized.width - target_w) // 2
+        # Bias the vertical crop upward: on a portrait avatar the face is above
+        # centre, and a centred crop of a tall image is the classic way to serve
+        # a grid full of torsos.
+        top = (resized.height - target_h) // 3
+        resized = resized.crop((left, top, left + target_w, top + target_h))
 
     buffer = io.BytesIO()
-    cropped.save(buffer, "JPEG", quality=_JPEG_QUALITY, optimize=True, progressive=True)
+    resized.save(buffer, "JPEG", quality=_JPEG_QUALITY, optimize=True, progressive=True)
     return buffer.getvalue()
 
 

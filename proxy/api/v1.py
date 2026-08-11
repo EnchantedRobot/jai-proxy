@@ -28,6 +28,9 @@ from proxy.api.models import (
     CardOut,
     FacetsOut,
     FacetValue,
+    GalleryFileOut,
+    GalleryFilesOut,
+    GalleryFolderOut,
     GalleryOut,
     IndexStatsOut,
     StatsOut,
@@ -48,10 +51,14 @@ _SORTS: dict[str, str] = {
     "name": "name",
     "creator": "creator",
     "modified": "mtime",
+    # When the card arrived, not when its file was last touched. The better
+    # default for "recently added" -- see CardOut.linked_at.
+    "added": "linked_at",
     "size": "size",
     "greetings": "greeting_count",
     "lore": "lore_entry_count",
     "description": "description_chars",
+    "prompt": "prompt_chars",
 }
 
 # Thumbs are content-addressed by (mtime, size) via their ETag, so a long
@@ -81,9 +88,10 @@ def _require(idx: archive.ArchiveIndex, card_id: str) -> archive.CardSummary:
     return record
 
 
-def _card_out(record: archive.CardSummary) -> CardOut:
+def _card_out(record: archive.CardSummary, *, extensions: bool = False) -> CardOut:
     quoted = quote(record.filename, safe="")
     return CardOut(
+        extensions=record.extensions if extensions else None,
         id=record.filename,
         name=record.name,
         creator=record.creator,
@@ -98,10 +106,12 @@ def _card_out(record: archive.CardSummary) -> CardOut:
         greetings=record.greeting_count,
         lore_entries=record.lore_entry_count,
         description_chars=record.description_chars,
+        prompt_chars=record.prompt_chars,
         has_creator_notes=record.has_creator_notes,
         has_example_dialogue=record.has_example_dialogue,
         size=record.size,
         modified=datetime.fromtimestamp(record.mtime, tz=timezone.utc),
+        linked_at=record.linked_at,
         thumb_url=f"{router.prefix}/characters/{quoted}/thumb",
         png_url=f"{router.prefix}/characters/{quoted}/png",
         error=record.error or None,
@@ -175,10 +185,14 @@ def list_characters(
     ),
     sort: str = Query(
         "name",
-        description="One of name, creator, modified, size, greetings, lore, description. Prefix with `-` to reverse.",
+        description="One of name, creator, added, modified, size, greetings, lore, description, prompt. Prefix with `-` to reverse.",
     ),
     limit: int = Query(60, ge=0, le=5000, description="0 means no limit -- the whole filtered set."),
     offset: int = Query(0, ge=0),
+    include: list[Literal["extensions"]] = Query(
+        default=[],
+        description="Optional heavier fields. `extensions` attaches each card's `data.extensions` -- provider links, gallery_id, version uids -- at roughly 790 bytes a card.",
+    ),
 ) -> CardListOut:
     idx = _index()
     if health == "ok":
@@ -220,11 +234,12 @@ def list_characters(
         matched.sort(key=lambda r: (getattr(r, key_name), r.filename.casefold()), reverse=descending)
 
     window = matched[offset:] if limit == 0 else matched[offset : offset + limit]
+    want_extensions = "extensions" in include
     return CardListOut(
         total=len(matched),
         limit=limit,
         offset=offset,
-        items=[_card_out(r) for r in window],
+        items=[_card_out(r, extensions=want_extensions) for r in window],
     )
 
 
@@ -304,6 +319,137 @@ def refresh() -> IndexStatsOut:
     )
 
 
+# Which element a gallery file is for, by extension. Sniffing the bytes would be
+# more honest but needs an open per file, and this list exists so a folder of 400
+# files can be described in one scandir.
+_GALLERY_KINDS: dict[str, str] = {
+    **{ext: "image" for ext in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif", ".tif", ".tiff")},
+    **{ext: "video" for ext in (".mp4", ".webm", ".mov", ".m4v", ".mkv")},
+    **{ext: "audio" for ext in (".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac")},
+}
+# What `gallery(...)` can actually render. A `.gif` thumbnails to its first frame,
+# which is what a grid wants; video and audio get no thumb at all rather than a
+# placeholder the client would have to recognise.
+_THUMBABLE = frozenset((".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"))
+
+
+def _safe_child(root: Path, *parts: str) -> Path:
+    """A path under `root`, or a 400.
+
+    Gallery folder and file names arrive from the client -- they are how the
+    frontend addresses images -- so every one of them is a path traversal until
+    proven otherwise. Rejecting separators and `..` up front is not enough on its
+    own (a symlink inside the galleries directory would still escape), so the
+    resolved result is checked against the resolved root as well.
+    """
+    for part in parts:
+        if not part or part in (".", "..") or "/" in part or "\\" in part or "\x00" in part:
+            raise HTTPException(status_code=400, detail=f"illegal path component {part!r}")
+    candidate = root.joinpath(*parts)
+    try:
+        resolved = candidate.resolve()
+        if not resolved.is_relative_to(root.resolve()):
+            raise HTTPException(status_code=400, detail="path escapes the gallery root")
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"cannot resolve path: {exc}") from exc
+    return candidate
+
+
+@router.get("/galleries", response_model=list[GalleryFolderOut], summary="Gallery folders on disk")
+def list_galleries() -> list[GalleryFolderOut]:
+    """Every folder in the galleries directory, each paired with the card that
+    claims it. A folder with `card_id: null` is orphaned -- the card was renamed
+    and nothing computes that folder name any more."""
+    idx = _index()
+    claimed = {
+        gallery.folder_name(r.name, r.gallery_id): r.filename
+        for r in idx.cards()
+        if r.gallery_id
+    }
+    try:
+        with os.scandir(settings.galleries_dir) as entries:
+            folders = sorted(e.name for e in entries if e.is_dir() and not e.name.startswith("."))
+    except OSError:
+        return []
+    return [GalleryFolderOut(folder=f, card_id=claimed.get(f)) for f in folders]
+
+
+@router.get("/galleries/{folder}", response_model=GalleryFilesOut, summary="Files in one gallery")
+def list_gallery_files(folder: str) -> GalleryFilesOut:
+    """A gallery folder's contents. 404 when the folder is not there -- unlike
+    SillyTavern's `/api/images/list`, which creates the directory as a side
+    effect of being asked about it, so the frontend could never tell an empty
+    gallery from a missing one."""
+    path = _safe_child(settings.galleries_dir, folder)
+    try:
+        with os.scandir(path) as entries:
+            files = sorted(
+                (e for e in entries if e.is_file() and not e.name.startswith(".")),
+                key=lambda e: e.name.casefold(),
+            )
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail=f"no gallery folder {folder!r}") from exc
+
+    quoted_folder = quote(folder, safe="")
+    items: list[GalleryFileOut] = []
+    total_bytes = 0
+    for entry in files:
+        st = entry.stat()
+        total_bytes += st.st_size
+        suffix = Path(entry.name).suffix.casefold()
+        quoted_name = quote(entry.name, safe="")
+        base = f"{router.prefix}/galleries/{quoted_folder}/files/{quoted_name}"
+        items.append(
+            GalleryFileOut(
+                name=entry.name,
+                kind=_GALLERY_KINDS.get(suffix, "other"),
+                size=st.st_size,
+                modified=datetime.fromtimestamp(st.st_mtime, tz=timezone.utc),
+                url=base,
+                thumb_url=f"{base}/thumb" if suffix in _THUMBABLE else None,
+            )
+        )
+    return GalleryFilesOut(folder=folder, total=len(items), bytes=total_bytes, items=items)
+
+
+@router.get("/galleries/{folder}/files/{filename}", summary="One gallery image")
+def get_gallery_file(folder: str, filename: str, request: Request) -> Response:
+    path = _safe_child(settings.galleries_dir, folder, filename)
+    return _serve_file(
+        path,
+        media_type=thumbs.media_type_of(path),
+        request=request,
+        cache_control=_THUMB_CACHE_CONTROL,
+    )
+
+
+@router.get("/galleries/{folder}/files/{filename}/thumb", summary="Gallery image thumbnail")
+def get_gallery_thumb(
+    folder: str,
+    filename: str,
+    request: Request,
+    size: int = Query(thumbs.GALLERY_THUMB_SIZE, ge=32, le=1024),
+) -> Response:
+    """A fitted derivative of one gallery image, generated on a cache miss.
+
+    Unlike the avatar thumb this does *not* fall back to the original on failure:
+    a gallery page asks for 100 of these at once, and answering a failure with a
+    4 MB source is how one unrenderable file takes the page down with it.
+    """
+    source = _safe_child(settings.galleries_dir, folder, filename)
+    if not source.is_file():
+        raise HTTPException(status_code=404, detail=f"no file {filename!r} in gallery {folder!r}")
+    thumb = thumbnail_store.gallery(source, folder, filename, size)
+    if thumb is None:
+        raise HTTPException(status_code=415, detail=f"{filename!r} cannot be thumbnailed")
+    return _serve_file(
+        thumb.path,
+        media_type=thumb.media_type,
+        request=request,
+        cache_control=_THUMB_CACHE_CONTROL,
+    )
+
+
 @router.get("/characters/{card_id}", response_model=CardDetailOut, summary="One card in full")
 def get_character(card_id: str) -> CardDetailOut:
     idx = _index()
@@ -349,7 +495,16 @@ def get_character_png(card_id: str, request: Request) -> Response:
 
 
 @router.get("/characters/{card_id}/thumb", summary="Card thumbnail")
-def get_character_thumb(card_id: str, request: Request) -> Response:
+def get_character_thumb(
+    card_id: str,
+    request: Request,
+    size: int | None = Query(
+        None,
+        ge=48,
+        le=1024,
+        description="Thumbnail height in pixels; the 2:3 grid aspect is fixed. Omit for the inherited 96x144 cache, which covers the whole archive already and costs nothing to serve.",
+    ),
+) -> Response:
     """A ~10 KB derivative of the card, generated on a cache miss.
 
     Falls back to the full PNG when a thumb cannot be made -- a card too broken
@@ -358,7 +513,7 @@ def get_character_thumb(card_id: str, request: Request) -> Response:
     """
     idx = _index()
     record = _require(idx, card_id)
-    thumb = thumbnail_store.avatar(record.filename)
+    thumb = thumbnail_store.avatar(record.filename, size=size)
     if thumb is None:
         logger.info("thumbs: falling back to the full PNG for %s", record.filename)
         return _serve_file(idx.root / record.filename, media_type="image/png", request=request)

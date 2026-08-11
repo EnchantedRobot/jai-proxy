@@ -13,9 +13,13 @@ compile:
 test:
 	uv run python -m pytest -q
 
-# Run the userscript unit tests (node:test, no deps -- see userscript/tests/)
+# Run the JavaScript unit tests (node:test, no deps). Two trees, run separately
+# because each resolves its fixtures relative to its own directory: the
+# userscripts (userscript/tests/) and the browser's archive adapter
+# (web/tests/).
 test-js:
 	cd userscript && node --test
+	cd web && node --test
 
 run:
 	uv run python -m proxy.server

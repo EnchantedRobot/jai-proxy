@@ -1,8 +1,9 @@
 """`/api/v1` -- the archive's own contract.
 
-These tests assert the contract's *shape*, not just its status codes, because the
-frontend's `core-api.js` is written against it and a silently renamed field is a
-broken browse grid.
+These tests assert the contract's *shape*, not just its status codes: the
+browser's adapter (`web/archive-api.js`) translates every field of it into the
+shape the vendored frontend expects, so a silently renamed field here is a
+broken browse grid there, with nothing in between to catch it.
 """
 
 from __future__ import annotations
@@ -40,14 +41,60 @@ def test_card_shape_is_the_contract(client):
         "greetings": 1,
         "lore_entries": 2,
         "description_chars": len("Abbie is a test character."),
+        # description + first_mes: the two prompt fields this fixture fills.
+        "prompt_chars": len("Abbie is a test character.") + len("Hello, I am Abbie."),
         "has_creator_notes": False,
         "has_example_dialogue": False,
         "size": item["size"],
         "modified": item["modified"],
+        "linked_at": "2026-07-21T17:31:47.257Z",
         "thumb_url": "/api/v1/characters/Abbie_0d162f5f.png/thumb",
         "png_url": "/api/v1/characters/Abbie_0d162f5f.png/png",
+        # Off unless asked for: see test_extensions_are_opt_in.
+        "extensions": None,
         "error": None,
     }
+
+
+def test_extensions_are_opt_in(client):
+    """The identity block -- provider links, gallery_id, version uids -- is
+    ~790 bytes a card, so it doubles a whole-archive listing and is not sent
+    unless a client says it needs it."""
+    plain = client.get("/api/v1/characters?q=abbie").json()["items"][0]
+    assert plain["extensions"] is None
+
+    rich = client.get("/api/v1/characters?q=abbie&include=extensions").json()["items"][0]
+    assert rich["extensions"]["gallery_id"] == "kzbYR2QbpncC"
+    assert rich["extensions"]["jai"]["id"] == "0d162f5f-86ab-4fdd-a2c2-3912adf24960"
+
+
+def test_sorting_by_added_uses_acquisition_time_not_the_files_mtime(client, populated_archive):
+    """"Recently added" has to mean when the card arrived.
+
+    mtime is the obvious-looking source and the wrong one: the bulk repair
+    passes rewrote 84% of the real archive within a single day, which collapses
+    that ordering into alphabetical. `extensions.jai.linkedAt` is stamped at
+    acquisition and every card in the archive carries one.
+    """
+    extensions = jai_extensions("99990000-0000-0000-0000-000000000000", creator_name="Late")
+    extensions["jai"]["linkedAt"] = "2026-08-10T09:00:00.000Z"  # after the fixtures' shared date
+    (populated_archive["characters"] / "Zoe_99990000.png").write_bytes(
+        card_png("Zoe", extensions=extensions)
+    )
+    # Every *other* card looks freshly written, so mtime and linkedAt disagree.
+    for name in ("Abbie_0d162f5f.png", "Bella_11112222.png", "Cleo_33334444.png"):
+        (populated_archive["characters"] / name).touch()
+    client.post("/api/v1/refresh")
+
+    assert _names(client.get("/api/v1/characters?sort=-added").json())[0] == "Zoe"
+    assert _names(client.get("/api/v1/characters?sort=-modified").json())[0] != "Zoe"
+
+
+def test_prompt_chars_sums_the_prompt_fields_not_just_the_description(client):
+    """Sorting a grid by card weight has to count every field that reaches the
+    model, not the description alone."""
+    item = client.get("/api/v1/characters?q=cleo").json()["items"][0]
+    assert item["prompt_chars"] >= item["description_chars"]
 
 
 def test_urls_on_the_card_are_usable_as_given(client):

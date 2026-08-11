@@ -1,0 +1,10 @@
+{
+    "display_name": "Character Archive",
+    "version": "7.0.4-archive",
+    "description": "Browse, search and export the character archive.",
+    "upstream": {
+        "project": "SillyTavern-CharacterLibrary",
+        "version": "7.0.4",
+        "note": "Vendored, not installed as an extension. See VENDORED.md for the changes."
+    }
+}

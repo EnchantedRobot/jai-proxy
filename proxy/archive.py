@@ -61,6 +61,13 @@ def _string_list(value: Any) -> tuple[str, ...]:
     return tuple(v.strip() for v in value if isinstance(v, str) and v.strip())
 
 
+# The fields that go into the prompt sent to a model, and so into "how big is
+# this card?". Kept in this order and this membership because it is the set
+# CharacterLibrary's own size estimate sums -- a browse grid ordered by size has
+# to agree with the number shown on the card.
+_PROMPT_FIELDS = ("description", "personality", "scenario", "first_mes", "system_prompt")
+
+
 def _lore_entry_count(data: dict[str, Any]) -> int:
     book = data.get("character_book")
     if not isinstance(book, dict):
@@ -102,8 +109,24 @@ class CardSummary:
     greeting_count: int = 0
     lore_entry_count: int = 0
     description_chars: int = 0
+    # Characters across the five fields that make up a card's prompt --
+    # description, personality, scenario, first_mes, system_prompt. A count, not
+    # the text: it answers "how big is this card?" for sorting and for the
+    # data-quality view, which is the only thing the prose was wanted for at list
+    # level. Divided by four it is the same rough token estimate the frontend
+    # would compute if it held the prose itself.
+    prompt_chars: int = 0
     has_creator_notes: bool = False
     has_example_dialogue: bool = False
+    # The card's whole `data.extensions` block, verbatim. Kept here -- unlike
+    # every other piece of prose-adjacent content -- because it is not prose: it
+    # is identity. Provider links, gallery_id, version uids and the per-source
+    # provenance blocks all live in it, so a client that has the summary but not
+    # the extensions cannot tell where a card came from or which gallery is its
+    # own. 790 bytes a card, ~3 MB across the archive, and served only when a
+    # request asks for it. Excluded from equality: it is derived from the same
+    # bytes as everything else, and hashing a dict would not work anyway.
+    extensions: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
     # Why this card could not be read, when it could not be. Empty for the
     # healthy majority; a card with an error carries only its file fields.
     error: str = ""
@@ -196,8 +219,10 @@ def summarize(path: Path, stat_result: Any | None = None) -> CardSummary:
         + len(_string_list(data.get("alternate_greetings"))),
         lore_entry_count=_lore_entry_count(data),
         description_chars=len(_text(data.get("description"))),
+        prompt_chars=sum(len(_text(data.get(f))) for f in _PROMPT_FIELDS),
         has_creator_notes=bool(_text(data.get("creator_notes")).strip()),
         has_example_dialogue=bool(_text(data.get("mes_example")).strip()),
+        extensions=extensions,
     )
 
 

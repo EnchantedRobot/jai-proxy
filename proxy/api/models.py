@@ -38,12 +38,25 @@ class CardOut(BaseModel):
     greetings: int = Field(description="Primary greeting plus alternates.")
     lore_entries: int
     description_chars: int
+    prompt_chars: int = Field(
+        description="Characters across description, personality, scenario, first_mes and system_prompt -- the card's prompt weight. Roughly four characters to a token."
+    )
     has_creator_notes: bool
     has_example_dialogue: bool
     size: int = Field(description="Card PNG size in bytes.")
-    modified: datetime
+    modified: datetime = Field(
+        description="The file's mtime. Says when the card was last *written*, which on this archive is dominated by bulk repair passes -- see `linked_at` for when it arrived."
+    )
+    linked_at: str = Field(
+        default="",
+        description="When this card was acquired, stamped by the importer into `extensions.jai.linkedAt`. Present on every card in the archive and the only trustworthy 'date added': mtimes were flattened by the bulk passes. A raw ISO-8601 string, passed through exactly as the card carries it.",
+    )
     thumb_url: str
     png_url: str
+    extensions: dict[str, Any] | None = Field(
+        default=None,
+        description="The card's `data.extensions` verbatim, only when asked for with `include=extensions`. Off by default: it is ~790 bytes a card, which doubles a whole-archive listing.",
+    )
     error: str | None = Field(
         default=None,
         description="Why this card could not be parsed. Null for healthy cards; a card with an error has only its file fields filled in.",
@@ -74,6 +87,38 @@ class GalleryOut(BaseModel):
     exists: bool
     images: int
     bytes: int
+
+
+class GalleryFileOut(BaseModel):
+    """One file in a gallery folder. `kind` is sniffed from the extension rather
+    than the bytes: a gallery holds images, video and audio side by side, and the
+    client needs to know which element to render before it fetches anything."""
+
+    name: str
+    kind: str = Field(description="image, video, audio, or other.")
+    size: int
+    modified: datetime
+    url: str
+    thumb_url: str | None = Field(
+        default=None,
+        description="Null for files that cannot be thumbnailed -- video, audio, anything Pillow will not open.",
+    )
+
+
+class GalleryFilesOut(BaseModel):
+    folder: str
+    total: int
+    bytes: int
+    items: list[GalleryFileOut]
+
+
+class GalleryFolderOut(BaseModel):
+    """A gallery folder as the orphan sweep sees it: the name on disk, and the
+    card that claims it -- null when nothing does, which is what makes it an
+    orphan. See `scripts/repair_galleries.py`."""
+
+    folder: str
+    card_id: str | None
 
 
 class CardDetailOut(CardOut):

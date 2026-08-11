@@ -7,7 +7,9 @@ from typing import Any
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from proxy import dashboard as dashboard_mod
 from proxy import janitor_mapper, saucepan_mapper
@@ -15,7 +17,7 @@ from proxy.api import v1_router
 from proxy.avatar import AvatarFetcher
 from proxy.capture_store import CaptureStore
 from proxy.cardbuilder import CardBuilder, PngWriter
-from proxy.config import settings
+from proxy.config import ROOT, settings
 from proxy.lorebook import LorebookMapper
 from proxy.lorebook_cache import LorebookCache
 from proxy.mlx_client import MLXClient, MLXError
@@ -35,6 +37,11 @@ from proxy.saucepan_mapper import SAUCEPAN_ORIGIN
 
 logger = logging.getLogger("jai_proxy.server")
 
+# The vendored Character Library frontend. In the repo, not in the archive:
+# it is code, it ships with the server, and it is the same directory in a
+# checkout and in the container image. See web/VENDORED.md.
+WEB_DIR = ROOT / "web"
+
 # Set by main() when the live dashboard is drawing; None means plain logging,
 # and every call site below is a no-op then (see _record_download).
 DASHBOARD: dashboard_mod.Dashboard | None = None
@@ -53,6 +60,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# The browse UI loads the entire archive as one JSON document at boot -- 5.9 MB
+# with extensions attached -- and 1.3 MB of vendored JavaScript alongside it.
+# Both are overwhelmingly repeated text, so gzip takes the pair down by roughly
+# a factor of five. The threshold keeps thumbnails and card PNGs out of it:
+# those are already compressed, and re-compressing them costs CPU to add bytes.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 class QuietAccessFilter(logging.Filter):
     """Drop uvicorn access-log lines for successful (2xx) requests.
@@ -467,6 +481,24 @@ async def build_saucepan(req: SaucepanBuildRequest) -> BuildResponse:
         source="saucepan",
         warnings=warnings,
     )
+
+
+# The browser, mounted last and mounted at the root.
+#
+# Last because Starlette matches routes in registration order and a mount at "/"
+# matches everything: every API route above therefore wins, and the frontend
+# picks up only what is left. Registering it earlier would swallow /api/v1 and
+# the userscript endpoints whole.
+#
+# At the root rather than /library because the archive *is* this application
+# now. There is no host page to be a subsection of.
+#
+# `html=True` serves index.html for "/" and, importantly, returns index.html
+# rather than 404 for unknown paths, which is what a client-side router needs.
+if WEB_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+else:  # pragma: no cover -- only in a checkout with the frontend removed
+    logger.warning("web/ is missing at %s; the browser UI will not be served", WEB_DIR)
 
 
 def _stats_line() -> str:
