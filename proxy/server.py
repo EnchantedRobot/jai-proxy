@@ -20,7 +20,7 @@ from proxy.cardbuilder import CardBuilder, PngWriter
 from proxy.config import ROOT, settings
 from proxy.lorebook import LorebookMapper
 from proxy.lorebook_cache import LorebookCache
-from proxy.mlx_client import MLXClient, MLXError
+from proxy.mock_responder import MockResponder
 from proxy.models import (
     BuildRequest,
     BuildResponse,
@@ -87,7 +87,7 @@ class QuietAccessFilter(logging.Filter):
 logging.getLogger("uvicorn.access").addFilter(QuietAccessFilter())
 
 capture_store = CaptureStore()
-mlx_client = MLXClient()
+responder = MockResponder()
 card_builder = CardBuilder()
 png_writer = PngWriter()
 avatar_fetcher = AvatarFetcher()
@@ -177,7 +177,7 @@ async def health() -> dict[str, Any]:
         "ok": True,
         "captures": capture_store.count,
         "lorebooks": lorebook_cache.count,
-        "model": settings.mlx_model,
+        "model": responder.model,
     }
 
 
@@ -185,7 +185,7 @@ async def health() -> dict[str, Any]:
 async def list_models() -> dict[str, Any]:
     return {
         "object": "list",
-        "data": [{"id": settings.mlx_model, "object": "model"}],
+        "data": [{"id": responder.model, "object": "model"}],
     }
 
 
@@ -202,15 +202,14 @@ async def chat_completions(request: Request) -> Any:
     except Exception:
         logger.exception("capture failed; continuing to forward")
 
-    try:
-        if body.get("stream"):
-            return StreamingResponse(
-                mlx_client.stream(body), media_type="text/event-stream"
-            )
-        completion = await mlx_client.complete(body)
-        return JSONResponse(completion)
-    except MLXError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=502)
+    # The reply is generated locally (proxy/mock_responder.py) and has no
+    # upstream to fail, so there is no error branch left here -- the capture
+    # above is the part that matters, and it already swallows its own failures.
+    if body.get("stream"):
+        return StreamingResponse(
+            responder.stream(body), media_type="text/event-stream"
+        )
+    return JSONResponse(await responder.complete(body))
 
 
 @app.get("/capture-status")
@@ -505,7 +504,7 @@ def _stats_line() -> str:
     return (
         f"{capture_store.count} captures · "
         f"{lorebook_cache.count} lorebooks cached · "
-        f"model {settings.mlx_model}"
+        f"model {responder.model}"
     )
 
 

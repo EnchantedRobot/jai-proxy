@@ -1,8 +1,8 @@
   // ---------------------------------------------------------------------------
   // FetchHook — patch window.fetch and XMLHttpRequest at document-start so
   // JanitorAI's chat-completion request is intercepted before its app code ever
-  // runs, relayed through the local server (which forwards to MLX AND captures
-  // the hidden definition + primary greeting). Everything that doesn't look
+  // runs, relayed through the local server (which answers it AND captures the
+  // hidden definition + primary greeting). Everything that doesn't look
   // like a chat-completion / models probe passes through untouched.
   // ---------------------------------------------------------------------------
   function looksLikeChatCompletion(url, bodyText) {

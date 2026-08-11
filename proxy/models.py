@@ -17,7 +17,7 @@ def _utcnow() -> datetime:
 
 class ChatCompletionRequest(BaseModel):
     """Passthrough shape of whatever JanitorAI sends. Extra fields are kept
-    verbatim so nothing is lost on the way to MLX."""
+    verbatim so nothing is lost on the way to the responder."""
 
     model_config = {"extra": "allow"}
 

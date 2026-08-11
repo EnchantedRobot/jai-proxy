@@ -1,4 +1,4 @@
-.PHONY: compile test test-js run import gallery-ids check names thumbs
+.PHONY: compile test test-js run import gallery-ids check names thumbs settings-import
 
 # Every target reads .env (see .env.template) via proxy/config.py -- most
 # importantly JAI_PROXY_OUTPUT_DIR, the cards folder they all read and write.
@@ -67,3 +67,12 @@ names:
 # Read-only report by default; `make thumbs ARGS=--apply` writes.
 thumbs:
 	uv run python scripts/sync_thumbs.py $(ARGS)
+
+# Seed data/settings.json from an existing SillyTavern install: lifts the
+# Character Library blob (provider tokens, followed creators, display prefs)
+# out of its settings.json so the standalone browser stops depending on
+# origin-keyed browser storage -- which silently held a copy left behind by
+# SillyTavern itself, since its stock port is also 8000.
+# Read-only report by default; `make settings-import ARGS=--apply` writes.
+settings-import:
+	uv run python scripts/import_st_settings.py $(ARGS)

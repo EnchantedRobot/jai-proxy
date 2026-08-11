@@ -21,8 +21,10 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    mlx_base_url: str = "http://127.0.0.1:8011/v1"
-    mlx_model: str = "Llama-3.2-3B-Instruct-4bit"
+    # The model id `/v1/models` advertises and a reply falls back to. There is
+    # no model -- replies come from proxy/mock_responder.py -- but the sites
+    # that call this endpoint want a name to put in their provider settings.
+    mock_model: str = "jai-proxy-mock"
     host: str = "127.0.0.1"
     port: int = 8000
 
@@ -57,6 +59,12 @@ class Settings(BaseSettings):
     # CharacterLibrary's cl_thumbs (keyed by <Name>_<gallery_id>). Pure cache --
     # deletable, regenerated on miss.
     thumbs_dir: Path = ROOT / "data" / "cache" / "thumbs"
+    # The browser UI's own settings -- provider credentials, followed creators,
+    # display preferences. Under `data/` with the cards rather than in `state/`
+    # because it is user data, not a cache: it is the only copy of the Chub and
+    # DataCat tokens, and it belongs in whatever gets mounted and backed up.
+    # Seed it from an existing SillyTavern install with `make settings-import`.
+    settings_file: Path = ROOT / "data" / "settings.json"
 
     # Server-side working state, deliberately *not* under output_dir: that may
     # point at SillyTavern's characters folder, which is not ours to litter.

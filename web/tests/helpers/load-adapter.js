@@ -54,29 +54,51 @@ function loadAdapter(responses = {}) {
     removeItem: (k) => store.delete(k),
   };
 
+  // Listeners the adapter registers, so a test can fire the lifecycle events it
+  // flushes pending settings on rather than waiting out a real timer.
+  const listeners = { window: {}, document: {} };
+  const record = (bag) => (event, fn) => {
+    (bag[event] ||= []).push(fn);
+  };
+
   const window = {
     fetch: nativeFetch,
     location: { origin: ORIGIN, href: `${ORIGIN}/index.html` },
     localStorage,
+    addEventListener: record(listeners.window),
   };
   window.window = window;
 
+  const document = {
+    visibilityState: "visible",
+    addEventListener: record(listeners.document),
+  };
+
+  const errors = [];
   const sandbox = {
     window,
+    document,
     localStorage,
-    console: { info() {}, warn() {}, error() {}, log() {} },
+    console: { info() {}, warn() {}, log() {}, error: (...a) => errors.push(a.join(" ")) },
     Response,
     Request,
     Headers,
     URL,
     TextDecoder,
+    setTimeout,
+    clearTimeout,
     atob: (b64) => Buffer.from(b64, "base64").toString("binary"),
     btoa: (bin) => Buffer.from(bin, "binary").toString("base64"),
   };
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(ADAPTER, "utf8"), sandbox, { filename: "archive-api.js" });
 
-  return { fetch: window.fetch, calls, store, origin: ORIGIN };
+  /** Fire a registered lifecycle event, e.g. fire("window", "pagehide"). */
+  const fire = (target, event) => {
+    for (const fn of listeners[target][event] || []) fn();
+  };
+
+  return { fetch: window.fetch, calls, store, origin: ORIGIN, fire, document, errors };
 }
 
 /** POST the way library.js's apiRequest() does: JSON body, JSON content type. */

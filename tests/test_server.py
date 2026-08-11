@@ -27,7 +27,9 @@ def _prompt(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 
-class FakeMLXClient:
+class FakeResponder:
+    model = settings.mock_model
+
     def __init__(self):
         self.last_request = None
 
@@ -35,7 +37,7 @@ class FakeMLXClient:
         self.last_request = req
         return {
             "id": "chatcmpl-fake",
-            "model": settings.mlx_model,
+            "model": settings.mock_model,
             "choices": [
                 {
                     "message": {"role": "assistant", "content": "fake reply"},
@@ -60,8 +62,8 @@ class FakeAvatarFetcher:
         return self._bytes
 
 
-def make_client(fake: FakeMLXClient, tmp_path=None) -> TestClient:
-    server_module.mlx_client = fake
+def make_client(fake: FakeResponder, tmp_path=None) -> TestClient:
+    server_module.responder = fake
     server_module.capture_store = server_module.CaptureStore(captures_dir=tmp_path)
     server_module.png_writer = server_module.PngWriter(output_dir=tmp_path)
     server_module.avatar_fetcher = FakeAvatarFetcher()
@@ -76,33 +78,33 @@ def _decode(path) -> dict:
 
 
 def test_health(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     resp = client.get("/health")
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
     assert body["captures"] == 0
-    assert body["model"] == settings.mlx_model
+    assert body["model"] == settings.mock_model
 
 
 def test_list_models(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     resp = client.get("/v1/models")
     assert resp.status_code == 200
     assert resp.json() == {
         "object": "list",
-        "data": [{"id": settings.mlx_model, "object": "model"}],
+        "data": [{"id": settings.mock_model, "object": "model"}],
     }
 
 
 # ---------------------------------------------------------------------------
-# /v1/chat/completions -- forwards to MLX and captures the hidden definition
-# (system message) + primary greeting (first assistant message).
+# /v1/chat/completions -- answers from the mock responder and captures the
+# hidden definition (system message) + primary greeting (first assistant).
 # ---------------------------------------------------------------------------
 
 
 def test_chat_completions_captures_system_prompt_and_forwards(tmp_path):
-    fake = FakeMLXClient()
+    fake = FakeResponder()
     client = make_client(fake, tmp_path)
 
     resp = client.post(
@@ -132,7 +134,7 @@ def test_chat_completions_captures_assistant_message_as_primary_greeting(tmp_pat
     # Real captured JanitorAI chat request: [system(hidden def), user ".",
     # assistant(rendered primary greeting), user "USER: hello"]. One relay
     # captures both halves a hidden card needs.
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     real_request = json.loads((FIXTURES / "chat_request_hidden_ari.json").read_text(encoding="utf-8"))
 
     client.post("/v1/chat/completions", json=real_request)
@@ -146,7 +148,7 @@ def test_chat_completions_captures_assistant_message_as_primary_greeting(tmp_pat
 
 
 def test_chat_completions_streaming_returns_sse(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
 
     resp = client.post(
         "/v1/chat/completions",
@@ -159,7 +161,7 @@ def test_chat_completions_streaming_returns_sse(tmp_path):
 
 
 def test_chat_completions_capture_error_does_not_block_forward(monkeypatch, tmp_path):
-    fake = FakeMLXClient()
+    fake = FakeResponder()
     client = make_client(fake, tmp_path)
     monkeypatch.setattr(
         server_module.capture_store,
@@ -186,7 +188,7 @@ def test_chat_completions_capture_error_does_not_block_forward(monkeypatch, tmp_
 
 
 def test_build_exports_open_card_png(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     akane = _character("open_akane_kujo")
 
     resp = client.post(
@@ -253,7 +255,7 @@ def test_build_exports_open_card_png(tmp_path):
 
 
 def test_rebuilding_a_saved_card_skips_the_write(tmp_path, caplog):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     payload = {
         "character": {"name": "Akane Kujo", "id": "abc123"},
         "character_json": _character("open_akane_kujo"),
@@ -292,7 +294,7 @@ def test_rebuilding_a_saved_card_skips_the_write(tmp_path, caplog):
 
 
 def test_rebuilding_after_deleting_the_card_writes_it_again(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     payload = {
         "character": {"name": "Akane Kujo", "id": "abc123"},
         "character_json": _character("open_akane_kujo"),
@@ -312,7 +314,7 @@ def test_rebuilding_after_deleting_the_card_writes_it_again(tmp_path):
 
 
 def test_build_saucepan_exports_open_card_png(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     eve = _saucepan("04a0c1ac")
 
     resp = client.post("/build-saucepan", json={"character": eve})
@@ -361,7 +363,7 @@ def test_build_saucepan_exports_open_card_png(tmp_path):
 
 
 def test_build_saucepan_response_formatting_lands_in_scenario(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
 
     resp = client.post("/build-saucepan", json={"character": _saucepan("1155a61e")})
 
@@ -374,7 +376,7 @@ def test_build_saucepan_response_formatting_lands_in_scenario(tmp_path):
 def test_build_saucepan_hidden_card_warns_but_exports_public_fields(tmp_path):
     # A hidden companion (open_definition:false) can't yield its definition, so
     # the build warns and falls back to the public fields rather than failing.
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
 
     resp = client.post("/build-saucepan", json={"character": _saucepan("closed_83831943")})
 
@@ -403,7 +405,7 @@ def test_build_saucepan_hidden_card_warns_but_exports_public_fields(tmp_path):
 
 
 def test_lorebooks_existing_splits_cached_and_missing(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     eve = _saucepan("04a0c1ac")
     lb_ids = [b["id"] for b in eve["lorebooks"]]
 
@@ -422,7 +424,7 @@ def test_lorebooks_existing_splits_cached_and_missing(tmp_path):
 
 
 def test_lorebooks_existing_namespaces_by_source(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     eve = _saucepan("04a0c1ac")
     lb_ids = [b["id"] for b in eve["lorebooks"]]
     client.post("/build-saucepan", json={"character": eve})
@@ -437,7 +439,7 @@ def test_build_saucepan_reuses_cached_lorebooks_by_id(tmp_path):
     # that fetches NO lorebooks but references them by `cached_lorebook_ids` must
     # reproduce the identical character_book -- proving a cache-loaded lorebook is
     # indistinguishable from a freshly fetched one.
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     eve = _saucepan("04a0c1ac")
     lb_ids = [b["id"] for b in eve["lorebooks"]]
 
@@ -458,7 +460,7 @@ def test_build_saucepan_skips_uncached_referenced_lorebook(tmp_path):
     # A referenced-but-uncached id is skipped (graceful degrade), not an error --
     # the safety net if the cache was cleared between the /existing check and the
     # build.
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     eve = _saucepan("04a0c1ac")
     stripped = {k: v for k, v in eve.items() if k != "lorebooks"}
     stripped["lorebooks"] = []
@@ -470,7 +472,7 @@ def test_build_saucepan_skips_uncached_referenced_lorebook(tmp_path):
 
 
 def test_clear_lorebooks_wipes_cache(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     eve = _saucepan("04a0c1ac")
     lb_ids = [b["id"] for b in eve["lorebooks"]]
     client.post("/build-saucepan", json={"character": eve})
@@ -489,7 +491,7 @@ def test_clear_lorebooks_wipes_cache(tmp_path):
 
 
 def test_existing_reports_only_ids_already_on_disk(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     akane = _character("open_akane_kujo")
 
     # Save one card, then ask about its id plus one we never built.
@@ -511,7 +513,7 @@ def test_existing_matches_on_id_fragment_regardless_of_name(tmp_path):
     # The saved filename keys on the first 8 id chars, so a full UUID whose
     # fragment matches an on-disk card is reported even though the caller has
     # no idea what name it was saved under.
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     client.post(
         "/build",
         json={
@@ -528,14 +530,14 @@ def test_existing_matches_on_id_fragment_regardless_of_name(tmp_path):
 
 
 def test_existing_empty_request_returns_empty(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     resp = client.post("/existing", json={"ids": []})
     assert resp.status_code == 200
     assert resp.json() == {"existing": []}
 
 
 def test_build_falls_back_to_character_name_without_character_json(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
 
     resp = client.post("/build", json={"character": {"name": "No Profile Card"}})
 
@@ -553,7 +555,7 @@ def test_build_names_card_from_chat_name_not_title_blurb(tmp_path):
     # The userscript sends no name anymore -- the server names the card (and its
     # file) from chat_name (the real character name), never from the JSON `name`
     # field (the card-title blurb), which is preserved only as metadata.
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
 
     resp = client.post(
         "/build",
@@ -615,7 +617,7 @@ def _capture_ari(client, greeting: str | None) -> None:
 
 
 def test_build_hidden_card_with_no_capture_fails(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
 
     resp = client.post(
         "/build",
@@ -628,7 +630,7 @@ def test_build_hidden_card_with_no_capture_fails(tmp_path):
 
 
 def test_build_hidden_card_with_definition_but_no_greeting_fails(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     _capture_ari(client, greeting=None)  # system captured, no assistant greeting
 
     resp = client.post(
@@ -642,7 +644,7 @@ def test_build_hidden_card_with_definition_but_no_greeting_fails(tmp_path):
 
 
 def test_build_hidden_card_merges_capture_and_json(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     _capture_ari(client, greeting="Hello there, USER")
 
     resp = client.post(
@@ -679,7 +681,7 @@ def test_build_hidden_card_merges_capture_and_json(tmp_path):
 
 
 def test_build_populates_character_book_from_lorebooks_payload(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     raw_script = json.loads((FIXTURES / "hampter_script_kamii_university.json").read_text(encoding="utf-8"))
 
     resp = client.post(
@@ -703,7 +705,7 @@ def test_build_populates_character_book_from_lorebooks_payload(tmp_path):
 
 
 def test_build_with_no_lorebooks_has_no_character_book(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
 
     resp = client.post(
         "/build",
@@ -714,7 +716,7 @@ def test_build_with_no_lorebooks_has_no_character_book(tmp_path):
 
 
 def test_build_surfaces_lorebook_mapping_warnings(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
 
     resp = client.post(
         "/build",
@@ -738,7 +740,7 @@ def test_build_surfaces_lorebook_mapping_warnings(tmp_path):
 
 
 def test_capture_status_unknown_name_is_all_false(tmp_path):
-    client = make_client(FakeMLXClient(), tmp_path)
+    client = make_client(FakeResponder(), tmp_path)
     status = client.get("/capture-status", params={"name": "Nobody"}).json()
     assert status == {"name": "Nobody", "system": False, "greetings": False}
 
@@ -748,7 +750,7 @@ def test_clear_captures_wipes_state_but_leaves_pngs(tmp_path):
     output_dir = tmp_path / "cards"
     server_module.capture_store = server_module.CaptureStore(captures_dir=captures_dir)
     server_module.png_writer = server_module.PngWriter(output_dir=output_dir)
-    server_module.mlx_client = FakeMLXClient()
+    server_module.responder = FakeResponder()
     server_module.avatar_fetcher = FakeAvatarFetcher()
     client = TestClient(server_module.app)
 

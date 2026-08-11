@@ -98,6 +98,11 @@ def archive_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, P
     monkeypatch.setattr(settings, "archive_dir", dirs["characters"])
     monkeypatch.setattr(settings, "galleries_dir", dirs["galleries"])
     monkeypatch.setattr(settings, "thumbs_dir", dirs["thumbs"])
+    # Not optional. The settings route WRITES, and the real file is the only
+    # copy of the developer's Chub and DataCat tokens -- an unredirected test
+    # would overwrite them with whatever it happened to PUT.
+    dirs["settings"] = tmp_path / "settings.json"
+    monkeypatch.setattr(settings, "settings_file", dirs["settings"])
     # The index and the thumbnail store are process-wide singletons bound at
     # import time; both have to be re-pointed or a test reads the real 3 GB
     # archive on the developer's machine and passes for the wrong reason.

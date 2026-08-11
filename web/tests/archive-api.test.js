@@ -234,10 +234,96 @@ test("every write refuses with 501 and an explanation", async () => {
   assert.deepEqual(calls, [], "a refused write must never reach the server");
 });
 
-test("chats are refused as out of scope, not silently swallowed", async () => {
+test("a character's chat list is empty, not unreadable", async () => {
+  // The archive stores no chats, so zero is the truth for every card -- and the
+  // difference between "none" and "could not read" is not cosmetic. The bundle
+  // exporter counts an unreadable chat list as a per-character FAILURE and ends
+  // a wholly clean 94-card run with "N file(s) failed". Observed live before
+  // this route was split off from the 501 below.
+  const { fetch } = loadAdapter({});
+  const resp = await post(fetch, "/api/characters/chats", { avatar_url: "Abbie_0d162f5f.png" });
+  assert.equal(resp.status, 200);
+  assert.deepEqual(await resp.json(), []);
+});
+
+test("reading or writing an actual chat is still refused", async () => {
+  // Unreachable while the list above is empty, and kept so it stays that way:
+  // the archive never stores, reads or emits a chat file.
   const { fetch } = loadAdapter({});
   assert.equal((await post(fetch, "/api/chats/get", {})).status, 501);
-  assert.equal((await post(fetch, "/api/characters/chats", {})).status, 501);
+  assert.equal((await post(fetch, "/api/chats/save", {})).status, 501);
+  assert.equal((await post(fetch, "/api/chats/export", {})).status, 501);
+});
+
+test("settings load from the server, in the shape library.js looks for", async () => {
+  // loadGallerySettings() reads settings.extension_settings[SETTINGS_KEY] --
+  // where the blob sat when the frontend ran inside SillyTavern. The store
+  // itself knows nothing of that nesting; it is applied here at the seam.
+  const blob = { chubToken: "t0ken", datacatFollowedCreators: ["a", "b"] };
+  const { fetch, calls } = loadAdapter({ "/api/v1/settings": blob });
+
+  const data = await (await post(fetch, "/api/settings/get", {})).json();
+
+  assert.deepEqual(calls, ["/api/v1/settings"]);
+  assert.deepEqual(data.settings.extension_settings.SillyTavernCharacterGallery, blob);
+});
+
+test("the settings payload carries no world_info_settings", async () => {
+  // Defence in depth for the destructive-bundle trap.
+  //
+  // getAllCharLore() looks for the additional-lorebook map at
+  // settings.world_info_settings.world_info.charLore, and batch-transfer keys
+  // manifest semantics off whether that read succeeds: unreadable omits
+  // auxWorlds, readable-and-empty writes `auxWorlds: []`. An explicit [] means
+  // "restore NO lorebooks" to an importing SillyTavern and strips lorebook
+  // links off the cards it overwrites. It shipped once, from an adapter stub
+  // returning `{ settings: {} }`, and put `auxWorlds: []` on all 94 characters
+  // of a test bundle.
+  //
+  // getAllCharLore() is patched to return null outright (see web/VENDORED.md),
+  // which is the real guard. This one ensures a re-vendor that loses the patch
+  // still has to actively add the key back before it can do harm.
+  const { fetch } = loadAdapter({ "/api/v1/settings": { chubToken: "t" } });
+  const data = await (await post(fetch, "/api/settings/get", {})).json();
+  assert.ok(!("world_info_settings" in data.settings), "must not ship a charLore source");
+});
+
+test("a settings save is coalesced, then PUT once", async () => {
+  // The frontend saves on every change, including per-keystroke in the
+  // custom-CSS box. Each of those must not become a disk write.
+  const { fetch, calls } = loadAdapter({ "/api/v1/settings": {} });
+
+  for (const v of ["a", "ab", "abc"]) {
+    const resp = await post(fetch, "/api/settings/save", { settings: { customCSS: v } });
+    assert.equal(resp.status, 200, "the UI is answered immediately, not after the disk");
+  }
+  assert.deepEqual(calls, [], "nothing written while the writes are still arriving");
+
+  await new Promise((r) => setTimeout(r, 600));
+  assert.deepEqual(calls, ["/api/v1/settings"], "one write, not three");
+});
+
+test("a pending settings save is flushed when the page goes away", async () => {
+  // Losing the last write to a tab close would lose whichever credential was
+  // just pasted in -- the one thing this store exists to hold.
+  const { fetch, calls, fire } = loadAdapter({ "/api/v1/settings": {} });
+
+  await post(fetch, "/api/settings/save", { settings: { chubToken: "fresh" } });
+  assert.deepEqual(calls, [], "still inside the debounce window");
+
+  fire("window", "pagehide");
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(calls, ["/api/v1/settings"], "pagehide must force the write out");
+});
+
+test("a settings save that is not an object is refused", async () => {
+  const { fetch, calls } = loadAdapter({});
+  for (const bad of [undefined, null, "nope", [1, 2]]) {
+    const resp = await post(fetch, "/api/settings/save", { settings: bad });
+    assert.equal(resp.status, 400);
+  }
+  await new Promise((r) => setTimeout(r, 600));
+  assert.deepEqual(calls, [], "a rejected save must never reach the server");
 });
 
 test("cross-origin requests pass through untouched", async () => {

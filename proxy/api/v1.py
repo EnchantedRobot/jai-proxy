@@ -21,7 +21,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 
-from proxy import archive, gallery, pngtools, thumbs
+from proxy import archive, gallery, pngtools, settings_store, thumbs
 from proxy.api.models import (
     CardDetailOut,
     CardListOut,
@@ -65,6 +65,13 @@ _SORTS: dict[str, str] = {
 # max-age costs nothing: a regenerated thumb changes its ETag and the
 # revalidation picks it up.
 _THUMB_CACHE_CONTROL = "public, max-age=86400"
+
+
+def _settings_store() -> settings_store.SettingsStore:
+    """Built per call so a test that repoints `settings.settings_file` -- or a
+    hand-edit of the file between requests -- is picked up without a restart.
+    Construction is just holding a path; there is nothing to cache."""
+    return settings_store.SettingsStore(settings.settings_file)
 
 
 def _index() -> archive.ArchiveIndex:
@@ -317,6 +324,41 @@ def refresh() -> IndexStatsOut:
         removed=stats_.removed,
         seconds=round(stats_.seconds, 4),
     )
+
+
+@router.get("/settings", summary="The browser UI's stored settings")
+def get_settings() -> dict:
+    """The settings blob, or `{}` if nothing has been stored yet.
+
+    Deliberately untyped: this is an opaque object owned by the frontend. Giving
+    it a pydantic model would put the vendored UI's 117-key schema into the
+    server's contract, and every UI change would then need a matching change
+    here -- the compatibility burden the whole pivot exists to shed.
+    """
+    try:
+        return _settings_store().read()
+    except settings_store.SettingsError as exc:
+        # 500, not an empty object. Handing back {} would look like a fresh
+        # archive, and the frontend would fill in defaults and save them
+        # straight over the damaged file, turning a recoverable problem into
+        # a lost Chub token.
+        logger.error("settings unreadable: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.put("/settings", summary="Replace the browser UI's stored settings")
+def put_settings(blob: dict) -> dict:
+    """Replace the whole blob and return what was stored.
+
+    Whole-document replace rather than a merge: the frontend already holds the
+    complete settings object in memory and treats itself as the owner, and a
+    merge endpoint could never express a *deleted* key -- which the frontend's
+    own boot migrations rely on being able to do.
+    """
+    try:
+        return _settings_store().write(blob)
+    except settings_store.SettingsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # Which element a gallery file is for, by extension. Sniffing the bytes would be

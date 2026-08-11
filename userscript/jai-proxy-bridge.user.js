@@ -2,7 +2,7 @@
 // @name         jai-proxy bridge
 // @namespace    https://github.com/EnchantedRobot/jai-proxy
 // @version      0.8.0
-// @description  Thin bridge: relays JanitorAI chat completions through a local jai-proxy server (which forwards to local MLX), shows a connection pill, and exports a character as a V3 card PNG via JanitorAI's clean JSON API (no DOM scraping). Card assembly lives server-side.
+// @description  Thin bridge: relays JanitorAI chat completions through a local jai-proxy server (which answers them locally), shows a connection pill, and exports a character as a V3 card PNG via JanitorAI's clean JSON API (no DOM scraping). Card assembly lives server-side.
 // @match        https://janitorai.com/*
 // @match        https://www.janitorai.com/*
 // @run-at       document-start
@@ -1315,8 +1315,8 @@
   // ---------------------------------------------------------------------------
   // FetchHook — patch window.fetch and XMLHttpRequest at document-start so
   // JanitorAI's chat-completion request is intercepted before its app code ever
-  // runs, relayed through the local server (which forwards to MLX AND captures
-  // the hidden definition + primary greeting). Everything that doesn't look
+  // runs, relayed through the local server (which answers it AND captures the
+  // hidden definition + primary greeting). Everything that doesn't look
   // like a chat-completion / models probe passes through untouched.
   // ---------------------------------------------------------------------------
   function looksLikeChatCompletion(url, bodyText) {

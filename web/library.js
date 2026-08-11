@@ -1260,6 +1260,19 @@ function saveGallerySettings(changedKeys = null) {
         }
     }
     
+    // ARCHIVE FORK: persist to the archive server. Upstream has no HTTP save
+    // path at all -- it writes SillyTavern's in-memory extensionSettings above
+    // and lets ST flush that to disk -- so standalone there was nothing but the
+    // localStorage backup below, which is keyed to the origin and evaporates
+    // when the port or host changes. These are the only copy of the Chub and
+    // DataCat tokens. Fire-and-forget: the adapter coalesces the writes and
+    // logs its own failures, and no caller here inspects a result.
+    fetch('/api/settings/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: gallerySettings }),
+    }).catch(() => { /* adapter reports; a save must never throw into the UI */ });
+
     // Also save to localStorage as backup
     try {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(gallerySettings));
@@ -29225,6 +29238,25 @@ window.canEditCharLore = function() {
 let _charLoreSettingsCache = { at: 0, data: null };
 
 window.getAllCharLore = async function() {
+    // ARCHIVE FORK: the archive has no charLore store, so the honest answer is
+    // "unreadable", and it must be given before any of the reads below can
+    // succeed at returning an empty list instead.
+    //
+    // null and [] are not interchangeable here. Batch-transfer omits auxWorlds
+    // from a bundle manifest on null, and writes `auxWorlds: []` on []. An
+    // explicit [] means "restore NO lorebooks" to an importing SillyTavern, so
+    // it silently strips lorebook links from every card it overwrites.
+    //
+    // Standalone, the settings read below now *succeeds* (it returns the
+    // archive's own settings from data/settings.json), and a successful read
+    // with no world_info_settings yields [] -- the destructive value. This
+    // exact bug shipped once already, via an adapter stub that returned
+    // `{ settings: {} }`, and put `auxWorlds: []` on all 94 characters of a
+    // test bundle. Restore this to upstream only alongside a real
+    // additional-lorebook store.
+    return null;
+
+    // eslint-disable-next-line no-unreachable
     const bridge = getCharLoreBridge();
     if (bridge) {
         try {

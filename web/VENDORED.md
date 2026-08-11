@@ -77,6 +77,14 @@ Every edit is marked in place with a comment beginning `ARCHIVE FORK`, so
    `/user/images/<folder>/<file>` now go through it. Deliberately *not* applied
    to the `deletePath` variables: those are request payloads naming a file, not
    URLs to load.
+5. **`saveGallerySettings()`** — POSTs the blob to `/api/settings/save`.
+   Upstream has **no HTTP save path at all**: it writes SillyTavern's in-memory
+   `extensionSettings` and lets ST flush that to disk, so standalone the only
+   thing that ran was the `localStorage` backup. See "Settings" below.
+6. **`getAllCharLore()`** — returns `null` unconditionally, before any of its
+   reads. **This one is load-bearing for data safety on the receiving end** and
+   is explained under "Settings"; do not restore it to upstream without a real
+   additional-lorebook store.
 
 ### `modules/gallery-viewer.js`
 
@@ -101,6 +109,75 @@ address `/user/images/...`, but they reach it through `fetch()`, so
    loads, a gallery shows images.
 5. `grep -rn 'ARCHIVE FORK' .` should list exactly the edits in this document.
 
+## Settings
+
+The UI's settings — provider tokens, followed creators, display preferences,
+117 keys — live in **`data/settings.json`**, served at `/api/v1/settings` and
+mapped onto ST's `/api/settings/{get,save}` by the adapter. Seed an install from
+an existing SillyTavern with `make settings-import ARGS=--apply`.
+
+They previously lived in `localStorage`, which was a live hazard rather than
+merely untidy. localStorage is keyed by **origin**; SillyTavern's stock port is
+also **8000**; the archive serves 8000. So the standalone app was reading a
+bucket SillyTavern itself had filled while running there earlier — it appeared
+to "remember" a Chub token and 19 followed creators that no code in this repo
+had ever stored, with SillyTavern not even running. All of it would have
+vanished the moment the port or host changed, which is precisely what
+containerizing does.
+
+Two vendored edits were unavoidable:
+
+- **`saveGallerySettings()` had no HTTP path to intercept.** It wrote ST's
+  in-memory context and `localStorage`, full stop. A fetch interceptor cannot
+  hook a call that was never made, so the POST is added at the call site — the
+  same class of problem as `<img src>`, and worth expecting again.
+- **`getAllCharLore()` now returns `null` outright.** Serving real settings
+  *re-arms the `auxWorlds` trap below*: that function reads
+  `settings.world_info_settings.world_info.charLore`, and **any** settings
+  object makes the read succeed, which yields `[]` — the destructive value. The
+  archive genuinely has no charLore store, so `null` ("unreadable") is the
+  honest answer and the only one that keeps bundles safe. The adapter also omits
+  `world_info_settings` from the payload as a second layer, so losing this patch
+  in a re-vendor is not by itself enough to do damage.
+
+Writes are coalesced in the adapter (400 ms) because the frontend saves on every
+change including per-keystroke, and flushed on `pagehide`/`visibilitychange` so
+a tab closed just after pasting a token does not lose it. The file is written
+atomically (temp + `os.replace`) and lands mode `0600` — it is the only copy of
+those credentials once the browser-storage copy is gone.
+
+## Bundle export
+
+Bundle `.zip` export works unmodified — no vendored edit was needed and none of
+the writer moved to Python. `batch-transfer.js` assembles the zip client-side
+with its own zip64-aware `ZipWriter` (`ZIP_STORED`), and every input it needs is
+something the adapter already serves: the card PNG off `/characters/<file>` and
+the gallery files off `/user/images/<folder>/<file>`.
+
+The two things that *were* wrong were both adapter replies, not vendored code,
+and neither one failed loudly:
+
+1. **`/api/settings/get` returned `{ settings: {} }`**, which made
+   `getAllCharLore()` report a successful read of an empty charLore map instead
+   of an unreadable one — so the exporter wrote **`auxWorlds: []`** onto every
+   character. On an *Overwrite* import that array means "restore no lorebooks"
+   and strips lorebook links from the cards it lands on. It now returns `{}`.
+2. **`/api/characters/chats` answered 501**, which the exporter counts as a
+   per-character failure; a completely clean run ended in "N file(s) failed".
+   Chat *lists* now answer `200 []` (the archive stores no chats, so zero is the
+   truth); reading or writing an actual chat still refuses.
+
+Both are pinned by tests in `tests/archive-api.test.js`. If a future re-vendor
+or refactor reintroduces the `{ settings: {} }` shape, the bundle silently
+becomes destructive again — that test is the guard.
+
+**The ceiling worth knowing:** the zip is assembled in browser memory before it
+downloads. A 94-character export with 1,083 gallery files (454 MB) completed
+fine, but this scales with selection size and a whole-archive export would not
+fit. Moving the writer server-side (`zipfile`, streamed off disk) is the fix
+when bulk export becomes a real workflow; it was not worth a second
+implementation of a format the client already writes correctly.
+
 ## Known gaps
 
 - **Search does not match creator notes.** The list endpoint carries no prose;
@@ -114,9 +191,14 @@ address `/user/images/...`, but they reach it through `fetch()`, so
   the CSS assistant are still present in the UI** but have no server behind
   them. They were dropped by the pivot's scope decision and their menu entries
   have not been removed yet.
-- **Frontend state lives in `localStorage`.** Filter presets, custom CSS, the
-  media-dedup ledger. The ~5 MB quota is a real limit for the ledger on a large
-  library; a write that would overflow fails loudly rather than truncating.
+- **Some frontend state still lives in `localStorage`.** Filter presets, the
+  media-dedup ledger, playlists — everything the frontend stores as a file under
+  `user/files/`. The settings blob has moved to `data/settings.json` (above);
+  this is the remainder, and it is origin-keyed with the same consequences. The
+  ~5 MB quota is a real limit for the ledger on a large library; a write that
+  would overflow fails loudly rather than truncating. Moving it beside the
+  settings is the obvious next step — it was left out because the settings were
+  urgent (they hold credentials that exist nowhere else) and a ledger rebuilds.
 - **A missing gallery folder logs a 404 in devtools.** The adapter turns it into
   an empty listing, which is correct, but the underlying request is still
   visible. The API 404s on a folder that does not exist rather than creating it

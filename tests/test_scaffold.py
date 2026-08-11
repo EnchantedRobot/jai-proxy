@@ -13,8 +13,7 @@ def test_settings_defaults():
     # Built without the repo's .env, so this asserts the shipped defaults rather
     # than whatever this machine happens to be configured to.
     defaults = Settings(_env_file=None)
-    assert defaults.mlx_base_url == "http://127.0.0.1:8011/v1"
-    assert defaults.mlx_model == "Llama-3.2-3B-Instruct-4bit"
+    assert defaults.mock_model == "jai-proxy-mock"
     assert defaults.port == 8000
     assert defaults.output_dir == Path("./cards")
     assert defaults.card_layout == "flat"

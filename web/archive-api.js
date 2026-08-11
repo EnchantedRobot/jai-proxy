@@ -174,21 +174,84 @@
     }
 
     // ========================================
+    // THE UI'S OWN SETTINGS  (ST's /api/settings/{get,save})
+    // ========================================
+    //
+    // Provider credentials, followed creators, display preferences. These live
+    // server-side in `data/settings.json`, reached through `/api/v1/settings`.
+    //
+    // They used to live in `localStorage`, which was a genuine hazard rather
+    // than merely untidy: localStorage is keyed by *origin*, SillyTavern's own
+    // stock port is 8000, and the archive serves 8000 -- so the standalone app
+    // was reading a bucket SillyTavern had filled while running there earlier.
+    // It appeared to remember a Chub token and 19 followed creators that no
+    // code here had ever stored, and all of it would have vanished the moment
+    // the port or host changed. Which is what containerizing does.
+    //
+    // The frontend saves on every settings change, including per-keystroke in
+    // the custom-CSS box, so writes are coalesced here rather than hitting the
+    // disk each time. The handler answers immediately; a failed flush is
+    // reported to the console because the UI has already moved on by then.
+
+    const SETTINGS_URL = `${API}/settings`;
+    // The key the vendored frontend stores itself under inside SillyTavern's
+    // `extension_settings`. Must match SETTINGS_KEY in library.js.
+    const CL_SETTINGS_KEY = 'SillyTavernCharacterGallery';
+    const SAVE_DEBOUNCE_MS = 400;
+
+    let pendingSettings = null;
+    let settingsTimer = null;
+
+    function flushSettings(unloading) {
+        if (pendingSettings === null) return;
+        const body = JSON.stringify(pendingSettings);
+        pendingSettings = null;
+        if (settingsTimer) {
+            clearTimeout(settingsTimer);
+            settingsTimer = null;
+        }
+        nativeFetch(SETTINGS_URL, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body,
+            // Lets the last write survive the page going away. The blob is ~6 KB,
+            // well inside the 64 KB keepalive ceiling.
+            keepalive: unloading === true,
+        })
+            .then((resp) => {
+                if (!resp.ok) {
+                    console.error('[archive-api] settings were NOT saved: HTTP', resp.status);
+                }
+            })
+            .catch((e) => {
+                console.error('[archive-api] settings were NOT saved:', e?.message || e);
+            });
+    }
+
+    // A tab closed or hidden mid-debounce must not drop the pending write.
+    // pagehide covers close and navigation; visibilitychange covers the mobile
+    // case where a backgrounded tab is frozen and pagehide never arrives.
+    window.addEventListener('pagehide', () => flushSettings(true));
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') flushSettings(true);
+    });
+
+    // ========================================
     // CLIENT-SIDE BLOB STORE  (ST's /user/files)
     // ========================================
     //
-    // The frontend persists its own working state -- filter presets, custom CSS,
-    // the media-dedup ledger, playlists -- as JSON files under SillyTavern's
+    // The frontend also persists bulkier working state -- filter presets, the
+    // media-dedup ledger, playlists -- as JSON files under SillyTavern's
     // `user/files/`. None of it is archive data: it is this browser's view of
     // the archive, and it has no business in the cards directory.
     //
-    // localStorage is the honest place for it *for now*, and the limitation is
-    // real rather than theoretical: the quota is ~5 MB, and the dedup ledger is
-    // the one blob that can approach it on a large library. A write that would
-    // overflow throws, is caught, and reports failure rather than truncating --
-    // silent partial persistence would be worse than none. When this state needs
-    // to survive a browser change it wants a real server-side store, and that is
-    // a Phase 2 decision, not something to fake here.
+    // This is still localStorage, unlike the settings above. The quota is ~5 MB
+    // and the dedup ledger is the one blob that can approach it on a large
+    // library; a write that would overflow throws, is caught, and reports
+    // failure rather than truncating. Moving it to `data/` alongside the
+    // settings is the obvious next step and deliberately not bundled into this
+    // change -- the settings were urgent because they hold credentials that
+    // exist nowhere else, and a ledger is rebuildable.
 
     const BLOB_PREFIX = 'cl_userfile:';
 
@@ -372,14 +435,51 @@
             },
         },
         {
-            // SillyTavern's settings blob. The frontend reads it for one thing
-            // it still needs -- the connection-profile proxy table behind the AI
-            // features -- and treats a null result as "no profiles", which is
-            // the truth here. An empty object rather than a 501 because this is
-            // asked for at boot and a failure would log on every load.
+            // Settings in, wearing the shape loadGallerySettings() looks for:
+            // it reads `settings.extension_settings[SETTINGS_KEY]`, which is
+            // where the blob sat when the frontend ran inside SillyTavern.
+            //
+            // NOTE the deliberate absence of `world_info_settings`. That is
+            // where getAllCharLore() looks for the per-character additional-
+            // lorebook map, and the bundle exporter keys destructive-vs-safe
+            // manifest semantics off whether that read succeeds: unreadable
+            // means "omit auxWorlds", while readable-and-empty writes
+            // `auxWorlds: []` -- which tells an importing SillyTavern to restore
+            // NO lorebooks and strips the links off the cards it lands on.
+            //
+            // Serving real settings at all therefore re-arms that trap, because
+            // any object here makes the charLore read *succeed*. getAllCharLore()
+            // is patched to return null unconditionally for exactly this reason
+            // (see web/VENDORED.md); leaving world_info_settings out is the
+            // second layer, so a future re-vendor that loses the patch still has
+            // to actively add the key back to do damage.
             path: '/api/settings/get',
-            handler() {
-                return json({ settings: {} });
+            async handler() {
+                const resp = await nativeFetch(SETTINGS_URL);
+                if (!resp.ok) return resp;
+                const blob = await resp.json();
+                return json({ settings: { extension_settings: { [CL_SETTINGS_KEY]: blob } } });
+            },
+        },
+        {
+            // Settings out. The frontend has no HTTP save path of its own --
+            // saveGallerySettings() wrote SillyTavern's in-memory context and
+            // localStorage and nothing else -- so the call reaching this route
+            // comes from a patched line in library.js (see web/VENDORED.md).
+            //
+            // Answers OK before the write lands. The frontend's save is
+            // fire-and-forget and it never surfaces a result, so blocking on the
+            // disk would buy nothing; the flush logs loudly on failure instead.
+            path: '/api/settings/save',
+            handler({ body }) {
+                const blob = body?.settings;
+                if (!blob || typeof blob !== 'object' || Array.isArray(blob)) {
+                    return json({ error: 'settings must be an object' }, 400);
+                }
+                pendingSettings = blob;
+                if (settingsTimer) clearTimeout(settingsTimer);
+                settingsTimer = setTimeout(() => flushSettings(false), SAVE_DEBOUNCE_MS);
+                return json({ ok: true });
             },
         },
 
@@ -422,9 +522,23 @@
             handler: () => notImplemented('Editing lorebooks'),
         },
         {
-            // Chats are out of scope for the archive by decision, not by
-            // omission: it never stores, reads or emits them.
-            match: (path) => path.startsWith('/api/chats/') || path === '/api/characters/chats',
+            // Listing a character's chats. The archive stores none, so the
+            // honest answer is an empty list, not a 501: every card really does
+            // have zero chats here. The distinction is not cosmetic -- the
+            // bundle exporter treats an unreadable chat list as a per-character
+            // *failure* and reports "N file(s) failed" at the end of a run that
+            // was in fact completely clean. The other two callers (the delete
+            // modal's chat-count line, the duplicate view's chat badge) both
+            // read 0 and render correctly.
+            path: '/api/characters/chats',
+            handler: () => json([]),
+        },
+        {
+            // Everything else chat-shaped: reading one back, saving, renaming.
+            // Out of scope for the archive by decision, not by omission -- it
+            // never stores, reads or emits a chat file. Unreachable in practice
+            // now that the list above is empty, and kept so it stays that way.
+            match: (path) => path.startsWith('/api/chats/'),
             handler: () => notImplemented('Chats'),
         },
     ];
