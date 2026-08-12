@@ -47,8 +47,6 @@ const DEFAULT_SETTINGS = {
     botbooruNsfwAccountSynced: false,
     botbooruUseTagWeights: false,
     ctCookie: null,
-    civitaiApiKey: null,
-    pixivCookie: null,
 
     // ---- NSFW Toggles ----
     chubNsfw: false,

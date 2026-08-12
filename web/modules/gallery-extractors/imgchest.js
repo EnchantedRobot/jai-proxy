@@ -10,7 +10,6 @@
  */
 
 import { registerExtractor } from './extractor-registry.js';
-import CoreAPI from '../core-api.js';
 import { proxyEncode } from '../providers/provider-utils.js';
 
 const IMGCHEST_PATTERNS = [
@@ -19,11 +18,8 @@ const IMGCHEST_PATTERNS = [
 
 const DATA_PAGE_REGEX = /data-page="([^"]+)"/;
 const CDN_URL_REGEX = /https?:\/\/cdn\.imgchest\.com\/files\/[^\s"'<>]+?\.(png|jpe?g|gif|webp)/gi;
-const PASSWORD_REGEX = /(?:pass\s*(?:word|code)|p\.?\s*w\.?|pass)\s*(?:[:=\-]|is)\s*["']?([^\s"'<>]+)/i;
 
 const REQUEST_DELAY_MS = 300;
-const CL_HELPER_BASE = '/plugins/cl-helper';
-const _apiRequest = (...args) => CoreAPI.apiRequest(...args);
 
 /**
  * @param {string} url - Imgchest post URL
@@ -32,7 +28,7 @@ const _apiRequest = (...args) => CoreAPI.apiRequest(...args);
  * @returns {Promise<import('./extractor-registry.js').ExtractorResult>}
  */
 async function extractImages(url, opts = {}) {
-    const { signal, character } = opts;
+    const { signal } = opts;
 
     if (signal?.aborted) return { images: [], aborted: true };
 
@@ -40,7 +36,7 @@ async function extractImages(url, opts = {}) {
         const html = await fetchPage(url, signal);
 
         if (isPasswordProtected(html)) {
-            return await handlePasswordProtected(url, character, signal);
+            return { images: [], error: 'Password-protected post (not supported)' };
         }
 
         const images = extractFromDataPage(html);
@@ -56,57 +52,8 @@ async function extractImages(url, opts = {}) {
     }
 }
 
-// ========================================================================
-// Password-protected gallery handling
-// ========================================================================
-
 function isPasswordProtected(html) {
     return html.includes('PostPassword');
-}
-
-async function handlePasswordProtected(url, character, signal) {
-    const password = extractPassword(character);
-    if (!password) {
-        return { images: [], error: 'Password-protected (no password found in card)' };
-    }
-
-    try {
-        const health = await _apiRequest(`${CL_HELPER_BASE}/health`).catch(() => null);
-        if (!health?.ok) {
-            return { images: [], error: 'Password-protected (cl-helper plugin required)' };
-        }
-
-        const resp = await _apiRequest(`${CL_HELPER_BASE}/imgchest-unlock`, 'POST', { url, password }, { signal });
-
-        const data = await resp.json();
-        if (data.error) return { images: [], error: data.error };
-        if (data.images?.length > 0) return { images: data.images };
-        return { images: [], error: 'No images found after unlock' };
-    } catch (err) {
-        if (err.name === 'AbortError') return { images: [], aborted: true };
-        return { images: [], error: `Unlock failed: ${err.message}` };
-    }
-}
-
-function extractPassword(character) {
-    if (!character) return null;
-    const data = character.data || character;
-    const texts = [];
-    for (const f of ['creator_notes', 'description', 'personality', 'scenario', 'first_mes']) {
-        if (data[f] && typeof data[f] === 'string') texts.push(data[f]);
-    }
-    const ext = data.extensions;
-    if (ext && typeof ext === 'object') {
-        for (const pd of Object.values(ext)) {
-            if (pd?.tagline && typeof pd.tagline === 'string') texts.push(pd.tagline);
-        }
-    }
-    for (const text of texts) {
-        const stripped = text.replace(/<[^>]*>/g, ' ');
-        const match = PASSWORD_REGEX.exec(stripped);
-        if (match) return match[1];
-    }
-    return null;
 }
 
 function extractFromDataPage(html) {

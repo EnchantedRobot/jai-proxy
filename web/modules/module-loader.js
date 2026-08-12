@@ -183,10 +183,7 @@ async function initModuleSystem() {
                 import('./gallery-extractors/catbox.js'),
                 import('./gallery-extractors/mega.js'),
                 import('./gallery-extractors/postimg.js'),
-                import('./gallery-extractors/imgbox.js'),
-                import('./gallery-extractors/civitai.js'),
-                import('./gallery-extractors/dropbox.js'),
-                import('./gallery-extractors/pixiv.js')
+                import('./gallery-extractors/imgbox.js')
             ]);
             window.findCharacterGalleryUrls = findCharacterGalleryUrls;
             window.extractGalleryImages = extractGalleryImages;

@@ -145,9 +145,9 @@ async function downloadViaServerRoute(cardId, items, prefix, phase, options = {}
 /**
  * Save one already-fetched media item through the server's second entry door
  * (docs/PHASE_3C_PLAN.md §6, "one writer, two entry doors") -- for MEGA's
- * AES-CTR decrypt and Pixiv's session-proxied fetch, which have to happen in
- * the browser, but still need sniff/normalize/dedupe/write/thumbnail/
- * manifest applied exactly the way a server-fetched item does.
+ * AES-CTR decrypt, which has to happen in the browser, but still needs
+ * sniff/normalize/dedupe/write/thumbnail/manifest applied exactly the way a
+ * server-fetched item does.
  * @param {string} cardId
  * @param {{url: string, filename?: string, arrayBuffer: ArrayBuffer, contentType?: string}} item
  * @param {string} prefix
@@ -775,8 +775,8 @@ async function downloadMediaToMemory(url, timeoutMs = 30000, abortSignal = null)
  * docs/PHASE_3C_PLAN.md §6, "extgallery still needs the browser's
  * extractors"). Once a page yields images, plain-URL ones go through the
  * batch JSON route same as embedded media; `downloadFn`-bearing ones (MEGA's
- * AES-CTR decrypt, Pixiv's session-proxied fetch) still run in the browser,
- * then their bytes go through the second entry door.
+ * AES-CTR decrypt) still run in the browser, then their bytes go through the
+ * second entry door.
  *
  * @param {Object} character - Character object (must be hydrated)
  * @param {string} cardId - The card's archive id (character.avatar)

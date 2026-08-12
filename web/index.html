@@ -1510,17 +1510,13 @@ https://jannyai.com/characters/uuid_slug
                             <p>Some character cards can link to galleries on external image hosts instead of embedding direct image URLs. Character Library walks these links, resolves the underlying images, and downloads them into the character's gallery folder.</p>
                             <p><strong>Supported hosts:</strong></p>
                             <ul>
-                                <li><strong>Civitai</strong>: posts and image collections (public out-of-the-box; private/hidden posts require an API key)</li>
-                                <li><strong>Imgchest</strong>: public and password-protected posts (passwords are auto-detected from the card's creator notes / description via regex; password-protected posts require cl-helper)</li>
+                                <li><strong>Imgchest</strong>: public posts (image links are extracted directly from the page)</li>
                                 <li><strong>Mega.nz</strong>: public folder shares with multi-pass folder traversal</li>
                                 <li><strong>PostImg, ImgBB, Imgbox</strong>: albums and individual images</li>
-                                <li><strong>Pixiv</strong>: artwork pages (requires cl-helper; R-18 works need your Pixiv login in Settings → Media)</li>
                                 <li><strong>Catbox</strong>: direct file URLs</li>
-                                <li><strong>Dropbox</strong>: shared folders and individual file links</li>
                                 <li><strong>Google Drive</strong>: shared folders and individual files</li>
                             </ul>
-                            <p>Extractors run automatically when you trigger <strong>Download Embedded Media</strong> from the Gallery tab or use Bulk Localization. No configuration is required for public content.</p>
-                            <p class="info-tip"><i class="fa-solid fa-key"></i> <strong>Civitai API key:</strong> Required only for private or hidden Civitai posts. Configure in Settings → Media → Civitai API Key. Generate at <code>civitai.com/user/account</code>. The key is stored persistently and pushed to the cl-helper plugin when you save it (re-synced automatically if the plugin restarts), so it stays server-side at request time.</p>
+                            <p>Extractors run automatically when you trigger <strong>Download Embedded Media</strong> from the Gallery tab or use Bulk Localization. No configuration is required.</p>
                         </div>
                     </div>
 
@@ -2303,63 +2299,6 @@ https://jannyai.com/characters/uuid_slug
                             </div>
                         </div>
 
-                        <div class="settings-group">
-                            <div class="settings-group-title"><i class="fa-solid fa-key"></i> Civitai API Key</div>
-                            <div class="settings-row">
-                                <label>Key:</label>
-                                <div class="settings-input-group">
-                                    <input type="password" id="settingsCivitaiApiKey" placeholder="Paste Civitai API key" autocomplete="off" spellcheck="false">
-                                    <button id="toggleCivitaiKeyVisibility" class="glass-btn icon-only" title="Show/Hide">
-                                        <i class="fa-solid fa-eye"></i>
-                                    </button>
-                                    <button id="validateCivitaiKeyBtn" class="settings-verify-btn" title="Test Connection">
-                                        <i class="fa-solid fa-check"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="settings-row">
-                                <span class="settings-hint">
-                                    Required to extract images from private or hidden Civitai posts. Public content works without a key. Stored persistently in extension settings and pushed to the cl-helper plugin at startup. Generate one at <a href="https://civitai.com/user/account" target="_blank" rel="noopener">civitai.com/user/account</a>.
-                                </span>
-                            </div>
-                            <div class="settings-row" style="gap: 8px;">
-                                <button id="saveCivitaiKeyBtn" class="settings-action-btn primary">
-                                    <i class="fa-solid fa-floppy-disk"></i> Save Key
-                                </button>
-                                <button id="clearCivitaiKeyBtn" class="settings-action-btn danger">
-                                    <i class="fa-solid fa-trash-can"></i> Clear Key
-                                </button>
-                            </div>
-                        </div>
-
-                        <div class="settings-group">
-                            <div class="settings-group-title"><i class="fa-solid fa-images"></i> Pixiv Login</div>
-                            <div class="settings-row">
-                                <label>PHPSESSID:</label>
-                                <div class="settings-input-group">
-                                    <input type="password" id="settingsPixivCookie" placeholder="Paste your Pixiv PHPSESSID cookie" autocomplete="off" spellcheck="false">
-                                    <button id="togglePixivCookieVisibility" class="glass-btn icon-only" title="Show/Hide">
-                                        <i class="fa-solid fa-eye"></i>
-                                    </button>
-                                    <button id="validatePixivCookieBtn" class="settings-verify-btn" title="Test Connection">
-                                        <i class="fa-solid fa-check"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="settings-row">
-                                <span class="settings-hint">
-                                    Required only for <strong>R-18</strong> artworks; public artworks extract without a login. R-18 works also need "View R-18 works" turned ON in your Pixiv account settings, or their images come back empty. Log in at pixiv.net, then copy the <strong>PHPSESSID</strong> cookie value from DevTools (Application &rarr; Cookies &rarr; pixiv.net). Stored persistently and pushed to the cl-helper plugin. Requires the cl-helper plugin.
-                                </span>
-                            </div>
-                            <div class="settings-row" style="gap: 8px;">
-                                <button id="savePixivCookieBtn" class="settings-action-btn primary">
-                                    <i class="fa-solid fa-floppy-disk"></i> Save Login
-                                </button>
-                                <button id="clearPixivCookieBtn" class="settings-action-btn danger">
-                                    <i class="fa-solid fa-trash-can"></i> Clear Login
-                                </button>
-                            </div>
-                        </div>
                     </div>
 
                     <!-- Gallery Folders Section -->
