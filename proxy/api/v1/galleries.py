@@ -207,10 +207,10 @@ def delete_gallery_file(folder: str, filename: str) -> Response:
     "/galleries/{folder}/thumbs/prune", response_model=ThumbsPrunedOut, summary="Drop orphaned gallery thumbs"
 )
 def prune_gallery_thumbs(folder: str) -> ThumbsPrunedOut:
-    """docs/PHASE_3C_PLAN.md §5 -- the replacement for cl-helper's
-    `gallery-thumb-cleanup`: thumbs are generated at write time now, so the
-    only orphans left are ones whose source file left by a route other than
-    `DELETE .../files/{filename}` (which already forgets its own thumb)."""
+    """docs/PHASE_3C_PLAN.md §5 -- thumbs are generated at write time now, so
+    the only orphans left are ones whose source file left by a route other
+    than `DELETE .../files/{filename}` (which already forgets its own
+    thumb)."""
     directory = _shared.gallery_dir(folder)
     live = {entry.name for entry in os.scandir(directory) if entry.is_file()} if directory.is_dir() else set()
     removed = _shared.thumbnail_store.prune_gallery(directory.name, live)

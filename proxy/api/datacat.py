@@ -1,13 +1,11 @@
 """`/api/v1/datacat` -- DataCat session transport for the browse/import UI.
 
 DataCat (datacat.run) gates its REST API behind an anonymous session token and
-a read-path allow-list; SillyTavern-CharacterLibrary used to reach it through
-its `cl-helper` server plugin, which lived inside SillyTavern's own process and
-has no equivalent here. This router is that plugin's DataCat surface, ported
-straight into the archive server (see proxy/datacat_client.py.DatacatSession for
-the port notes and PHASE_3B_PLAN.md S2 for the design). Seven routes:
+a read-path allow-list; this router provides that surface directly from the
+archive server (see proxy/datacat_client.py.DatacatSession for the port notes
+and PHASE_3B_PLAN.md S2 for the design). Seven routes:
 
-  health              -- replaces the plugin-installed probe
+  health              -- probe
   dc-init             -- anonymous identify handshake -> session token
   dc-set-token        -- push a client-held token in (e.g. from settings)
   dc-validate         -- is the held token still good
@@ -15,9 +13,8 @@ the port notes and PHASE_3B_PLAN.md S2 for the design). Seven routes:
   dc-proxy/{path...}  -- authenticated GET passthrough (allow-listed paths only)
   dc-extract          -- submit a JanitorAI/Saucepan URL to the extraction queue
 
-The browser reaches these via CL_HELPER_PLUGIN_BASE in
-web/modules/providers/provider-utils.js, repointed here from the old
-`/plugins/cl-helper` -- see that constant's docstring.
+The browser reaches these via DATACAT_API_BASE in
+web/modules/providers/provider-utils.js.
 """
 
 from __future__ import annotations

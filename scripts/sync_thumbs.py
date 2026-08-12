@@ -23,8 +23,7 @@ cache is disposable regardless -- deleting it costs one regeneration pass and no
 data -- which is why this script is allowed to be blunt.
 
 `--galleries` does the same job for the gallery thumb cache instead of the
-avatar one -- docs/PHASE_3C_PLAN.md §5, the replacement for cl-helper's
-`gallery-thumb-cleanup`:
+avatar one -- docs/PHASE_3C_PLAN.md §5:
 
     uv run python scripts/sync_thumbs.py --galleries              # report
     uv run python scripts/sync_thumbs.py --galleries --apply      # act

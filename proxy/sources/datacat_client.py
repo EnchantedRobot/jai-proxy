@@ -201,21 +201,15 @@ class DatacatImageResolver:
 # ---------------------------------------------------------------------------
 # Live session transport for the browser's browse/import flow (Phase 3B S2,
 # see docs/PHASE_3B_PLAN.md). This is the "promotion" the plan describes: the
-# same anonymous handshake above, plus the token-lifecycle and read-only
-# proxy routes the closed-source cl-helper plugin used to provide. Ported
-# from its real source (~/workspaces/SillyTavern-CharacterLibrary/extras/
-# cl-helper/index.js registerDataCatRoutes()) rather than guessed -- every
-# endpoint path, request body shape and validation rule below matches that
-# file line for line, including the extraction-submit bodies for DataCat's
-# two upstream kinds (JanitorAI vs Saucepan), which are not documented
-# anywhere public.
+# same anonymous handshake above, plus token-lifecycle and read-only proxy
+# routes, including the extraction-submit bodies for DataCat's two upstream
+# kinds (JanitorAI vs Saucepan), which are not documented anywhere public.
 # ---------------------------------------------------------------------------
 
 
 class DatacatSessionError(Exception):
     """Raised by DatacatSession.proxy_get; carries the HTTP status the route
-    handler should answer with (401/403/502), mirroring cl-helper's
-    res.status(...).json(...) branches for the same failures."""
+    handler should answer with (401/403/502)."""
 
     def __init__(self, status: int, message: str) -> None:
         super().__init__(message)
@@ -224,7 +218,7 @@ class DatacatSessionError(Exception):
 
 
 # Read-only API paths forwarded by dc-proxy. A safety valve against the proxy
-# becoming an arbitrary datacat.run relay -- matches cl-helper's DC_ALLOWED_PATHS.
+# becoming an arbitrary datacat.run relay.
 _DC_ALLOWED_PATHS = [
     re.compile(r"^/api/characters/fresh\b"),
     re.compile(r"^/api/characters/recent-public\b"),
@@ -244,8 +238,7 @@ def dc_proxy_path_allowed(path: str) -> bool:
 class DatacatSession:
     """A server-held DataCat session backing /api/v1/datacat/* -- the live
     counterpart to DatacatImageResolver above (which is a one-shot, .env-
-    persisted token for offline batch scripts). This one is in-memory only,
-    exactly mirroring cl-helper's own module-level `dcSessionToken` variable:
+    persisted token for offline batch scripts). This one is in-memory only:
     a browse session is ephemeral, not something a later `make import` run
     should inherit."""
 
@@ -307,8 +300,8 @@ class DatacatSession:
 
     async def validate(self) -> dict[str, Any]:
         """dc-validate: probe the held token against a cheap real endpoint.
-        There is no dedicated "is this token valid" call on datacat.run --
-        cl-helper uses the same recent-public page-1 request, so this does too."""
+        There is no dedicated "is this token valid" call on datacat.run, so
+        this reuses the recent-public page-1 request."""
         if not self._token:
             return {"valid": False, "reason": "no token stored"}
         try:

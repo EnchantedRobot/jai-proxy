@@ -267,8 +267,7 @@ def test_media_status_incomplete_when_last_run_had_errors(client, populated_arch
 
 
 # --------------------------------------------------------------------------
-# POST /galleries/{folder}/thumbs/prune -- docs/PHASE_3C_PLAN.md §5, the
-# replacement for cl-helper's gallery-thumb-cleanup.
+# POST /galleries/{folder}/thumbs/prune -- docs/PHASE_3C_PLAN.md §5.
 # --------------------------------------------------------------------------
 
 

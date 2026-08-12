@@ -2587,7 +2587,7 @@ async function fetchAndPopulateDetails(hit, token) {
 
         // Linked lorebooks (external, metadata-only). DataCat stores attached
         // lorebooks/scripts on `character.scripts[]`. Their entries are not
-        // reachable through cl-helper, so this is a heads-up surface only
+        // fetchable here, so this is a heads-up surface only
         renderDatacatLorebooks(character.scripts);
 
         // Saucepan portraits gallery
@@ -4003,7 +4003,7 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
         if (grid) {
             this.observeImages(grid);
             // Show spinner immediately so the user doesn't see a blank grid
-            // while the async cl-helper / session checks below are in flight.
+            // while the async availability / session checks below are in flight.
             renderSkeletonGrid(grid);
         }
 
@@ -4035,7 +4035,7 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                 } else {
                     renderBrowseError(document.getElementById('datacatGrid'), {
                         provider: 'datacat',
-                        error: new Error('Failed to initialize a DataCat session (cl-helper /dc-init returned no token)'),
+                        error: new Error('Failed to initialize a DataCat session (dc-init returned no token)'),
                         message: 'Failed to initialize a DataCat session. DataCat may be temporarily unavailable.',
                         retry: bootstrapDcSession,
                     });

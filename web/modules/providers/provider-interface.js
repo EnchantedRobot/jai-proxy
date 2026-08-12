@@ -72,9 +72,6 @@ export class ProviderBase {
     /** Warning message shown when enabling this provider. Null = no warning. @returns {string|null} */
     get enableWarning() { return null; }
 
-    /** Lowest cl-helper version whose routes this provider needs. Null = works without it. @returns {string|null} */
-    get minClHelperVersion() { return null; }
-
     /** Reference to this provider's BrowseView subclass instance, if any. @returns {import('./browse-view.js').BrowseView|null} */
     get browseView() { return null; }
 

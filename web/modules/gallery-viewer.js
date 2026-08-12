@@ -592,7 +592,7 @@ function measureThumbStride(strip) {
 
 function _getThumbUrl(media) {
     if (!_currentFolder || isVideo(media) || isGif(media)) return null;
-    // only types cl-helper's Jimp can actually decode; extensionless names (the synthesized avatar entry) would 400 per open
+    // only types the thumbnailer can actually decode; extensionless names (the synthesized avatar entry) would 400 per open
     if (!/\.(png|jpe?g|webp)$/i.test(media.name || '')) return null;
     return CoreAPI.getGalleryThumbUrl(_currentFolder, media.name);
 }

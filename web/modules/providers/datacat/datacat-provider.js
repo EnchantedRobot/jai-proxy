@@ -221,10 +221,10 @@ class DatacatProvider extends ProviderBase {
         const report = options?.onStatus;
 
         try {
-            report?.('Checking cl-helper plugin...');
+            report?.('Checking DataCat availability...');
             const pluginOk = await checkDcPluginAvailable();
             if (!pluginOk) {
-                api?.debugLog?.('[DatacatProvider] refreshRemoteData: cl-helper not available, skipping re-extraction');
+                api?.debugLog?.('[DatacatProvider] refreshRemoteData: DataCat not available, skipping re-extraction');
                 return;
             }
 
@@ -520,7 +520,7 @@ export default datacatProvider;
 // Window-exposed session management (called by settings panel in library.js)
 window.datacatValidateSession = async () => {
     const pluginOk = await checkDcPluginAvailable();
-    if (!pluginOk) return { valid: false, reason: 'cl-helper plugin not available' };
+    if (!pluginOk) return { valid: false, reason: 'DataCat not available' };
     return validateDcSession();
 };
 

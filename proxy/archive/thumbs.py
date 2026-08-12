@@ -261,9 +261,9 @@ class ThumbnailStore:
 
     def prune_gallery(self, folder: str, live_filenames: set[str]) -> int:
         """Delete cached gallery thumbs whose source image is no longer in the
-        gallery folder -- docs/PHASE_3C_PLAN.md §5, the replacement for
-        cl-helper's `gallery-thumb-cleanup`. `live_filenames` is the caller's
-        own scandir of the gallery, so this only ever reads the thumb cache."""
+        gallery folder -- docs/PHASE_3C_PLAN.md §5. `live_filenames` is the
+        caller's own scandir of the gallery, so this only ever reads the
+        thumb cache."""
         directory = self.gallery_dir / folder
         if not directory.is_dir():
             return 0

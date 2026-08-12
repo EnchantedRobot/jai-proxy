@@ -52,8 +52,7 @@ app = FastAPI(title="jai-proxy", lifespan=_lifespan)
 # under /api/v1 and deliberately not shaped like SillyTavern's /api -- see
 # proxy/api/__init__.py for why that distinction is the point.
 app.include_router(v1_router)
-# DataCat's session transport (Phase 3B S2) -- the archive's replacement for
-# the cl-helper plugin's DataCat surface. See proxy/api/datacat.py.
+# DataCat's session transport (Phase 3B S2). See proxy/api/datacat.py.
 app.include_router(datacat_router)
 # What the two userscripts talk to: the per-source build endpoints, the
 # bookkeeping they call around a bulk run, and the custom-provider chat surface
