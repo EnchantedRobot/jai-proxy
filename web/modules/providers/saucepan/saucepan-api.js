@@ -1,20 +1,22 @@
 // Shared Saucepan API utilities - used by both saucepan-provider.js and
 // saucepan-browse.js, plus DataCat and the Creator Downloads adapter for
-// creator/companion lookups. All calls go through cl-helper (transport only).
+// creator/companion lookups. All calls go through the archive server's
+// DataCat session transport (transport only).
 
-import { CL_HELPER_PLUGIN_BASE } from '../provider-utils.js';
+import { DC_SESSION_API_BASE } from '../provider-utils.js';
 
 // ========================================
 // CONSTANTS
 // ========================================
 
-const SAUCEPAN_PROXY_BASE = `${CL_HELPER_PLUGIN_BASE}/saucepan-proxy`;
+const SAUCEPAN_PROXY_BASE = `${DC_SESSION_API_BASE}/saucepan-proxy`;
 
 // Saucepan CDN images can't be hotlinked: the CDN answers with
 // Cross-Origin-Resource-Policy: same-origin, so the browser refuses to render
-// them from our origin. Route them through cl-helper's proxy instead. Images
-// live at saucepan.ai/cdn/{imageId}/card; plugin routes are prefixed with /api.
-export const SAUCEPAN_CDN_PROXY_BASE = `/api${CL_HELPER_PLUGIN_BASE}/saucepan-proxy/cdn/`;
+// them from our origin. Route them through the archive server's proxy
+// instead. Images live at saucepan.ai/cdn/{imageId}/card; routes are
+// prefixed with /api.
+export const SAUCEPAN_CDN_PROXY_BASE = `/api${DC_SESSION_API_BASE}/saucepan-proxy/cdn/`;
 
 // The CDN is variant-addressed (/cdn/{id}/{variant}). Small surfaces use 'card' so a 70px
 // avatar or grid thumb does not pull a full-size source; full-screen and saved media use
@@ -82,15 +84,15 @@ export function setSaucepanTokenGetter(fn) { _getSaucepanToken = fn; }
 export function hasSaucepanToken() { return !!(_getSaucepanToken?.() ?? null); }
 
 /**
- * Ping cl-helper's health endpoint. Used by the auth bridges to report a
- * friendly "plugin not available" instead of a raw HTTP error.
+ * Ping the DataCat API's health endpoint. Used by the auth bridges to
+ * report a friendly "not available" instead of a raw HTTP error.
  * @returns {Promise<boolean>}
  */
-export async function checkClHelperAvailable() {
+export async function checkDataCatApiAvailable() {
     try {
         const resp = _apiRequest
-            ? await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/health`)
-            : await fetch(`/api${CL_HELPER_PLUGIN_BASE}/health`);
+            ? await _apiRequest(`${DC_SESSION_API_BASE}/health`)
+            : await fetch(`/api${DC_SESSION_API_BASE}/health`);
         if (!resp.ok) return false;
         const data = await resp.json();
         return data?.ok === true;
@@ -101,9 +103,10 @@ export async function checkClHelperAvailable() {
 
 let _tokenPushInFlight = null;
 
-// cl-helper holds the token in RAM only, so it is empty after every ST restart while
-// the client still has one persisted. Provider init pushes it fire-and-forget, so a
-// call made before that lands would 403; re-push once and retry rather than fail.
+// The archive server holds the token in RAM only, so it is empty after every server
+// restart while the client still has one persisted. Provider init pushes it
+// fire-and-forget, so a call made before that lands would 403; re-push once and
+// retry rather than fail.
 async function tryPushSavedToken() {
     if (_tokenPushInFlight) return _tokenPushInFlight;
     // Bail BEFORE storing anything: a path that returns without awaiting would finish
@@ -124,7 +127,7 @@ async function tryPushSavedToken() {
 }
 
 async function saucepanFetch(method, apiPath, body) {
-    if (!_apiRequest) throw new Error('Saucepan: apiRequest not bound (cl-helper required)');
+    if (!_apiRequest) throw new Error('Saucepan: apiRequest not bound (archive server required)');
     const url = `${SAUCEPAN_PROXY_BASE}${apiPath}`;
     const send = () => (method === 'POST' ? _apiRequest(url, 'POST', body) : _apiRequest(url));
     let resp = await send();
@@ -135,7 +138,7 @@ async function saucepanFetch(method, apiPath, body) {
 }
 
 // ========================================
-// SESSION (cl-helper token management)
+// SESSION (archive-server token management)
 // ========================================
 
 /** Shared error shaping for the session endpoints. */
@@ -145,13 +148,13 @@ async function sessionError(resp) {
 }
 
 /**
- * Log into Saucepan via cl-helper (which performs the credentialed request).
+ * Log into Saucepan via the archive server (which performs the credentialed request).
  * The password is never stored; the returned token is what callers persist.
  * @returns {Promise<{ok: boolean, token?: string, error?: string}>}
  */
 export async function saucepanLogin(handle, password) {
     try {
-        const resp = await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/saucepan-login`, 'POST', { handle, password });
+        const resp = await _apiRequest(`${DC_SESSION_API_BASE}/saucepan-login`, 'POST', { handle, password });
         if (!resp.ok) return { ok: false, error: await sessionError(resp) };
         return await resp.json();
     } catch (e) {
@@ -160,12 +163,12 @@ export async function saucepanLogin(handle, password) {
 }
 
 /**
- * Push a Bearer token into cl-helper's in-memory store (proxy auth).
+ * Push a Bearer token into the archive server's in-memory store (proxy auth).
  * @returns {Promise<{ok: boolean, error?: string}>}
  */
 export async function pushSaucepanToken(token) {
     try {
-        const resp = await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/saucepan-set-token`, 'POST', { token });
+        const resp = await _apiRequest(`${DC_SESSION_API_BASE}/saucepan-set-token`, 'POST', { token });
         if (!resp.ok) return { ok: false, error: await sessionError(resp) };
         return await resp.json();
     } catch (e) {
@@ -174,12 +177,12 @@ export async function pushSaucepanToken(token) {
 }
 
 /**
- * Validate the token cl-helper currently holds.
+ * Validate the token the archive server currently holds.
  * @returns {Promise<{valid: boolean, reason?: string}>}
  */
 export async function validateSaucepanSession() {
     try {
-        const resp = await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/saucepan-validate`);
+        const resp = await _apiRequest(`${DC_SESSION_API_BASE}/saucepan-validate`);
         if (!resp.ok) return { valid: false, reason: await sessionError(resp) };
         return await resp.json();
     } catch (e) {
@@ -188,12 +191,12 @@ export async function validateSaucepanSession() {
 }
 
 /**
- * Clear the token from cl-helper's in-memory store.
+ * Clear the token from the archive server's in-memory store.
  * @returns {Promise<boolean>}
  */
 export async function clearSaucepanToken() {
     try {
-        const resp = await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/saucepan-clear-token`, 'POST');
+        const resp = await _apiRequest(`${DC_SESSION_API_BASE}/saucepan-clear-token`, 'POST');
         return resp.ok;
     } catch {
         return false;
@@ -205,7 +208,7 @@ export async function clearSaucepanToken() {
 // ========================================
 
 /**
- * Rewrite a Saucepan CDN image URL to the local cl-helper proxy path.
+ * Rewrite a Saucepan CDN image URL to the local archive-server proxy path.
  * Non-Saucepan URLs are returned unchanged.
  * @param {string} url
  * @returns {string}
@@ -221,7 +224,7 @@ export function resolveSaucepanImageUrl(url) {
         return url.replace('https://cdn.saucepan.ai/images/', SAUCEPAN_CDN_PROXY_BASE);
     }
     // Proxy paths from earlier builds that lack the /api prefix.
-    if (url.startsWith(`${CL_HELPER_PLUGIN_BASE}/saucepan-proxy/cdn/`)) {
+    if (url.startsWith(`${DC_SESSION_API_BASE}/saucepan-proxy/cdn/`)) {
         return `/api${url}`;
     }
     return url;
@@ -232,7 +235,7 @@ export function resolveSaucepanImageUrl(url) {
 // ========================================
 
 /**
- * Search Saucepan companions via the Saucepan API (proxied through cl-helper).
+ * Search Saucepan companions via the Saucepan API (proxied through the archive server).
  * Returns results normalized to DataCat-compatible shape.
  * @param {Object} opts
  * @param {string} [opts.search='']
@@ -552,7 +555,7 @@ async function fetchSaucepanJson(apiPath) {
 }
 
 /**
- * Submit a Saucepan companion URL for native extraction via cl-helper.
+ * Submit a Saucepan companion URL for native extraction via the archive server.
  * Requires a Saucepan Bearer token (login or manually pasted).
  * @param {string} companionUrl - Full Saucepan companion URL
  * @returns {Promise<{success: boolean, assembled?: Object, greetings?: Object[], error?: string}>}

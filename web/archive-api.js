@@ -424,11 +424,11 @@
             },
         },
         {
-            // The one cl-helper route worth keeping. Everything else that plugin
-            // did is gone, but gallery thumbnails are not optional -- a folder of
-            // 400 full-size images is hundreds of megabytes -- and the archive
-            // inherited its 3,446-folder cache, so this maps to a real endpoint
-            // rather than a 501.
+            // Gallery thumbnails are not optional -- a folder of 400 full-size
+            // images is hundreds of megabytes -- and the archive inherited a
+            // 3,446-folder cache, so this maps to a real endpoint rather than
+            // a 501. The wire path itself is kept as-is; only the internal
+            // naming around it was cleaned up.
             match: (path) => path.startsWith('/api/plugins/cl-helper/gallery-thumb/'),
             handler({ url }) {
                 const rest = url.pathname.slice('/api/plugins/cl-helper/gallery-thumb/'.length);

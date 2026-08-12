@@ -127,7 +127,7 @@ const DEFAULT_SETTINGS = {
     mobileHaptics: true,
     useGridThumbnails: false,
     gridThumbnailsDesktop: false,
-    gridThumbnailsClHelper: true,
+    gridThumbnailsHiRes: true,
     gridThumbnailSize: 512,
     enableCharDetailNav: true,
 

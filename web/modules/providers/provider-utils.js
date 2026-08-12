@@ -11,13 +11,11 @@ import CoreAPI from '../core-api.js';
 
 export const IMG_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/%3E";
 
-// Was '/plugins/cl-helper', SillyTavern-CharacterLibrary's server plugin --
-// gone with SillyTavern (Phase 3B S2, see docs/PHASE_3B_PLAN.md). DataCat's
-// session transport now lives in the archive server itself, at
+// DataCat's session transport lives in the archive server itself, at
 // proxy/api/datacat.py; apiRequest() prefixes `/api`, so this constant
 // resolves through to /api/v1/datacat/* -- a real backend route, not an
 // archive-api.js translation, so it needs no entry in that table.
-export const CL_HELPER_PLUGIN_BASE = '/v1/datacat';
+export const DC_SESSION_API_BASE = '/v1/datacat';
 
 // Live mobile-mode check for handlers that branch per mode (html.cl-mobile, owned by the boot
 // policy + the library-mobile lifecycle). Always evaluate at event time, never at listener-attach
@@ -273,7 +271,7 @@ function gatherEnvInfo() {
             const [manifest, helper, st, corsProxy] = await Promise.all([
                 fetch('../manifest.json', { cache: 'no-cache' }).then(r => r.json()).catch(() => null),
                 (async () => {
-                    try { return await (await CoreAPI.apiRequest(`${CL_HELPER_PLUGIN_BASE}/health`)).json(); } catch { return null; }
+                    try { return await (await CoreAPI.apiRequest(`${DC_SESSION_API_BASE}/health`)).json(); } catch { return null; }
                 })(),
                 fetch('/version').then(r => r.json()).catch(() => null),
                 // Probing with our own origin trips ST's circular-request check (400) when the
@@ -310,7 +308,7 @@ async function buildBrowseErrorReport(c) {
     if (err.status != null) lines.push(`http: ${err.status}`);
     if (err.bodySnippet) lines.push(`body: ${err.bodySnippet}`);
     if (flags) lines.push(`settings: ${flags}`);
-    lines.push(`cl-helper: ${env.helper} | ST: ${env.st}`);
+    lines.push(`datacat: ${env.helper} | ST: ${env.st}`);
     lines.push(`env: corsProxy=${onOff(env.corsProxy)} | basicAuth=${onOff(env.basicAuth)} | lazyLoad=${onOff(CoreAPI.isStShallowMode())} | mode=${isMobileMode() ? 'mobile' : 'desktop'} | online=${onOff(navigator.onLine)}`);
     lines.push(`ua: ${navigator.userAgent}`);
     return lines.join('\n');

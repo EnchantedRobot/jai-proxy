@@ -3,7 +3,7 @@
 // Sections: Network, Metadata, Browse/Search, Tags, V2 Card Builder, Extraction, MeiliSearch
 
 import CoreAPI from '../../core-api.js';
-import { CL_HELPER_PLUGIN_BASE, slugify, stripHtml, readJsonClassified, classifyErrorPage } from '../provider-utils.js';
+import { DC_SESSION_API_BASE, slugify, stripHtml, readJsonClassified, classifyErrorPage } from '../provider-utils.js';
 import { meiliMultiSearch, TAG_MAP as JANNY_TAG_MAP } from '../janny/janny-api.js';
 import { isJanitorBridgeAvailable, janitorBridgeFetch } from '../janitor-bridge.js';
 
@@ -86,7 +86,7 @@ export const MIN_TOTAL_TOKENS = 889;
 // NETWORK
 // ========================================
 
-const DC_PROXY_BASE = `${CL_HELPER_PLUGIN_BASE}/dc-proxy`;
+const DC_PROXY_BASE = `${DC_SESSION_API_BASE}/dc-proxy`;
 
 let _apiRequest = null;
 let _getSavedToken = null;
@@ -107,7 +107,7 @@ export function setApiRequest(fn) { _apiRequest = fn; }
 export function setSavedTokenGetter(fn) { _getSavedToken = fn; }
 
 /**
- * Push the saved token (or a fresh anonymous one) into cl-helper. Returns
+ * Push the saved token (or a fresh anonymous one) to the archive server. Returns
  * true if a usable session is now active. Concurrent callers share the
  * in-flight bootstrap promise so we never run more than one /dc-init at
  * a time. Reset on completion so a future 401 can re-arm.
@@ -128,13 +128,13 @@ async function tryBootstrapSession() {
 }
 
 /**
- * Fetch a DataCat API path through the cl-helper plugin proxy.
+ * Fetch a DataCat API path through the archive server's proxy.
  * On 401/403, attempts to bootstrap a session once and retries.
  * @param {string} apiPath - Path relative to datacat.run (e.g. /api/characters/recent-public?...)
  * @returns {Promise<Response>}
  */
 async function dcFetch(apiPath) {
-    if (!_apiRequest) throw new Error('DataCat: apiRequest not bound (cl-helper required)');
+    if (!_apiRequest) throw new Error('DataCat: apiRequest not bound (archive server required)');
     let resp = await _apiRequest(`${DC_PROXY_BASE}${apiPath}`);
     if (resp.status === 401 || resp.status === 403) {
         if (await tryBootstrapSession()) {
@@ -150,14 +150,14 @@ async function dcFetch(apiPath) {
 }
 
 /**
- * Check if the cl-helper plugin is available.
+ * Check if the DataCat API is available.
  * @returns {Promise<boolean>}
  */
 export async function checkDcPluginAvailable() {
     try {
         const resp = _apiRequest
-            ? await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/health`)
-            : await fetch(`/api${CL_HELPER_PLUGIN_BASE}/health`);
+            ? await _apiRequest(`${DC_SESSION_API_BASE}/health`)
+            : await fetch(`/api${DC_SESSION_API_BASE}/health`);
         if (!resp.ok) return false;
         const data = await resp.json();
         return data?.ok === true;
@@ -167,8 +167,8 @@ export async function checkDcPluginAvailable() {
 }
 
 /**
- * Try to restore a saved DataCat session token via cl-helper.
- * Pushes the saved token to cl-helper and validates it.
+ * Try to restore a saved DataCat session token.
+ * Pushes the saved token to the archive server and validates it.
  * @param {string} savedToken - Previously saved session token
  * @returns {Promise<boolean>} true if the saved token is still valid
  */
@@ -176,8 +176,8 @@ async function restoreSavedToken(savedToken) {
     if (!savedToken || typeof savedToken !== 'string') return false;
     try {
         const setResp = _apiRequest
-            ? await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/dc-set-token`, 'POST', { token: savedToken })
-            : await fetch(`/api${CL_HELPER_PLUGIN_BASE}/dc-set-token`, {
+            ? await _apiRequest(`${DC_SESSION_API_BASE}/dc-set-token`, 'POST', { token: savedToken })
+            : await fetch(`/api${DC_SESSION_API_BASE}/dc-set-token`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ token: savedToken }),
@@ -185,8 +185,8 @@ async function restoreSavedToken(savedToken) {
         if (!setResp.ok) return false;
 
         const valResp = _apiRequest
-            ? await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/dc-validate`)
-            : await fetch(`/api${CL_HELPER_PLUGIN_BASE}/dc-validate`);
+            ? await _apiRequest(`${DC_SESSION_API_BASE}/dc-validate`)
+            : await fetch(`/api${DC_SESSION_API_BASE}/dc-validate`);
         if (!valResp.ok) return false;
         const data = await valResp.json();
         return data?.valid === true;
@@ -196,7 +196,7 @@ async function restoreSavedToken(savedToken) {
 }
 
 /**
- * Initialize a DataCat session via cl-helper.
+ * Initialize a DataCat session.
  * If a saved token is provided, tries to restore it first.
  * Otherwise (or if saved token is invalid), requests a fresh session.
  * Returns the active token string on success so the caller can persist it.
@@ -214,8 +214,8 @@ export async function initDcSession(savedToken, force = false) {
 
         const body = force ? JSON.stringify({ force: true }) : undefined;
         const resp = _apiRequest
-            ? await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/dc-init`, 'POST', force ? { force: true } : undefined)
-            : await fetch(`/api${CL_HELPER_PLUGIN_BASE}/dc-init`, {
+            ? await _apiRequest(`${DC_SESSION_API_BASE}/dc-init`, 'POST', force ? { force: true } : undefined)
+            : await fetch(`/api${DC_SESSION_API_BASE}/dc-init`, {
                 method: 'POST',
                 ...(force ? { headers: { 'Content-Type': 'application/json' }, body } : {}),
             });
@@ -229,14 +229,14 @@ export async function initDcSession(savedToken, force = false) {
 }
 
 /**
- * Validate the current DataCat session on cl-helper.
+ * Validate the current DataCat session.
  * @returns {Promise<{valid: boolean, reason?: string}>}
  */
 export async function validateDcSession() {
     try {
         const resp = _apiRequest
-            ? await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/dc-validate`)
-            : await fetch(`/api${CL_HELPER_PLUGIN_BASE}/dc-validate`);
+            ? await _apiRequest(`${DC_SESSION_API_BASE}/dc-validate`)
+            : await fetch(`/api${DC_SESSION_API_BASE}/dc-validate`);
         if (!resp.ok) return { valid: false, reason: 'request failed' };
         return await resp.json();
     } catch {
@@ -245,14 +245,14 @@ export async function validateDcSession() {
 }
 
 /**
- * Clear the DataCat session token from cl-helper.
+ * Clear the DataCat session token.
  * @returns {Promise<boolean>}
  */
 export async function clearDcSession() {
     try {
         const resp = _apiRequest
-            ? await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/dc-clear-token`, 'POST')
-            : await fetch(`/api${CL_HELPER_PLUGIN_BASE}/dc-clear-token`, { method: 'POST' });
+            ? await _apiRequest(`${DC_SESSION_API_BASE}/dc-clear-token`, 'POST')
+            : await fetch(`/api${DC_SESSION_API_BASE}/dc-clear-token`, { method: 'POST' });
         return resp.ok;
     } catch {
         return false;
@@ -265,7 +265,7 @@ export async function clearDcSession() {
 // Unlocks page 2+ of the Hampter sorts. JanitorAI auth is Supabase; the
 // anon key below is their PUBLIC publishable key (role:anon), shipped in the janitorai
 // frontend bundle, safe to embed. Login/refresh hit supabase.co directly (CORS *, and it is
-// NOT behind JanitorAI's Cloudflare bot gate), so the whole flow is client-side, no cl-helper.
+// NOT behind JanitorAI's Cloudflare bot gate), so the whole flow is client-side, no archive-server round trip.
 // Access tokens live ~3h; the refresh token rotates on every use, so callers must persist the
 // new one each refresh. Pure HTTP here; the stateful session layer lives in datacat-provider.
 
@@ -859,7 +859,7 @@ export function buildV2FromDownload(downloadData, character) {
 export async function submitExtraction(janitorUrl, { publicFeed = true, alwaysReextract = false } = {}) {
     if (!_apiRequest) throw new Error('DataCat: apiRequest not bound');
     try {
-        const resp = await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/dc-extract`, 'POST', { url: janitorUrl, publicFeed, alwaysReextract });
+        const resp = await _apiRequest(`${DC_SESSION_API_BASE}/dc-extract`, 'POST', { url: janitorUrl, publicFeed, alwaysReextract });
         if (!resp.ok) {
             const errText = await resp.text();
             console.error('[DataCat] dc-extract error:', resp.status, errText.substring(0, 200));
@@ -868,7 +868,7 @@ export async function submitExtraction(janitorUrl, { publicFeed = true, alwaysRe
         try {
             return await resp.json();
         } catch {
-            return { success: false, error: 'Invalid JSON response from cl-helper' };
+            return { success: false, error: 'Invalid JSON response from archive server' };
         }
     } catch (e) {
         console.error('[DataCat] submitExtraction failed:', e);

@@ -20,6 +20,12 @@ function migrateSettings() {
         delete gallerySettings.backgroundMediaLocalization;
         saveGallerySettings();
     }
+    // gridThumbnailsClHelper renamed to gridThumbnailsHiRes -- same toggle, cl-helper is gone
+    if ('gridThumbnailsClHelper' in gallerySettings) {
+        gallerySettings.gridThumbnailsHiRes = gallerySettings.gridThumbnailsClHelper;
+        delete gallerySettings.gridThumbnailsClHelper;
+        saveGallerySettings();
+    }
 }
 
 /**
@@ -332,10 +338,10 @@ function setupSettingsModal() {
     const mobileHapticsCheckbox = document.getElementById('settingsMobileHaptics');
     const useGridThumbnailsCheckbox = document.getElementById('settingsUseGridThumbnails');
     const gridThumbDesktopCheckbox = document.getElementById('settingsGridThumbDesktop');
-    const gridThumbClHelperCheckbox = document.getElementById('settingsGridThumbClHelper');
+    const gridThumbHiResCheckbox = document.getElementById('settingsGridThumbHiRes');
     const gridThumbSizeSelect = document.getElementById('settingsGridThumbSize');
     const gridThumbDesktopRow = document.getElementById('settingsGridThumbDesktopRow');
-    const gridThumbClHelperRow = document.getElementById('settingsGridThumbClHelperRow');
+    const gridThumbHiResRow = document.getElementById('settingsGridThumbHiResRow');
     const gridThumbSizeRow = document.getElementById('settingsGridThumbSizeRow');
     
     // Appearance
@@ -1329,8 +1335,8 @@ function setupSettingsModal() {
         if (gridThumbDesktopCheckbox) {
             gridThumbDesktopCheckbox.checked = getSetting('gridThumbnailsDesktop') === true;
         }
-        if (gridThumbClHelperCheckbox) {
-            gridThumbClHelperCheckbox.checked = getSetting('gridThumbnailsClHelper') !== false;
+        if (gridThumbHiResCheckbox) {
+            gridThumbHiResCheckbox.checked = getSetting('gridThumbnailsHiRes') !== false;
         }
         if (gridThumbSizeSelect) {
             gridThumbSizeSelect.value = String(getSetting('gridThumbnailSize') || 512);
@@ -1590,12 +1596,12 @@ function setupSettingsModal() {
 
     function applyGridThumbsDisabledStates() {
         const masterOn = !!(useGridThumbnailsCheckbox && useGridThumbnailsCheckbox.checked);
-        const clHelperOn = !!(gridThumbClHelperCheckbox && gridThumbClHelperCheckbox.checked);
-        const sizeOn = masterOn && clHelperOn;
+        const hiResOn = !!(gridThumbHiResCheckbox && gridThumbHiResCheckbox.checked);
+        const sizeOn = masterOn && hiResOn;
         if (gridThumbDesktopCheckbox) gridThumbDesktopCheckbox.disabled = !masterOn;
         if (gridThumbDesktopRow) gridThumbDesktopRow.classList.toggle('disabled', !masterOn);
-        if (gridThumbClHelperCheckbox) gridThumbClHelperCheckbox.disabled = !masterOn;
-        if (gridThumbClHelperRow) gridThumbClHelperRow.classList.toggle('disabled', !masterOn);
+        if (gridThumbHiResCheckbox) gridThumbHiResCheckbox.disabled = !masterOn;
+        if (gridThumbHiResRow) gridThumbHiResRow.classList.toggle('disabled', !masterOn);
         // Size only meaningful when master AND high-res thumbs are on.
         if (gridThumbSizeSelect) gridThumbSizeSelect.disabled = !sizeOn;
         if (gridThumbSizeRow) gridThumbSizeRow.classList.toggle('disabled', !sizeOn);
@@ -1603,8 +1609,8 @@ function setupSettingsModal() {
     if (useGridThumbnailsCheckbox) {
         useGridThumbnailsCheckbox.addEventListener('change', applyGridThumbsDisabledStates);
     }
-    if (gridThumbClHelperCheckbox) {
-        gridThumbClHelperCheckbox.addEventListener('change', applyGridThumbsDisabledStates);
+    if (gridThumbHiResCheckbox) {
+        gridThumbHiResCheckbox.addEventListener('change', applyGridThumbsDisabledStates);
     }
 
     if (themeCustomizerCheckbox) {
@@ -1671,7 +1677,7 @@ function setupSettingsModal() {
             mobileHaptics: mobileHapticsCheckbox ? mobileHapticsCheckbox.checked : true,
             useGridThumbnails: useGridThumbnailsCheckbox ? useGridThumbnailsCheckbox.checked : false,
             gridThumbnailsDesktop: gridThumbDesktopCheckbox ? gridThumbDesktopCheckbox.checked : false,
-            gridThumbnailsClHelper: gridThumbClHelperCheckbox ? gridThumbClHelperCheckbox.checked : true,
+            gridThumbnailsHiRes: gridThumbHiResCheckbox ? gridThumbHiResCheckbox.checked : true,
             gridThumbnailSize: gridThumbSizeSelect ? parseInt(gridThumbSizeSelect.value) || 512 : 512,
             buttonStyle: buttonStyleSelect ? buttonStyleSelect.value || 'glass' : 'glass',
             uiScale: uiScaleSelect ? parseInt(uiScaleSelect.value) || 3 : 3,
@@ -1869,8 +1875,8 @@ function setupSettingsModal() {
         if (gridThumbDesktopCheckbox) {
             gridThumbDesktopCheckbox.checked = DEFAULT_SETTINGS.gridThumbnailsDesktop;
         }
-        if (gridThumbClHelperCheckbox) {
-            gridThumbClHelperCheckbox.checked = DEFAULT_SETTINGS.gridThumbnailsClHelper;
+        if (gridThumbHiResCheckbox) {
+            gridThumbHiResCheckbox.checked = DEFAULT_SETTINGS.gridThumbnailsHiRes;
         }
         if (gridThumbSizeSelect) {
             gridThumbSizeSelect.value = String(DEFAULT_SETTINGS.gridThumbnailSize);

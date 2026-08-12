@@ -110,7 +110,7 @@ function getCharacterAvatarThumbUrl(avatar) {
     // ARCHIVE FORK: one endpoint serves both tiers. The larger one is rendered
     // on demand into its own cache the first time a tile asks for it; the
     // smaller is the inherited 96x144 cache, which is already complete.
-    if (getSetting('gridThumbnailsClHelper') !== false) {
+    if (getSetting('gridThumbnailsHiRes') !== false) {
         const size = getSetting('gridThumbnailSize') || 512;
         return `/api/v1/characters/${encodeURIComponent(avatar)}/thumb?size=${size}${tail}`;
     }

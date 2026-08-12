@@ -870,7 +870,7 @@ function _populateGalleryGridThumb(startIndex, endIndex) {
                 </div>
             `;
         } else {
-            // types cl-helper's Jimp cant decode go straight to the full URL
+            // types the thumbnailer cant decode go straight to the full URL
             const thumbUrl = /\.(bmp|avif|tiff?)$/i.test(fileName)
                 ? mediaUrl
                 : buildGalleryThumbUrl(state.safeFolderName, fileName);
