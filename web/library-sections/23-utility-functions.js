@@ -89,7 +89,7 @@ function renderProviderTaglineRow(char) {
     }
 }
 
-// ST's built-in /thumbnail (96x144). For small avatars (chat list rows, modal header thumb, message bubbles, dupe-finder cards, recommender results) where even the cl-helper thumb is overkill. Soft above ~64px target on retina; use the cl-helper helper instead for hero-sized previews.
+// ST's built-in /thumbnail (96x144). For small avatars (chat list rows, modal header thumb, message bubbles, dupe-finder cards, recommender results) where even the hi-res thumb is overkill. Soft above ~64px target on retina; use getCharacterAvatarThumbUrl instead for hero-sized previews.
 function getCharacterAvatarStThumbUrl(avatar) {
     if (!avatar) return '';
     const bust = _avatarCacheBust.get(avatar);

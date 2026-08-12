@@ -99,10 +99,10 @@ available", which is true.
 (`notifySTCharacterEdited`, `notifySTCharacterAdded`, persona name, the
 settings-load fallbacks) were **left in place**. They always return `null`
 standalone so every branch is already inert, but they are diffuse rather than
-blocked-out and were not worth the risk in one pass. Same for the remaining
-`cl-helper` plugin probe and the shared LLM client — the latter still has one live
-consumer, `lorebook-manager.js`, whose AI features call SillyTavern's
-`/backends/chat-completions/generate` and therefore do not work here.
+blocked-out and were not worth the risk in one pass. Same for the shared LLM
+client — it still has one live consumer, `lorebook-manager.js`, whose AI
+features call SillyTavern's `/backends/chat-completions/generate` and
+therefore do not work here.
 
 ## How it is wired
 
@@ -173,7 +173,7 @@ Every edit is marked in place with a comment beginning `ARCHIVE FORK`, so
    **`getCharacterAvatarThumbUrl()`** — repointed at
    `/api/v1/characters/<id>/{png,thumb}`. These three build every avatar URL in
    the app and their results become `<img src>`. The large grid tier maps to
-   `?size=<n>` rather than to the cl-helper plugin, which no longer exists.
+   `?size=<n>` against the archive server's own thumbnail route.
 4. **`galleryFileUrl()`** — new helper, and 11 call sites that inlined
    `/user/images/<folder>/<file>` now go through it. Deliberately *not* applied
    to the `deletePath` variables: those are request payloads naming a file, not
