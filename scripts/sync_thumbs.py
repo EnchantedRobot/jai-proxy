@@ -1,4 +1,4 @@
-"""Bring the avatar thumbnail cache in step with the archive.
+"""Bring the avatar thumbnail cache in step with the catalog.
 
 The cache came across at cutover from SillyTavern's `thumbnails/avatar` and
 already covers 99.6% of the archive, so this is a tidy-up pass, not a build:
@@ -45,7 +45,7 @@ import os
 import shutil
 from pathlib import Path
 
-from proxy import archive, thumbs
+from proxy.archive import catalog, thumbs
 from proxy.config import settings
 
 
@@ -80,7 +80,7 @@ def main() -> int:
     if not args.archive_dir.is_dir():
         parser.error(f"archive dir does not exist: {args.archive_dir}")
 
-    index = archive.ArchiveIndex(args.archive_dir)
+    index = catalog.ArchiveIndex(args.archive_dir)
     index.refresh(force=True)
     store = thumbs.ThumbnailStore(args.thumbs_dir, args.archive_dir)
     filenames = [r.filename for r in index.all()]

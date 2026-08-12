@@ -38,7 +38,7 @@ import json
 import sys
 from pathlib import Path
 
-from proxy import settings_store
+from proxy.state import ui_settings
 from proxy.config import settings
 
 # The key the Character Library frontend stores itself under, inside
@@ -134,11 +134,11 @@ def main() -> int:
             print(f"  {key:26s} {describe(blob[key])}")
     print()
 
-    store = settings_store.SettingsStore(args.dest)
+    store = ui_settings.SettingsStore(args.dest)
     if args.dest.exists() and not args.force:
         try:
             existing = store.read()
-        except settings_store.SettingsError as exc:
+        except ui_settings.SettingsError as exc:
             print(f"{args.dest} exists and is unreadable ({exc})", file=sys.stderr)
             print("inspect it by hand, or pass --force to overwrite", file=sys.stderr)
             return 1
@@ -155,7 +155,7 @@ def main() -> int:
 
     try:
         store.write(blob)
-    except settings_store.SettingsError as exc:
+    except ui_settings.SettingsError as exc:
         print(f"write failed: {exc}", file=sys.stderr)
         return 1
     print(f"wrote {len(blob)} keys to {args.dest}")

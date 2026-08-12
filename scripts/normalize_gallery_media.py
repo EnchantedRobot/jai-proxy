@@ -10,7 +10,7 @@ happened to serve. For each one:
      download route uses, so a file converted here is byte-for-byte what it
      would have been if downloaded today.
   2. Write the `.webp` sibling, retire the original to `data/.trash/`
-     (`cardwrite.to_trash`, same bin every other delete in this app uses).
+     (`edit.to_trash`, same bin every other delete in this app uses).
   3. Forget the stale gallery thumb -- it was rendered from the old bytes and
      is now keyed to a filename nothing points at.
   4. If the gallery's `.media.json` names the old file for some source URL,
@@ -30,7 +30,9 @@ import argparse
 import hashlib
 from pathlib import Path
 
-from proxy import cardwrite, media_manifest, media_writer, thumbs
+from proxy.cards import edit
+from proxy.archive import thumbs
+from proxy.media import manifest as media_manifest, writer as media_writer
 from proxy.config import settings
 
 _CANDIDATE_EXTS = frozenset((".jpg", ".jpeg", ".png"))
@@ -88,9 +90,9 @@ def main() -> int:
                 continue
 
             try:
-                cardwrite.write_atomic(new_path, new_data)
-                cardwrite.to_trash(path)
-            except cardwrite.WriteError as exc:
+                edit.write_atomic(new_path, new_data)
+                edit.to_trash(path)
+            except edit.WriteError as exc:
                 print(f"  FAILED converting {path}: {exc}")
                 failed += 1
                 continue

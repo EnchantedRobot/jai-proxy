@@ -22,7 +22,7 @@ open-card fixtures.
 ## `hampter/*.json`
 Real `GET /hampter/characters/<id>` API payloads — the clean JSON that replaced DOM
 scraping (see the `jai_proxy_janitor_api` memory). Captured 2026-07-16 in-page (bearer
-JWT). Primary fixtures for `janitor_mapper.py`. Six cards, 4 open + 2 hidden — one per
+JWT). Primary fixtures for `sources.janitor.py`. Six cards, 4 open + 2 hidden — one per
 distinct mapping behaviour.
 
 - `open_{nyla,akane_kujo,vaelyra,lila}.json` — open cards (`showdefinition: true`):
@@ -49,7 +49,7 @@ Proof that the primary greeting rides in as the first `assistant` message — th
 
 ## `datacat/*.json`
 The base64-decoded character card embedded in two real datacat PNG exports (the `ccv3`
-chunk of `import/*.png`, captured 2026-07-21). Primary fixtures for `datacat_mapper.py`.
+chunk of `import/*.png`, captured 2026-07-21). Primary fixtures for `sources.datacat.py`.
 datacat writes a full `chara_card_v3` with macros intact and no `character_book`, so these
 back the `make import` path.
 
@@ -59,7 +59,7 @@ back the `make import` path.
 ## `chub/*.json`
 The base64-decoded `data` object embedded in a real Chub.ai PNG export (the `ccv3`
 chunk of an `import/*.png`, captured 2026-07-22), wrapped as `{"data": …}`. Primary
-fixture for `chub_mapper.py`. Unlike datacat, a Chub card is an already-complete
+fixture for `sources.chub.py`. Unlike datacat, a Chub card is an already-complete
 `chara_card_v3` with its own `character_book` and a rich `extensions` block, so this
 backs the passthrough import path (clean the text, preserve the rest).
 
@@ -73,7 +73,7 @@ path (the "New saucepan engine"), not a parked userscript.
 
 ### `saucepan_*.json` — companion payloads
 Real captures of the `{id, definition, companion, lorebooks}` bundle the userscript posts
-to `/build-saucepan`. Primary fixtures for `saucepan_mapper.py`; each covers a distinct
+to `/build-saucepan`. Primary fixtures for `sources.saucepan.py`; each covers a distinct
 case (see `test_saucepan_mapper.py` / `test_server.py`):
 
 - `saucepan_04a0c1ac` (Eve) — open card, macros intact, plus a merged lorebook; the
@@ -92,7 +92,7 @@ Two real chapter responses (`GET /api/v2/lorebooks/<id>/chapters/<index>`), shap
 `fragments` is a shuffled bag of real prose **mixed with decoys** (~25% of each payload).
 Reassembly — keep fragments whose `proof` validates, sort by `key XOR mask`, concatenate —
 was reverse-engineered from saucepan's minified bundle and now lives **server-side** in
-`proxy/saucepan_fragments.py` (used by `saucepan_mapper.py` on every live build).
+`proxy/saucepan_fragments.py` (used by `sources.saucepan.py` on every live build).
 `tests/test_saucepan_lorebook.py` pins the algorithm against these two files — the only
 real captures of that format in existence. The trap they document: decoy ordinals all sort
 *past* the real prose, so an implementation that skips `proof` validation emits the correct
@@ -149,6 +149,6 @@ entirely, from a different *site*. They are not `/hampter/script` responses, and
 Cross-check: entry 0's `content` field (the "Kamii University: The Living Campus..." prose)
 also appears **verbatim, completely undelimited** in the raw hidden-capture system prompts —
 real proof that an activated lore entry gets folded straight into the chat system prompt
-with zero structural markers. See `proxy/prompt_parser.py`'s comment on trailing content and
-`proxy/capture_store.py`'s comment on why `lore_entries` accumulation from raw prompt text
+with zero structural markers. See `proxy/sources/prompts/janitor.py`'s comment on trailing content and
+`proxy/state/captures.py`'s comment on why `lore_entries` accumulation from raw prompt text
 isn't attempted.

@@ -10,7 +10,7 @@ Hidden saucepan companions (`companion.companion.open_definition === false`) can
 exported today. Their `/api/v1/companion/definition` returns a decoy `{"error": ...}`, so
 `POST /build-saucepan` falls back to public v2 fields only (name / creator / tags / blurb /
 greetings / avatar) plus a "definition is not open" warning — `description` / `scenario` /
-`mes_example` come back empty. See `proxy/saucepan_mapper.py` hidden fallback (`is_open` +
+`mes_example` come back empty. See `proxy/sources/saucepan.py` hidden fallback (`is_open` +
 `to_profile_fields` description fallback to `full_description_fragments`).
 
 saucepan recently shipped a **Custom API Provider** (Settings → External Model API Providers →
@@ -57,8 +57,8 @@ userscript export of hidden card ──POST──> proxy  /build-saucepan
 ```
 
 Reference template already in the repo: the JanitorAI path — `server.py` `/v1/chat/completions`
-capture block (L94-116) + `/build-jai` hidden merge (L179-246), `proxy/prompt_parser.py`
-`SystemPromptParser`, `proxy/capture_store.py`, `proxy/macros.py` `MacroSanitizer.reverse_names`.
+capture block (L94-116) + `/build-jai` hidden merge (L179-246), `proxy/sources/prompts/janitor.py`
+`SystemPromptParser`, `proxy/state/captures.py`, `proxy/text/macros.py` `MacroSanitizer.reverse_names`.
 
 ## 4. The validated parse mapping
 
@@ -91,7 +91,7 @@ form `[ Label ]` on their own line, then the user persona. Line-anchored split o
 - **Greeting note:** the captured `assistant` message equals `first_mes`, but for saucepan we do
   NOT need it — the public v2 API returns ALL greetings (`starting_scenarios_fragments`) with
   macros intact even for hidden cards, and `/build-saucepan` already uses them via
-  `saucepan_mapper.greetings(raw)`. So the capture only needs to supply **description + scenario**.
+  `sources.saucepan.greetings(raw)`. So the capture only needs to supply **description + scenario**.
 
 ## 5. Design decisions (locked)
 
@@ -114,9 +114,9 @@ form `[ Label ]` on their own line, then the user persona. Line-anchored split o
 
 ## 6. Implementation phases
 
-### Phase 1 — `proxy/saucepan_prompt_parser.py` + tests (start here, pure/offline)
+### Phase 1 — `proxy/sources/prompts/saucepan.py` + tests (start here, pure/offline)
 - New `SaucepanPromptParser` (peer of `SystemPromptParser`). `parse(system: str) -> ParsedDefinition`
-  (`proxy/models.py` L72: `name, personality, scenario, mes_example, first_mes, raw`). Map:
+  (`proxy/cards/models.py` L72: `name, personality, scenario, mes_example, first_mes, raw`). Map:
   `personality ← [ Background ]`, `scenario ← [ Critical Instructions ]`, `mes_example ← ""`,
   `name ←` primary name from preamble. Extract handle from preamble and reverse it to `{{user}}`
   in `personality`/`scenario` before returning (use `macros.reverse_persona_names(text, [handle])`).
@@ -131,23 +131,23 @@ form `[ Label ]` on their own line, then the user persona. Line-anchored split o
   Follow the fixture-loading pattern in `tests/test_saucepan_mapper.py`.
 
 ### Phase 2 — capture endpoint wiring
-- `proxy/capture_store.py`: allow a per-call parser. Minimal change — add an optional
+- `proxy/state/captures.py`: allow a per-call parser. Minimal change — add an optional
   `parser: SystemPromptParser | None = None` to `record()` (L47) defaulting to `self._parser`;
   or add `record_with(parser, system, primary_greeting=)`. Everything else (keying by
   `parsed.name`, greeting-merge, persistence) is reused as-is.
-- `proxy/server.py`: add `POST /saucepan/v1/chat/completions` mirroring the existing
+- `proxy/api/chat.py`: add `POST /saucepan/v1/chat/completions` mirroring the existing
   `/v1/chat/completions` (L94), but calling `capture_store.record(system, primary_greeting=...,
   parser=saucepan_parser)`. Forward to MLX identically (stream + non-stream). The `assistant`
   greeting can still be recorded (harmless; unused for saucepan).
 
-### Phase 3 — `/build-saucepan` hidden-fill merge (`proxy/server.py` L249)
-- After mapping `profile = saucepan_mapper.to_profile_fields(raw)`, if `not is_open(raw)`:
+### Phase 3 — `/build-saucepan` hidden-fill merge (`proxy/api/build.py`)
+- After mapping `profile = sources.saucepan.to_profile_fields(raw)`, if `not is_open(raw)`:
   `capture = capture_store.get(profile.name)`. If a capture with definition exists
   (`capture.personality or capture.scenario`), override `profile.description ← capture.personality`
   and `profile.scenario ← capture.scenario`, and DROP the "definition is not open" warning
   (replace with an info note like "hidden definition filled from capture"). If no capture, keep
   today's fallback + warning.
-- **Read `proxy/cardbuilder.py` `build()` first** to confirm how `capture=` vs `profile` merge for
+- **Read `proxy/cards/builder.py` `build()` first** to confirm how `capture=` vs `profile` merge for
   hidden cards (the `_pick` logic). Simplest robust approach: fill the fields directly on `profile`
   as above and continue to pass `capture=None` (or pass the capture and ensure it wins). Mirror
   whatever the JanitorAI `/build-jai` hidden path does at L190-215 for consistency.
@@ -184,13 +184,13 @@ confirmed):
 
 ## 7. Files
 
-- **New:** `proxy/saucepan_prompt_parser.py`, `tests/test_saucepan_prompt_parser.py`.
-- **Edit:** `proxy/capture_store.py` (per-call parser), `proxy/server.py` (new capture route +
-  `/build-saucepan` merge + auth gate), `proxy/config.py` (auth secret), `proxy/saucepan_mapper.py`
+- **New:** `proxy/sources/prompts/saucepan.py`, `tests/test_saucepan_prompt_parser.py`.
+- **Edit:** `proxy/state/captures.py` (per-call parser), `proxy/api/chat.py` (new capture route +
+  `/build-saucepan` merge + auth gate), `proxy/config.py` (auth secret), `proxy/sources/saucepan.py`
   (only if the hidden fallback needs to yield to the capture), `userscript/src_saucepan/*`,
   `README.md`.
-- **Reuse (do not rewrite):** `proxy/macros.py` (`reverse_persona_names`), `proxy/cardbuilder.py`,
-  `proxy/lorebook.py`, `proxy/avatar.py`, `proxy/models.py`, the `/build-saucepan` assemble tail
+- **Reuse (do not rewrite):** `proxy/text/macros.py` (`reverse_persona_names`), `proxy/cards/builder.py`,
+  `proxy/cards/lorebook.py`, `proxy/cards/avatar_fetch.py`, `proxy/cards/models.py`, the `/build-saucepan` assemble tail
   `_assemble_and_write`.
 - **Fixture:** `tests/fixtures/saucepan/saucepan_chat_finley_60bdd321.json` (the captured request);
   ground truth `cards/Theodrax/Finley_60bdd321.png`.

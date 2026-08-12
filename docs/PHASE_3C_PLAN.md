@@ -127,7 +127,7 @@ Per item the server does, in order:
    audio-vs-video atom walk) — the content type decides the extension, never the header.
 6. **Normalize to WebP** (§4).
 7. **Content hash** → dedupe against the folder.
-8. **Write** atomically via `cardwrite.write_atomic`, as `{prefix}_{index}_{name}.webp`.
+8. **Write** atomically via `cards.edit.write_atomic`, as `{prefix}_{index}_{name}.webp`.
 9. **Thumbnail** immediately via `thumbs.generate_gallery` — no prewarm pass, no setting.
 10. **Record** in the manifest and, on failure, in the ledger.
 
@@ -144,7 +144,7 @@ URLs to local files by reconstructing the sanitized name. If the server sanitize
 slightly differently from `extractSanitizedUrlName`, media downloads fine and then renders
 as a broken remote link across the whole archive.
 
-→ **`proxy/media_names.py`**, ported verbatim from the JS and tested against it:
+→ **`proxy/media/names.py`**, ported verbatim from the JS and tested against it:
 `CDN_VARIANT_NAMES`, `extract_sanitized_url_name`, `media_key`, the
 `{prefix}_{index}_{name}.{ext}` format, and the prefix-priority ladder
 (`localized_media` 4 > `lorebook_media` 3 > `extgallery` 2 > `{provider}gallery` 1).
@@ -284,7 +284,7 @@ Then:
 ## 9. Sequencing
 
 1. Step 0 — verify live, capture fixtures.
-2. `proxy/media_names.py` + tests against the JS behaviour. Nothing else can be right first.
+2. `proxy/media/names.py` + tests against the JS behaviour. Nothing else can be right first.
 3. The URL guard + size cap, with tests. Before the first outbound request exists.
 4. The writer: fetch → sniff → WebP → dedupe → write → thumb → manifest, behind
    `POST /api/v1/characters/{id}/media`. The multipart upload route joins it on the same

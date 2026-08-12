@@ -31,7 +31,7 @@ from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / "workspaces" / "jai-proxy"))
-from proxy.pngtools import read_envelope  # noqa: E402
+from proxy.cards.pngtools import read_envelope  # noqa: E402
 
 ST = Path.home() / "workspaces" / "SillyTavern" / "data" / "default-user"
 CHARS = ST / "characters"

@@ -11,7 +11,7 @@
 > (`Asari-Sensei_c9f1aaaf.png`) — see `jai_proxy_datacat_phase3b` in memory for the
 > details, including the one real bug the live data caught (`primary_content_source_kind`
 > arrives as `"janitor_core"`, not the bare `"janitor"` this project's
-> `extensions.datacat.sourceKind` vocabulary expects — datacat_mapper.normalized_source_kind
+> `extensions.datacat.sourceKind` vocabulary expects — sources.datacat.normalized_source_kind
 > fixes it). B5 (deleting the `characters/create` / `characters/import` /
 > `content/importURL` 501 stubs) is NOT done: the local-PNG/URL import modal and
 > `web/modules/batch-transfer.js` still call them for an unrelated, still-unbuilt
@@ -55,7 +55,7 @@ Every DataCat call goes through the plugin proxy:
 "plugin required" panel before it ever asks DataCat anything. That is the message you saw.
 
 The needed surface is **7 endpoints**, and the hard part already exists in Python:
-`proxy/datacat_api.py` performs DataCat's anonymous session handshake
+`proxy/sources/datacat_client.py` performs DataCat's anonymous session handshake
 (`POST /api/liberator/identify`), confirmed live from a plain server-side request with no
 login and no Cloudflare gate.
 
@@ -111,18 +111,18 @@ so porting them to Python is mechanical and testable against real fixtures:
 
 | Browser (JS) | Emits | Server-side consumer that already exists |
 | --- | --- | --- |
-| `chub-api.js:247` `buildCharacterCardFromChub()` (~40 lines) | V2 `data` dict | `chub_mapper.clean_card()` → `to_payload()` → `PngWriter.write_payload()` |
-| `datacat-api.js:714` `buildV2FromDatacat()` / `:785` `buildV2FromDownload()` (+ `pickRecoveryVariant`, `extractCharacterBookFromScripts`, `resolveTagNames`, `stripDatacatMarkers`) | V2 `data` dict | `datacat_mapper.to_profile_fields()` + `greetings()` → `CardBuilder` |
+| `chub-api.js:247` `buildCharacterCardFromChub()` (~40 lines) | V2 `data` dict | `sources.chub.clean_card()` → `to_payload()` → `PngWriter.write_payload()` |
+| `datacat-api.js:714` `buildV2FromDatacat()` / `:785` `buildV2FromDownload()` (+ `pickRecoveryVariant`, `extractCharacterBookFromScripts`, `resolveTagNames`, `stripDatacatMarkers`) | V2 `data` dict | `sources.datacat.to_profile_fields()` + `greetings()` → `CardBuilder` |
 
-`datacat_mapper.to_profile_fields()` reads exactly the keys `buildV2FromDatacat` writes.
-`chub_mapper.clean_card()` eats exactly the `data` object `buildCharacterCardFromChub`
+`sources.datacat.to_profile_fields()` reads exactly the keys `buildV2FromDatacat` writes.
+`sources.chub.clean_card()` eats exactly the `data` object `buildCharacterCardFromChub`
 produces. The port target is not guesswork.
 
 ### The one structural fork: Chub cannot use `_assemble_and_write`
 
 Chub is a **raw-dict passthrough** — it must never round-trip through the pydantic
 `LoreEntry` model, which drops `priority` / `probability` / `selectiveLogic` and coerces
-Chub's mixed int-or-string `position` (see `chub_mapper.py` module docstring, and the
+Chub's mixed int-or-string `position` (see `sources.chub.py` module docstring, and the
 `jai_proxy_chub_import` memory). So `/build-chub` uses `PngWriter.write_payload()`, the way
 `scripts/import_cards.py:_import_chub` does — not the `CardBuilder` path.
 
@@ -135,11 +135,11 @@ uses the tail with its own payload; DataCat uses both halves as today.
 
 ## 4. Server work
 
-**S1. Split `proxy/server.py:_assemble_and_write`** into `build_card` / `fetch_avatar_and_write`
+**S1. Split `_assemble_and_write`** (then in `proxy/server.py`, now `proxy/api/build.py`) into `build_card` / `fetch_avatar_and_write`
 so the payload path and the CardBuilder path share the avatar, dedupe and dashboard tail.
 Pure refactor; `/build-jai` and `/build-saucepan` must be unchanged behaviourally.
 
-**S2. DataCat transport in FastAPI.** Seven routes backed by `proxy/datacat_api.py`'s session
+**S2. DataCat transport in FastAPI.** Seven routes backed by `proxy/sources/datacat_client.py`'s session
 handshake, promoted from a one-shot avatar resolver into a reusable session-holding client:
 
 | Route | Does |
@@ -156,13 +156,13 @@ Decision: serve these at a clean `/api/v1/datacat/*` and repoint `CL_HELPER_PLUG
 
 **S3. `POST /build-chub`.** Body mirrors `/build-saucepan`: the raw Chub node from
 `/api/characters/{fullPath}?full=true`, plus the linked lorebook JSON if the card has one,
-plus an optional avatar URL. Server: port `buildCharacterCardFromChub` → `chub_mapper.clean_card`
+plus an optional avatar URL. Server: port `buildCharacterCardFromChub` → `sources.chub.clean_card`
 → `extensions.jai` provenance (`sourceKind: "chub_core"`, distinct from the importer's
 `chub_import`) → `write_payload` → shared avatar tail.
 
 **S4. `POST /build-datacat`.** Body: the character detail JSON, the `/download` payload if
 present, and the hydrated scripts (lorebook) array. Server: port the two V2 builders and
-their helpers → `datacat_mapper` → `CardBuilder` → `_assemble_and_write`. Avatar URL
+their helpers → `sources.datacat` → `CardBuilder` → `_assemble_and_write`. Avatar URL
 resolution (`resolveDatacatAvatarUrl` with `preferOriginal`) ports too — the server holds
 the same JSON, so the browser should not pre-resolve it.
 
@@ -196,7 +196,7 @@ flow that is pure dead weight now).
 
 ## 6. Known divergences and risks
 
-- **DataCat lorebooks are new.** `datacat_mapper`'s docstring says "No lorebook. datacat does
+- **DataCat lorebooks are new.** `sources.datacat`'s docstring says "No lorebook. datacat does
   not retrieve `character_book`" — true of the PNG exports the bulk importer eats, but the
   browser flow *does* get one via `extractCharacterBookFromScripts` + `hydrateDatacatScripts`.
   Pass it through to `CardBuilder` as `book`. This makes a browser import strictly better than

@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     )
 
     # The model id `/v1/models` advertises and a reply falls back to. There is
-    # no model -- replies come from proxy/mock_responder.py -- but the sites
+    # no model -- replies come from proxy/runtime/mock_responder.py -- but the sites
     # that call this endpoint want a name to put in their provider settings.
     mock_model: str = "jai-proxy-mock"
     host: str = "127.0.0.1"
@@ -80,10 +80,10 @@ class Settings(BaseSettings):
     # 3C). One file, not a directory -- its parent (data/state/) already
     # exists once captures_dir/lorebook_cache_dir are created below. Global
     # because the same dead catbox link shows up on dozens of cards; see
-    # proxy/media_manifest.py.
+    # proxy/media/manifest.py.
     dead_urls_file: Path = ROOT / "data" / "state" / "dead_urls.json"
 
-    # Draw the live terminal dashboard (proxy/dashboard.py) instead of a plain
+    # Draw the live terminal dashboard (proxy/runtime/dashboard.py) instead of a plain
     # scrolling log. Ignored -- and the plain log used -- when stdout is not a
     # TTY, so piping the server or running it under a supervisor still yields
     # ordinary line-by-line output.
@@ -101,14 +101,14 @@ class Settings(BaseSettings):
     pngquant_bin: Path = Path(__file__).resolve().parent / "pngquant"
 
     # Outbound proxy for server-initiated calls to third-party APIs (currently
-    # just proxy/datacat_api.py's original-avatar lookup). httpx's single
+    # just proxy/datacat_client.py's original-avatar lookup). httpx's single
     # `proxy=` kwarg, so one URL covers http+https; None disables it.
     http_proxy: str | None = None
 
     # A datacat.run anonymous session token, so DatacatImageResolver reuses it
     # instead of hitting /api/liberator/identify on every run. Left unset the
     # first time; the resolver fetches one and writes it back here itself --
-    # see proxy/datacat_api.py._persist_session_token.
+    # see proxy/datacat_client.py._persist_session_token.
     datacat_session_token: str | None = None
 
 

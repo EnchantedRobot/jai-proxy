@@ -18,9 +18,10 @@ from typing import Any
 import pytest
 from PIL import Image
 
-from proxy import archive as archive_mod
-from proxy import pngtools, thumbs
-from proxy.api import v1
+from proxy.archive import catalog
+from proxy.cards import pngtools
+from proxy.archive import thumbs
+from proxy.api.v1 import _shared as v1_shared
 from proxy.config import settings
 
 
@@ -112,8 +113,8 @@ def archive_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, P
     # The index and the thumbnail store are process-wide singletons bound at
     # import time; both have to be re-pointed or a test reads the real 3 GB
     # archive on the developer's machine and passes for the wrong reason.
-    monkeypatch.setattr(archive_mod, "_index", None)
-    monkeypatch.setattr(v1, "thumbnail_store", thumbs.ThumbnailStore(dirs["thumbs"], dirs["characters"]))
+    monkeypatch.setattr(catalog, "_index", None)
+    monkeypatch.setattr(v1_shared, "thumbnail_store", thumbs.ThumbnailStore(dirs["thumbs"], dirs["characters"]))
     return dirs
 
 

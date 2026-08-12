@@ -4,7 +4,7 @@ DataCat (datacat.run) gates its REST API behind an anonymous session token and
 a read-path allow-list; SillyTavern-CharacterLibrary used to reach it through
 its `cl-helper` server plugin, which lived inside SillyTavern's own process and
 has no equivalent here. This router is that plugin's DataCat surface, ported
-straight into the archive server (see proxy/datacat_api.py.DatacatSession for
+straight into the archive server (see proxy/datacat_client.py.DatacatSession for
 the port notes and PHASE_3B_PLAN.md S2 for the design). Seven routes:
 
   health              -- replaces the plugin-installed probe
@@ -28,7 +28,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
-from proxy.datacat_api import DatacatSession, DatacatSessionError
+from proxy.sources.datacat_client import DatacatSession, DatacatSessionError
 
 router = APIRouter(prefix="/api/v1/datacat", tags=["datacat"])
 
