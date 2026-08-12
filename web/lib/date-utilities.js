@@ -9,7 +9,7 @@
  * @param {object} char - Character object
  * @returns {string} Date string or empty string
  */
-function getCharacterCreateDateValue(char) {
+export function getCharacterCreateDateValue(char) {
     if (!char) return '';
     const candidates = [
         char._meta?.create_date,
@@ -29,7 +29,7 @@ function getCharacterCreateDateValue(char) {
  * @param {string|number} rawValue - Date value
  * @returns {Date|null} Parsed Date or null
  */
-function parseDateValue(rawValue) {
+export function parseDateValue(rawValue) {
     if (rawValue === undefined || rawValue === null || rawValue === '') return null;
     if (typeof rawValue === 'number') {
         const d = new Date(rawValue);
@@ -61,7 +61,7 @@ function parseDateValue(rawValue) {
  * @param {string|number} rawValue - Date value
  * @returns {string} Formatted date string
  */
-function formatDateTime(rawValue) {
+export function formatDateTime(rawValue) {
     if (!rawValue) return '(not available)';
     const d = parseDateValue(rawValue);
     if (!d) return String(rawValue);
@@ -78,11 +78,11 @@ function formatDateTime(rawValue) {
 /**
  * Get the date a character was added to SillyTavern (file system time).
  * This changes whenever the character file is edited/rewritten.
- * 
+ *
  * @param {object} char - Character object
  * @returns {number} Timestamp in milliseconds for sorting
  */
-function getCharacterDateAdded(char) {
+export function getCharacterDateAdded(char) {
     if (!char) return 0;
     if (char.date_added) {
         return Number(char.date_added) || 0;
@@ -93,11 +93,11 @@ function getCharacterDateAdded(char) {
 /**
  * Get the original creation date of a character (from PNG metadata).
  * This is stable and doesn't change when the character is edited.
- * 
+ *
  * @param {object} char - Character object
  * @returns {number} Timestamp in milliseconds for sorting
  */
-function getCharacterCreateDate(char) {
+export function getCharacterCreateDate(char) {
     if (!char) return 0;
     const rawCreateDate = getCharacterCreateDateValue(char);
     if (rawCreateDate) {
@@ -106,4 +106,3 @@ function getCharacterCreateDate(char) {
     }
     return 0;
 }
-

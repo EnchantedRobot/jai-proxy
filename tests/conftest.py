@@ -103,6 +103,12 @@ def archive_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, P
     # would overwrite them with whatever it happened to PUT.
     dirs["settings"] = tmp_path / "settings.json"
     monkeypatch.setattr(settings, "settings_file", dirs["settings"])
+    # Same reasoning for the cross-character dead-URL ledger (Phase 3C): it is
+    # one real file shared by the whole archive, and an unredirected test run
+    # permanently poisons it with synthetic test URLs -- which is exactly what
+    # happened here before this line existed (`mega://folder/bad` on disk).
+    dirs["dead_urls"] = tmp_path / "dead_urls.json"
+    monkeypatch.setattr(settings, "dead_urls_file", dirs["dead_urls"])
     # The index and the thumbnail store are process-wide singletons bound at
     # import time; both have to be re-pointed or a test reads the real 3 GB
     # archive on the developer's machine and passes for the wrong reason.

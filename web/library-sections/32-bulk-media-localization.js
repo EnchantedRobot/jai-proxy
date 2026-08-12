@@ -434,87 +434,26 @@ function showBulkSummary(wasAborted = false, skippedCompleted = 0) {
     bulkSummaryModal.classList.add('visible');
 }
 
-// Kept in its own Files-API JSON so settings.json doesnt accumulate one entry per processed char; in-memory Set is the runtime source.
-const MEDIA_LOC_COMPLETED_FILE = '_cl_media_loc_completed.json';
-let _completedMediaLocCache = null;
-let _completedMediaLocSaving = false;
-let _completedMediaLocSaveQueued = false;
-let _completedMediaLocLoadPromise = null;
+// Which characters Bulk Localize can skip -- read straight from the archive's
+// own per-gallery manifests (docs/PHASE_3C_PLAN.md §3, §9 step 6) rather than
+// a client-side completed-list. There is nothing to migrate: the old
+// `_cl_media_loc_completed.json` (and the dead-URL ledger before it) tracked
+// completion independently of whether anything was actually ever downloaded,
+// which is exactly the state that went stale. "Complete" is now just "the
+// gallery's last download run had zero errors," a fact the server already
+// has to know to answer `GET /media/status`.
+let _forceRescanNextBulkRun = false;
 
-async function loadCompletedMediaLocalizations() {
-    if (_completedMediaLocCache) return _completedMediaLocCache;
-    if (_completedMediaLocLoadPromise) return _completedMediaLocLoadPromise;
-    _completedMediaLocLoadPromise = (async () => {
-        let avatars = null;
-        try {
-            const resp = await fetch(`/user/files/${MEDIA_LOC_COMPLETED_FILE}`);
-            if (resp.ok) {
-                const text = await resp.text();
-                if (text && text.trim()) {
-                    const parsed = JSON.parse(text);
-                    if (parsed && Array.isArray(parsed.avatars)) avatars = parsed.avatars;
-                }
-            }
-        } catch {}
-        if (avatars === null) {
-            // Migration: pull legacy list out of settings.json on first load if present.
-            const legacy = getSetting('completedMediaLocalizations');
-            if (Array.isArray(legacy) && legacy.length > 0) {
-                _completedMediaLocCache = new Set(legacy);
-                const saved = await saveCompletedMediaLocalizations();
-                if (saved) {
-                    try { delete gallerySettings.completedMediaLocalizations; saveGallerySettings(); } catch {}
-                    debugLog(`[MediaLoc] Migrated ${legacy.length} completed entries from settings.json to ${MEDIA_LOC_COMPLETED_FILE}`);
-                } else {
-                    console.warn('[MediaLoc] Migration file save failed; legacy data left in settings.json for retry on next boot.');
-                }
-                _completedMediaLocLoadPromise = null;
-                return _completedMediaLocCache;
-            }
-            avatars = [];
-        }
-        _completedMediaLocCache = new Set(avatars);
-        _completedMediaLocLoadPromise = null;
-        return _completedMediaLocCache;
-    })();
-    return _completedMediaLocLoadPromise;
-}
-
-async function saveCompletedMediaLocalizations() {
-    if (!_completedMediaLocCache) return false;
-    if (_completedMediaLocSaving) { _completedMediaLocSaveQueued = true; return false; }
-    _completedMediaLocSaving = true;
-    let ok = false;
+async function fetchMediaStatus() {
     try {
-        const payload = { version: 1, avatars: [..._completedMediaLocCache] };
-        const jsonStr = JSON.stringify(payload);
-        const base64 = utf8ToBase64(jsonStr);
-        const resp = await apiRequest('/files/upload', 'POST', { name: MEDIA_LOC_COMPLETED_FILE, data: base64 });
-        if (resp.ok) ok = true;
-        else console.warn('[MediaLoc] Save failed:', resp.status);
+        const resp = await fetch('/api/v1/media/status');
+        if (!resp.ok) return {};
+        const body = await resp.json();
+        return body?.cards || {};
     } catch (e) {
-        console.warn('[MediaLoc] Save failed:', e?.message || e);
-    } finally {
-        _completedMediaLocSaving = false;
-        if (_completedMediaLocSaveQueued) { _completedMediaLocSaveQueued = false; saveCompletedMediaLocalizations(); }
+        console.warn('[MediaLoc] /media/status fetch failed:', e?.message || e);
+        return {};
     }
-    return ok;
-}
-
-function getCompletedMediaLocalizations() {
-    return _completedMediaLocCache || new Set();
-}
-
-function markMediaLocalizationComplete(avatar) {
-    if (!avatar) return;
-    if (!_completedMediaLocCache) _completedMediaLocCache = new Set();
-    _completedMediaLocCache.add(avatar);
-    saveCompletedMediaLocalizations();
-}
-
-function clearCompletedMediaLocalizations() {
-    _completedMediaLocCache = new Set();
-    saveCompletedMediaLocalizations();
 }
 
 /**
@@ -525,10 +464,9 @@ async function runBulkLocalization() {
     bulkLocalizeAbortController = new AbortController();
     bulkLocalizeResults = [];
 
-    // Load the completed cache before reading it, else a fast click re-processes already-done chars.
-    await loadCompletedMediaLocalizations();
-    const completedAvatars = getCompletedMediaLocalizations();
-    
+    const mediaStatus = _forceRescanNextBulkRun ? {} : await fetchMediaStatus();
+    _forceRescanNextBulkRun = false;
+
     // Reset UI
     bulkLocalizeModal.classList.add('visible');
     bulkLocalizeCharAvatar.src = '';
@@ -567,8 +505,8 @@ async function runBulkLocalization() {
         // Get unique folder name if enabled
         const folderName = getGalleryFolderName(char);
         
-        // Skip characters that already completed successfully in previous runs
-        if (char.avatar && completedAvatars.has(char.avatar)) {
+        // Skip characters whose last download run already finished clean
+        if (char.avatar && mediaStatus[char.avatar]?.complete) {
             skippedCompleted++;
             bulkLocalizeProgressCount.textContent = `${i + 1}/${totalChars} characters (${skippedCompleted} previously done)`;
             bulkLocalizeProgressFill.style.width = `${((i + 1) / totalChars) * 100}%`;
@@ -672,11 +610,6 @@ async function runBulkLocalization() {
             bulkLocalizeFileFill.style.width = '100%';
         }
         
-        // Mark as complete in persistent storage if no errors and not aborted
-        if (!result.incomplete && char.avatar) {
-            markMediaLocalizationComplete(char.avatar);
-        }
-        
         bulkLocalizeResults.push(result);
         
         // Small delay to prevent UI lockup and allow abort to be processed
@@ -705,37 +638,27 @@ document.getElementById('bulkLocalizeBtn')?.addEventListener('click', async () =
         return;
     }
 
-    await loadCompletedMediaLocalizations();
-    const completedAvatars = getCompletedMediaLocalizations();
-    const alreadyDone = allCharacters.filter(c => c.avatar && completedAvatars.has(c.avatar)).length;
+    const mediaStatus = _forceRescanNextBulkRun ? {} : await fetchMediaStatus();
+    const alreadyDone = allCharacters.filter(c => c.avatar && mediaStatus[c.avatar]?.complete).length;
     const remaining = allCharacters.length - alreadyDone;
-    
+
     let confirmMsg;
     if (alreadyDone > 0) {
         confirmMsg = `${alreadyDone} of ${allCharacters.length} characters were previously processed and will be skipped.\n\n${remaining} characters will be scanned for remote media.\n\nContinue?`;
     } else {
         confirmMsg = `This will scan ${allCharacters.length} characters for remote media and download any new files.\n\nThis may take a while for large libraries. Continue?`;
     }
-    
+
     if (confirm(confirmMsg)) {
         runBulkLocalization();
     }
 });
 
-// Clear bulk localize history button
-document.getElementById('clearBulkLocalizeHistoryBtn')?.addEventListener('click', async () => {
-    await loadCompletedMediaLocalizations();
-    const completedAvatars = getCompletedMediaLocalizations();
-    const count = completedAvatars.size;
-    
-    if (count === 0) {
-        showToast('No processed history to clear', 'info');
-        return;
-    }
-    
-    if (confirm(`This will clear the history of ${count} processed characters.\n\nThe next bulk localize will scan all characters again. Continue?`)) {
-        clearCompletedMediaLocalizations();
-        showToast(`Cleared history of ${count} processed characters`, 'success');
-    }
+// "Clear history" now just forces the next run to ignore each gallery's
+// recorded completion and rescan everyone -- there is no separate history to
+// clear any more; completeness is read live from each gallery's manifest.
+document.getElementById('clearBulkLocalizeHistoryBtn')?.addEventListener('click', () => {
+    _forceRescanNextBulkRun = true;
+    showToast('Next bulk localize will scan every character again', 'success');
 });
 

@@ -35,14 +35,17 @@ function extractSanitizedUrlName(url) {
     }
 }
 
+const MEDIA_JOB_POLL_MS = 400;
+
 /**
  * Batch-download URLs through the server's media pipeline -- guard, fetch,
  * sniff, WebP-normalize, dedupe, write, thumbnail, manifest, all server side
- * now (docs/PHASE_3C_PLAN.md §3, step 4). Streams NDJSON and maps each
- * finished item onto one `onLog` line, so the calling UI (log panel,
- * progress bar) doesn't change even though the per-item "Checking..." /
- * "Saving..." pending states are gone -- there's nothing to show between
- * request and result once the fetch itself moved server side.
+ * (docs/PHASE_3C_PLAN.md §3, step 4). The run itself is a detached background
+ * job (§7, "3C-2 -- the job runner"): this function only submits it and polls
+ * for progress, so closing the tab mid-run no longer kills the download --
+ * the server keeps going and the manifest ends up correct regardless of
+ * whether anyone is still watching. Maps each finished item onto one `onLog`
+ * line, same as the old NDJSON stream, so the calling UI doesn't change.
  * @param {string} cardId - the card's archive id (character.avatar)
  * @param {{url: string, filename?: string}[]} items
  * @param {string} prefix - 'localized_media' | 'lorebook_media' | 'extgallery' | '{provider}gallery'
@@ -64,12 +67,13 @@ async function downloadViaServerRoute(cardId, items, prefix, phase, options = {}
     let success = 0, skipped = 0, errors = 0, done = 0;
     const total = items.length;
 
-    let response;
+    let submitResp;
     try {
-        response = await fetch(`/api/v1/characters/${encodeURIComponent(cardId)}/media`, {
+        submitResp = await fetch('/api/v1/media/jobs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+                card_id: cardId,
                 items: items.map(i => ({ url: i.url, filename: i.filename || null })),
                 prefix,
                 phase
@@ -82,21 +86,15 @@ async function downloadViaServerRoute(cardId, items, prefix, phase, options = {}
         return { success: 0, skipped: 0, errors: items.length, aborted: false };
     }
 
-    if (!response.ok || !response.body) {
-        const text = await response.text().catch(() => '');
-        if (onLog) onLog(`Download request failed: HTTP ${response.status} ${text}`, 'error');
+    if (!submitResp.ok) {
+        const text = await submitResp.text().catch(() => '');
+        if (onLog) onLog(`Download request failed: HTTP ${submitResp.status} ${text}`, 'error');
         return { success: 0, skipped: 0, errors: items.length, aborted: false };
     }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let aborted = false;
+    const { job_id: jobId } = await submitResp.json();
 
-    const handleLine = (line) => {
-        if (!line.trim()) return;
-        const evt = JSON.parse(line);
-        if (evt.type !== 'item') return;
+    const handleEvent = (evt) => {
         done++;
         const displayUrl = evt.url.length > 60 ? evt.url.substring(0, 60) + '...' : evt.url;
         if (evt.status === 'saved') {
@@ -116,22 +114,30 @@ async function downloadViaServerRoute(cardId, items, prefix, phase, options = {}
         if (onProgress) onProgress(done, total);
     };
 
-    while (true) {
+    let cursor = 0;
+    let aborted = false;
+    let state = 'queued';
+    while (state === 'queued' || state === 'running') {
         if ((shouldAbort && shouldAbort()) || abortSignal?.aborted) {
             aborted = true;
-            try { await reader.cancel(); } catch {}
+            fetch(`/api/v1/media/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' }).catch(() => {});
             break;
         }
-        const { done: streamDone, value } = await reader.read();
-        if (streamDone) break;
-        buffer += decoder.decode(value, { stream: true });
-        let newlineIdx;
-        while ((newlineIdx = buffer.indexOf('\n')) >= 0) {
-            handleLine(buffer.slice(0, newlineIdx));
-            buffer = buffer.slice(newlineIdx + 1);
+        await new Promise(resolve => setTimeout(resolve, MEDIA_JOB_POLL_MS));
+        let statusResp;
+        try {
+            statusResp = await fetch(`/api/v1/media/jobs/${encodeURIComponent(jobId)}?after=${cursor}`);
+        } catch {
+            continue; // transient network hiccup -- the job keeps running server-side, just keep polling
         }
+        if (!statusResp.ok) continue;
+        const body = await statusResp.json();
+        for (const evt of body.events) handleEvent(evt);
+        cursor = body.next_cursor;
+        state = body.state;
+        if (state === 'error' && onLog) onLog(`Download job failed: ${body.error || 'unknown error'}`, 'error');
     }
-    if (!aborted && buffer.trim()) handleLine(buffer);
+    if (state === 'cancelled') aborted = true;
 
     return { success, skipped, errors, aborted };
 }

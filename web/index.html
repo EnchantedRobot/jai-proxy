@@ -2327,31 +2327,6 @@ https://jannyai.com/characters/uuid_slug
                         </div>
 
                         <div class="settings-group">
-                            <div class="settings-group-title"><i class="fa-solid fa-image"></i> Thumbnails</div>
-                            <div class="cl-helper-banner cl-hidden" id="galleryThumbsClHelperBanner">
-                                <i class="fa-solid fa-puzzle-piece"></i>
-                                <div>
-                                    <strong>cl-helper plugin required</strong>
-                                    <span>Gallery thumbnails are generated server-side by cl-helper. Install it to enable this. <a href="#" class="cl-goto-info">Open cl-helper status &rarr;</a></span>
-                                </div>
-                            </div>
-                            <div id="galleryThumbsClHelperFields">
-                                <div class="settings-row">
-                                    <label>
-                                        <input type="checkbox" id="settingsGalleryThumbnails" checked> Generate gallery thumbnails
-                                    </label>
-                                    <span class="settings-hint">Use cl-helper to generate smaller thumbnail images for gallery grids and the viewer strip. Requires the cl-helper plugin.</span>
-                                </div>
-                                <div class="settings-row" id="galleryThumbPrewarmRow" style="padding-left: 24px;">
-                                    <label>
-                                        <input type="checkbox" id="settingsGalleryThumbPrewarm" checked> Pre-generate during download
-                                    </label>
-                                    <span class="settings-hint">Generate thumbnails immediately after downloading media, so galleries open instantly.</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-key"></i> Civitai API Key</div>
                             <div class="settings-row">
                                 <label>Key:</label>
@@ -2675,25 +2650,19 @@ https://jannyai.com/characters/uuid_slug
          module encapsulation. Order matters: keep it exactly as generated. -->
     <script src="archive-api.js?v=1"></script>
     <script src="library-sections/00-preamble.js?v=1"></script>
-    <script src="library-sections/01-scrollbar-auto-hide.js?v=1"></script>
-    <script src="library-sections/02-mobile-mode.js?v=1"></script>
     <script src="library-sections/03-performance-utilities.js?v=1"></script>
     <script src="library-sections/04-custom-select.js?v=1"></script>
     <script src="library-sections/05-settings-persistence-system-uses-sillytavern-s-ext.js?v=1"></script>
     <script src="library-sections/06-settings-migrations.js?v=1"></script>
     <script src="library-sections/07-core-helper-functions.js?v=1"></script>
     <script src="library-sections/08-view-management-top-level-view-switching-character.js?v=1"></script>
-    <script src="library-sections/09-fallback-images.js?v=1"></script>
-    <script src="library-sections/10-api-endpoints.js?v=1"></script>
     <script src="library-sections/11-unique-gallery-folder-system-gives-each-character-.js?v=1"></script>
     <script src="library-sections/12-smart-image-relocation-system-uses-content-hashes-.js?v=1"></script>
     <script src="library-sections/13-slim-index.js?v=1"></script>
     <script src="library-sections/14-virtual-scrolling-system-renders-only-visible-card.js?v=1"></script>
     <script src="library-sections/15-card-image-avatar-replacement-state-edit-tab.js?v=1"></script>
-    <script src="library-sections/16-date-utilities.js?v=1"></script>
     <script src="library-sections/17-favorites-system.js?v=1"></script>
     <script src="library-sections/18-visual-tag-editing-in-sidebar.js?v=1"></script>
-    <script src="library-sections/19-expand-field-modal-for-larger-text-editing.js?v=1"></script>
     <script src="library-sections/20-advanced-filter.js?v=1"></script>
     <script src="library-sections/21-notifications-center-section-based-topbar-dropdown.js?v=1"></script>
     <script src="library-sections/22-lorebook-editor-functions.js?v=1"></script>
@@ -2702,7 +2671,6 @@ https://jannyai.com/characters/uuid_slug
     <script src="library-sections/25-provider-link-feature.js?v=1"></script>
     <script src="library-sections/26-bulk-auto-link-feature.js?v=1"></script>
     <script src="library-sections/27-update-lock.js?v=1"></script>
-    <script src="library-sections/28-search-highlighting-utilities.js?v=1"></script>
     <script src="library-sections/29-help-tips-modal.js?v=1"></script>
     <script src="library-sections/30-media-localization-feature.js?v=1"></script>
     <script src="library-sections/31-unified-media-download-pipeline.js?v=1"></script>
@@ -2712,11 +2680,10 @@ https://jannyai.com/characters/uuid_slug
     <script src="library-sections/35-character-duplicate-detection-system.js?v=1"></script>
     <script src="library-sections/36-pre-import-duplicate-check.js?v=1"></script>
     <script src="library-sections/37-creator-notes-module.js?v=1"></script>
-    <script src="library-sections/38-keyboard-navigation.js?v=1"></script>
     <script src="library-sections/39-theme-customizer.js?v=1"></script>
     <script src="library-sections/40-core-api-bridge.js?v=1"></script>
-    <script src="library-sections/41-world-info-api.js?v=1"></script>
     <script src="library-sections/42-additional-character-lorebooks-charlore.js?v=1"></script>
+    <script type="module" src="lib/index.js?v=1"></script>
     <script type="module" src="modules/module-loader.js?v=47"></script>
 </body>
 </html>

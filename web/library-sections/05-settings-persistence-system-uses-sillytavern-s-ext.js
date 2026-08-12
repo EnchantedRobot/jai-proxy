@@ -90,8 +90,6 @@ const DEFAULT_SETTINGS = {
     importMediaAction: 'ask',
     importDirectDownloads: false,
     includeExternalGalleries: true,
-    galleryThumbnails: true,
-    galleryThumbPrewarm: true,
 
     // ---- UI & Display ----
     chatCardDensity: 'comfortable',

@@ -1,13 +1,15 @@
 // ==============================================
 // Keyboard Navigation
 // ==============================================
+// Side-effect only: reaches its deps through window.ProviderRegistry and the
+// bare global closeModal(), both runtime-only lookups that stay working.
 
 document.addEventListener('keydown', (e) => {
     // Don't intercept when typing in inputs
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
         return;
     }
-    
+
     // Handle Escape for full-screen modals
     if (e.key === 'Escape') {
         const charModal = document.getElementById('charModal');
@@ -33,12 +35,12 @@ document.addEventListener('keydown', (e) => {
         const el = document.getElementById(id);
         return el && !el.classList.contains('hidden');
     })) return;
-    
+
     const scrollContainer = document.querySelector('.gallery-content');
     if (!scrollContainer) return;
-    
+
     const scrollAmount = scrollContainer.clientHeight * 0.8; // 80% of visible height
-    
+
     switch (e.key) {
         case 'PageDown':
             e.preventDefault();
@@ -58,4 +60,3 @@ document.addEventListener('keydown', (e) => {
             break;
     }
 });
-

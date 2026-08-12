@@ -549,10 +549,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Run once at boot on any settings-load path; idempotent (renamed keys are gone, so re-runs no-op).
     migrateSettings();
 
-    // Must run after loadGallerySettings; the legacy-to-file migration reads gallerySettings.
-    loadCompletedMediaLocalizations().catch(() => {});
-
-    // Fire-and-forget: check cl-helper for thumbnail support early
+    // Fire-and-forget: check cl-helper availability early, for the settings
+    // sections that still depend on it (e.g. Pixiv/Civitai auth flows).
     checkClHelperPlugin();
 
     // Apply saved highlight color

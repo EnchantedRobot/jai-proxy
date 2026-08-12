@@ -299,6 +299,32 @@ class MediaManifestOut(BaseModel):
     runs: list[MediaManifestRunOut]
 
 
+class ThumbsPrunedOut(BaseModel):
+    """`POST /galleries/{folder}/thumbs/prune` -- docs/PHASE_3C_PLAN.md §5."""
+
+    folder: str
+    removed: int
+
+
+class MediaStatusEntryOut(BaseModel):
+    """One card's row in `GET /media/status` -- a manifest summary, not the
+    manifest itself (see `MediaManifestOut` for that)."""
+
+    files: int
+    bytes: int
+    complete: bool
+    dead: int
+    last_run: str | None = None
+
+
+class MediaStatusOut(BaseModel):
+    """`GET /media/status` -- docs/PHASE_3C_PLAN.md §3. Cards with no gallery
+    folder or no media run yet are simply absent, not zeroed entries: Bulk
+    Localize treats "missing" and "never downloaded" as the same thing."""
+
+    cards: dict[str, MediaStatusEntryOut]
+
+
 class MediaBytesOut(BaseModel):
     """`POST /characters/{id}/media/bytes` response -- one item, not a batch,
     so no NDJSON framing (docs/PHASE_3C_PLAN.md §6, the browser-fetch door for
@@ -306,5 +332,59 @@ class MediaBytesOut(BaseModel):
 
     status: Literal["saved", "skipped", "error"]
     file: str | None = None
+
+
+class MediaJobSubmitIn(BaseModel):
+    """`POST /media/jobs` body -- the same items/prefix/phase shape as the
+    synchronous `POST /characters/{id}/media`, but queued and run in the
+    background instead of streamed over the request's own connection
+    (docs/PHASE_3C_PLAN.md §7, "3C-2 -- the job runner")."""
+
+    card_id: str
+    items: list[MediaItemIn]
+    prefix: str = Field(
+        default="localized_media",
+        description="Filename prefix and dedupe-priority class: localized_media, lorebook_media, extgallery, or <provider>gallery.",
+    )
+    phase: str = Field(default="embedded", description="Label only, recorded in the manifest's run history.")
+
+
+class MediaJobOut(BaseModel):
+    """`POST /media/jobs` response -- just enough to start polling."""
+
+    job_id: str
+    state: str
+    total: int
+
+
+class MediaJobEventOut(BaseModel):
+    """One finished item, same shape as an NDJSON line from the synchronous route."""
+
+    url: str
+    status: Literal["saved", "skipped", "error"]
+    file: str | None = None
+    reason: str | None = None
+    bytes: int | None = None
+
+
+class MediaJobStatusOut(BaseModel):
+    """`GET /media/jobs/{id}` -- poll this until `state` is `done`, `error`,
+    or `cancelled`. `events` holds only items finished since the caller's
+    last `after` cursor; `next_cursor` is what to pass next time so a poll
+    loop doesn't re-send the whole history every tick."""
+
+    job_id: str
+    card_id: str
+    phase: str
+    prefix: str
+    state: str
+    total: int
+    done: int
+    saved: int
+    skipped: int
+    errors: int
+    error: str | None = None
+    events: list[MediaJobEventOut] = Field(default_factory=list)
+    next_cursor: int = 0
     reason: str | None = None
     bytes: int | None = None

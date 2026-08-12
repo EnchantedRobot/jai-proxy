@@ -31,7 +31,7 @@ import httpx
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
-from proxy import archive, cardwrite, gallery, media_manifest, media_writer, pngtools, settings_store, thumbs
+from proxy import archive, cardwrite, gallery, media_jobs, media_manifest, media_writer, pngtools, settings_store, thumbs
 from proxy.api.models import (
     BulkTagsIn,
     BulkTagsOut,
@@ -50,8 +50,15 @@ from proxy.api.models import (
     IndexStatsOut,
     MediaBytesOut,
     MediaDownloadIn,
+    MediaJobEventOut,
+    MediaJobOut,
+    MediaJobStatusOut,
+    MediaJobSubmitIn,
     MediaManifestOut,
+    MediaStatusEntryOut,
+    MediaStatusOut,
     StatsOut,
+    ThumbsPrunedOut,
     ThumbStatsOut,
 )
 from proxy.config import settings
@@ -61,6 +68,10 @@ logger = logging.getLogger("jai_proxy.api")
 router = APIRouter(prefix="/api/v1", tags=["archive"])
 
 thumbnail_store = thumbs.ThumbnailStore()
+
+# 3C-2 -- the job runner (docs/PHASE_3C_PLAN.md §7). Bound to the running
+# event loop by `proxy.server`'s startup hook; see proxy/media_jobs.py.
+job_store = media_jobs.JobStore(thumbnail_store)
 
 # What `sort` accepts, mapped to the record attribute it orders by. A whitelist
 # rather than a getattr on user input, and small on purpose -- these are the
@@ -392,10 +403,8 @@ _GALLERY_KINDS: dict[str, str] = {
     **{ext: "video" for ext in (".mp4", ".webm", ".mov", ".m4v", ".mkv")},
     **{ext: "audio" for ext in (".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac")},
 }
-# What `gallery(...)` can actually render. A `.gif` thumbnails to its first frame,
-# which is what a grid wants; video and audio get no thumb at all rather than a
-# placeholder the client would have to recognise.
-_THUMBABLE = frozenset((".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"))
+# What `gallery(...)` can actually render -- see proxy/thumbs.py.
+_THUMBABLE = thumbs.THUMBABLE_EXTS
 
 
 def _safe_child(root: Path, *parts: str) -> Path:
@@ -849,6 +858,50 @@ def delete_gallery_file(folder: str, filename: str) -> Response:
     return Response(status_code=204)
 
 
+@router.post(
+    "/galleries/{folder}/thumbs/prune", response_model=ThumbsPrunedOut, summary="Drop orphaned gallery thumbs"
+)
+def prune_gallery_thumbs(folder: str) -> ThumbsPrunedOut:
+    """docs/PHASE_3C_PLAN.md §5 -- the replacement for cl-helper's
+    `gallery-thumb-cleanup`: thumbs are generated at write time now, so the
+    only orphans left are ones whose source file left by a route other than
+    `DELETE .../files/{filename}` (which already forgets its own thumb)."""
+    directory = _gallery_dir(folder)
+    live = {entry.name for entry in os.scandir(directory) if entry.is_file()} if directory.is_dir() else set()
+    removed = thumbnail_store.prune_gallery(directory.name, live)
+    return ThumbsPrunedOut(folder=directory.name, removed=removed)
+
+
+@router.get("/media/status", response_model=MediaStatusOut, summary="Media-download status for every card")
+def get_media_status() -> MediaStatusOut:
+    """docs/PHASE_3C_PLAN.md §3 -- lets Bulk Localize skip characters it already
+    finished without one request per card. Cards with no gallery folder on disk
+    yet cost one failed `stat`; a folder that exists but was never downloaded
+    into has no `.media.json` and costs the same. Only a folder with an actual
+    manifest pays for a JSON read, and that file is small."""
+    idx = _index()
+    cards: dict[str, MediaStatusEntryOut] = {}
+    for record in idx.cards():
+        folder = gallery.resolve_folder(settings.galleries_dir, gallery.folder_name(record.name, record.gallery_id))
+        if not folder:
+            continue
+        gallery_dir = settings.galleries_dir / folder
+        try:
+            media_manifest.manifest_path(gallery_dir).stat()
+        except OSError:
+            continue
+        manifest = media_manifest.load_manifest(gallery_dir)
+        last_run = manifest["runs"][-1] if manifest["runs"] else None
+        cards[record.filename] = MediaStatusEntryOut(
+            files=len(manifest["files"]),
+            bytes=sum(f.get("size", 0) for f in manifest["files"].values()),
+            complete=bool(last_run and last_run.get("errors", 0) == 0),
+            dead=len(manifest["dead"]),
+            last_run=last_run.get("at") if last_run else None,
+        )
+    return MediaStatusOut(cards=cards)
+
+
 @router.get("/characters/{card_id}/media", response_model=MediaManifestOut, summary="A card's media manifest")
 def get_character_media(card_id: str) -> MediaManifestOut:
     """The gallery's `.media.json`, verbatim -- which source URLs became which
@@ -949,6 +1002,64 @@ def download_character_media(card_id: str, body: MediaDownloadIn) -> StreamingRe
         )
 
     return StreamingResponse(generate(), media_type="application/x-ndjson")
+
+
+def _job_status_out(job: media_jobs.MediaJob, *, after: int = 0, include_events: bool = True) -> MediaJobStatusOut:
+    events = [MediaJobEventOut(**e) for e in job.events[after:]] if include_events else []
+    return MediaJobStatusOut(
+        job_id=job.id,
+        card_id=job.card_id,
+        phase=job.phase,
+        prefix=job.prefix,
+        state=job.state,
+        total=job.total,
+        done=job.done,
+        saved=job.saved,
+        skipped=job.skipped,
+        errors=job.errors,
+        error=job.error_message,
+        events=events,
+        next_cursor=len(job.events),
+    )
+
+
+@router.post("/media/jobs", response_model=MediaJobOut, summary="Queue a background media-download run")
+def submit_media_job(body: MediaJobSubmitIn) -> MediaJobOut:
+    """docs/PHASE_3C_PLAN.md §7, "3C-2 -- the job runner". Same contract as
+    `POST /characters/{id}/media` -- the browser still does discovery and
+    hands over a resolved URL list -- but the download itself runs as a
+    detached background task instead of over this request's own connection,
+    so it survives the tab closing. Poll `GET /media/jobs/{id}` for progress."""
+    idx = _index()
+    record = _require(idx, body.card_id)
+    folder_name, gallery_dir = _gallery_dir_for_card(idx, record)
+    items = [{"url": i.url, "filename": i.filename} for i in body.items]
+    job = job_store.submit(gallery_dir, folder_name, items, body.prefix, body.phase, card_id=body.card_id)
+    return MediaJobOut(job_id=job.id, state=job.state, total=job.total)
+
+
+@router.get("/media/jobs/{job_id}", response_model=MediaJobStatusOut, summary="Poll a background media-download job")
+def get_media_job(job_id: str, after: int = Query(default=0, ge=0, description="Skip events before this index.")) -> MediaJobStatusOut:
+    job = job_store.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    return _job_status_out(job, after=after)
+
+
+@router.post("/media/jobs/{job_id}/cancel", summary="Cancel a queued or running media-download job")
+def cancel_media_job(job_id: str) -> dict[str, bool]:
+    if not job_store.cancel(job_id):
+        raise HTTPException(status_code=404, detail="job not found or already finished")
+    return {"cancelled": True}
+
+
+@router.get("/media/jobs", response_model=list[MediaJobStatusOut], summary="List recent background media-download jobs")
+def list_media_jobs(
+    card_id: str | None = Query(default=None),
+    active: bool = Query(default=False, description="Only queued/running jobs."),
+) -> list[MediaJobStatusOut]:
+    jobs = job_store.list_jobs(card_id=card_id, active_only=active)
+    return [_job_status_out(job, include_events=False) for job in jobs]
 
 
 @router.post("/characters/{card_id}/media/bytes", response_model=MediaBytesOut, summary="Save one already-fetched media item")

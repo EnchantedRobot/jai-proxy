@@ -435,9 +435,5 @@ localizeMediaBtn?.addEventListener('click', async () => {
     } else if (totals.errors > 0) {
         showToast('Some downloads failed', 'error');
     }
-    
-    if (totals.errors === 0 && activeChar?.avatar) {
-        markMediaLocalizationComplete(activeChar.avatar);
-    }
 });
 

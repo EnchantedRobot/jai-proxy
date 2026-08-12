@@ -304,11 +304,10 @@ async function checkClHelperPlugin(...pairs) {
         if (resp.ok) {
             const data = await resp.json();
             available = data?.ok === true;
-            _galleryThumbsAvailable = available && data?.thumbnails === true;
             runningVersion = data?.version || null;
             linkedInstall = data?.linked === true;
             isAdmin = data?.admin === true;
-            debugLog('[cl-helper] health:', JSON.stringify(data), '| thumbnails:', _galleryThumbsAvailable);
+            debugLog('[cl-helper] health:', JSON.stringify(data));
         } else {
             debugLog('[cl-helper] health check failed:', resp.status);
         }
@@ -530,9 +529,6 @@ function setupSettingsModal() {
     const includeLorebookCheckbox = document.getElementById('settingsIncludeLorebook');
     const importMediaActionSelect = document.getElementById('settingsImportMediaAction');
     const includeExternalGalleriesCheckbox = document.getElementById('settingsIncludeExternalGalleries');
-    const galleryThumbnailsCheckbox = document.getElementById('settingsGalleryThumbnails');
-    const galleryThumbPrewarmCheckbox = document.getElementById('settingsGalleryThumbPrewarm');
-    const galleryThumbPrewarmRow = document.getElementById('galleryThumbPrewarmRow');
 
     // Display
     const replaceUserPlaceholderCheckbox = document.getElementById('settingsReplaceUserPlaceholder');
@@ -1471,12 +1467,7 @@ function setupSettingsModal() {
         // Check cl-helper plugin availability for provider + cl-helper-backed feature sections
         const gridThumbsClHelperBanner = document.getElementById('gridThumbsClHelperBanner');
         const settingsGridThumbClHelperFields = document.getElementById('settingsGridThumbClHelperFields');
-        const galleryThumbsClHelperBanner = document.getElementById('galleryThumbsClHelperBanner');
-        const galleryThumbsClHelperFields = document.getElementById('galleryThumbsClHelperFields');
-        checkClHelperPlugin(
-            gridThumbsClHelperBanner, settingsGridThumbClHelperFields,
-            galleryThumbsClHelperBanner, galleryThumbsClHelperFields,
-        );
+        checkClHelperPlugin(gridThumbsClHelperBanner, settingsGridThumbClHelperFields);
         // DataCat's own session transport lives in the archive server now, not
         // behind cl-helper (see docs/PHASE_3B_PLAN.md S2) -- its status badge no
         // longer waits on that probe.
@@ -1537,13 +1528,6 @@ function setupSettingsModal() {
         }
         if (includeExternalGalleriesCheckbox) {
             includeExternalGalleriesCheckbox.checked = getSetting('includeExternalGalleries') !== false;
-        }
-        if (galleryThumbnailsCheckbox) {
-            galleryThumbnailsCheckbox.checked = getSetting('galleryThumbnails') !== false;
-            if (galleryThumbPrewarmRow) galleryThumbPrewarmRow.style.display = galleryThumbnailsCheckbox.checked ? '' : 'none';
-        }
-        if (galleryThumbPrewarmCheckbox) {
-            galleryThumbPrewarmCheckbox.checked = getSetting('galleryThumbPrewarm') !== false;
         }
 
         // Display
@@ -1811,13 +1795,6 @@ function setupSettingsModal() {
         });
     }
     
-    // Thumbnail pre-warm sub-option visibility
-    if (galleryThumbnailsCheckbox && galleryThumbPrewarmRow) {
-        galleryThumbnailsCheckbox.addEventListener('change', () => {
-            galleryThumbPrewarmRow.style.display = galleryThumbnailsCheckbox.checked ? '' : 'none';
-        });
-    }
-    
     // Mobile layout override: per-device (localStorage, not ST settings, so a desktop and an
     // iPad on the same account can diverge), applied live via the mode writer.
     if (mobileModeSelect) {
@@ -2042,8 +2019,6 @@ function setupSettingsModal() {
             includeLorebook: includeLorebookCheckbox ? includeLorebookCheckbox.checked : false,
             importMediaAction: importMediaActionSelect ? (importMediaActionSelect.value || 'ask') : 'ask',
             includeExternalGalleries: includeExternalGalleriesCheckbox ? includeExternalGalleriesCheckbox.checked : true,
-            galleryThumbnails: galleryThumbnailsCheckbox ? galleryThumbnailsCheckbox.checked : true,
-            galleryThumbPrewarm: galleryThumbPrewarmCheckbox ? galleryThumbPrewarmCheckbox.checked : true,
             replaceUserPlaceholder: replaceUserPlaceholderCheckbox ? replaceUserPlaceholderCheckbox.checked : true,
             debugMode: debugModeCheckbox ? debugModeCheckbox.checked : false,
             themeCustomizer: themeCustomizerCheckbox ? themeCustomizerCheckbox.checked : false,

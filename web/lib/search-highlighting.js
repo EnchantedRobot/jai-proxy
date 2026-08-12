@@ -2,7 +2,7 @@
 // Search Highlighting Utilities
 // ==============================================
 
-function highlightText(container, query) {
+export function highlightText(container, query) {
     clearHighlights(container);
     if (!query) return;
     const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -30,11 +30,10 @@ function highlightText(container, query) {
     }
 }
 
-function clearHighlights(container) {
+export function clearHighlights(container) {
     container.querySelectorAll('mark.search-highlight').forEach(mark => {
         const parent = mark.parentNode;
         mark.replaceWith(document.createTextNode(mark.textContent));
         parent.normalize();
     });
 }
-

@@ -99,8 +99,13 @@ def save_manifest(gallery_dir: Path, manifest: dict[str, Any]) -> None:
     cardwrite.write_atomic(manifest_path(gallery_dir), payload)
 
 
-def record_saved(manifest: dict[str, Any], url: str, file_name: str, sha256: str) -> None:
-    manifest["files"][url] = {"file": file_name, "sha256": sha256, "at": _now_iso()}
+def record_saved(
+    manifest: dict[str, Any], url: str, file_name: str, sha256: str, *, size: int | None = None
+) -> None:
+    entry: dict[str, Any] = {"file": file_name, "sha256": sha256, "at": _now_iso()}
+    if size is not None:
+        entry["size"] = size
+    manifest["files"][url] = entry
     manifest["dead"].pop(url, None)
 
 

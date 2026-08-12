@@ -40,6 +40,7 @@ from __future__ import annotations
 import glob
 import io
 import logging
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,6 +61,12 @@ THUMB_SIZE = (96, 144)
 # CharacterLibrary's gallery-thumb edge, likewise fixed by the 3,446 inherited
 # folders rather than chosen: their files are named `<image>_384.jpg`.
 GALLERY_THUMB_SIZE = 384
+# What `gallery(...)` can actually render. A `.gif` thumbnails to its first frame,
+# which is what a grid wants; video and audio get no thumb at all rather than a
+# placeholder the client would have to recognise. Shared between the API (which
+# extension gets a `thumb_url`) and `scripts/sync_thumbs.py --galleries` (which
+# extension gets pre-rendered).
+THUMBABLE_EXTS = frozenset((".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"))
 _JPEG_QUALITY = 90
 
 _MAGIC: tuple[tuple[bytes, str], ...] = (
@@ -252,6 +259,28 @@ class ThumbnailStore:
                 continue
         return removed
 
+    def prune_gallery(self, folder: str, live_filenames: set[str]) -> int:
+        """Delete cached gallery thumbs whose source image is no longer in the
+        gallery folder -- docs/PHASE_3C_PLAN.md §5, the replacement for
+        cl-helper's `gallery-thumb-cleanup`. `live_filenames` is the caller's
+        own scandir of the gallery, so this only ever reads the thumb cache."""
+        directory = self.gallery_dir / folder
+        if not directory.is_dir():
+            return 0
+        removed = 0
+        for candidate in directory.iterdir():
+            if not candidate.is_file():
+                continue
+            source = _gallery_thumb_source_name(candidate.name)
+            if source is None or source in live_filenames:
+                continue
+            try:
+                candidate.unlink()
+                removed += 1
+            except OSError:
+                continue
+        return removed
+
     def missing(self, filenames: list[str]) -> list[str]:
         """Which of these cards have no avatar thumb yet."""
         return [name for name in filenames if not self.avatar_path(name).is_file()]
@@ -266,6 +295,16 @@ class ThumbnailStore:
         except OSError:
             return []
         return [p for p in entries if p.is_file() and p.name not in known]
+
+
+_GALLERY_THUMB_RE = re.compile(r"^(?P<name>.+)_(?P<size>\d+)\.jpg$")
+
+
+def _gallery_thumb_source_name(thumb_filename: str) -> str | None:
+    """The source image a gallery thumb file name (`<image>_<size>.jpg`) was
+    rendered from, or None for anything that isn't one of ours."""
+    match = _GALLERY_THUMB_RE.match(thumb_filename)
+    return match.group("name") if match else None
 
 
 def _avatar_box(size: int | None) -> tuple[int, int]:

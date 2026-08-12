@@ -1,7 +1,7 @@
 // ========================================
 // API ENDPOINTS - Centralized path constants
 // ========================================
-const ENDPOINTS = {
+export const ENDPOINTS = {
     CHARACTERS_GET: '/characters/get',
     CHARACTERS_ALL: '/characters/all',
     CHARACTERS_CREATE: '/characters/create',
@@ -18,4 +18,3 @@ const ENDPOINTS = {
     IMAGES_UPLOAD: '/images/upload',
     IMAGES_FOLDERS: '/images/folders'
 };
-

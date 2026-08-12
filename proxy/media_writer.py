@@ -398,7 +398,7 @@ def finish_item(
     digest = hashlib.sha256(written_bytes).hexdigest()
     existing_by_hash = index_state.find_by_hash(digest)
     if existing_by_hash:
-        media_manifest.record_saved(manifest, url, existing_by_hash, digest)
+        media_manifest.record_saved(manifest, url, existing_by_hash, digest, size=len(written_bytes))
         return DownloadOutcome("skipped", url, file=existing_by_hash, reason="already have this content")
 
     # 8. Write, atomically.
@@ -418,7 +418,7 @@ def finish_item(
 
     # 10. Record.
     index_state.note_saved(url, filename_hint, prefix, file_name, digest)
-    media_manifest.record_saved(manifest, url, file_name, digest)
+    media_manifest.record_saved(manifest, url, file_name, digest, size=len(written_bytes))
     return DownloadOutcome("saved", url, file=file_name, bytes=len(written_bytes))
 
 

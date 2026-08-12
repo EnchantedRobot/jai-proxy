@@ -731,7 +731,6 @@ async function fetchCharacterImages(charOrName) {
     }
 }
 
-let _galleryImageObserver = null;
 
 const GALLERY_PAGE_SIZE = 100;
 const GALLERY_THUMB_SIZE = 384;
@@ -739,7 +738,6 @@ const GALLERY_THUMB_CONCURRENCY = 6;
 const GALLERY_PREWARM_CONCURRENCY = 4;
 const PREWARM_EXTENSIONS = /\.(png|jpe?g|webp)$/i;
 let _galleryState = null;
-let _galleryThumbsAvailable = false;
 let _galleryThumbObserver = null;
 // Per-surface thumbnail loader: capped-concurrency FIFO over <img> elements
 // carrying dataset.thumbUrl/.fullUrl. The gallery tab and the fullscreen
@@ -808,18 +806,15 @@ function buildGalleryThumbUrl(folderName, fileName) {
 }
 
 function getGalleryThumbUrl(folderName, fileName) {
-    if (!_galleryThumbsAvailable || getSetting('galleryThumbnails') === false) return null;
     return buildGalleryThumbUrl(folderName, fileName);
 }
 
 function cleanupThumbCache(folderName) {
-    if (!_galleryThumbsAvailable) return;
-    apiRequest(`/plugins/cl-helper/gallery-thumb-cleanup/${encodeURIComponent(folderName)}`, 'POST')
+    fetch(`/api/v1/galleries/${encodeURIComponent(folderName)}/thumbs/prune`, { method: 'POST' })
         .catch(() => {});
 }
 
 function prewarmThumbnails(folderName, fileNames) {
-    if (!_galleryThumbsAvailable || getSetting('galleryThumbnails') === false || getSetting('galleryThumbPrewarm') === false) return;
     const imageFiles = fileNames.filter(f => PREWARM_EXTENSIONS.test(f));
     if (imageFiles.length === 0) return;
     debugLog(`[Thumbs] Pre-warming ${imageFiles.length} thumbnails for ${folderName}`);
@@ -836,77 +831,9 @@ function prewarmThumbnails(folderName, fileNames) {
     drain();
 }
 
-function getGalleryImageObserver() {
-    if (_galleryImageObserver) return _galleryImageObserver;
-    const root = document.querySelector('#charModal .modal-body');
-    _galleryImageObserver = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-            if (!entry.isIntersecting) continue;
-            const img = entry.target;
-            _galleryImageObserver.unobserve(img);
-            const realSrc = img.dataset.src;
-            if (!realSrc) continue;
-            img.src = realSrc;
-            delete img.dataset.src;
-            img.decode().catch(() => {});
-        }
-    }, { root: root || null, rootMargin: '100px' });
-    return _galleryImageObserver;
-}
-
 function _populateGalleryGrid(startIndex, endIndex) {
-    const state = _galleryState;
-    if (!state) return;
-
-    debugLog('[gallery] _populateGalleryGrid called, thumbsAvailable:', _galleryThumbsAvailable);
-
-    if (_galleryThumbsAvailable && getSetting('galleryThumbnails') !== false) {
-        debugLog('[gallery] Using cl-helper thumbnails for', endIndex - startIndex, 'items');
-        _populateGalleryGridThumb(startIndex, endIndex);
-        return;
-    }
-
-    const observer = getGalleryImageObserver();
-    const fragment = document.createDocumentFragment();
-    const gifImages = [];
-
-    for (let i = startIndex; i < endIndex; i++) {
-        const { fileName, type } = state.visualMedia[i];
-        const mediaUrl = state.galleryMedia[i].url;
-        const mediaContainer = document.createElement('div');
-        const mediaIsGif = type === 'image' && /\.gif$/i.test(fileName);
-        mediaContainer.className = `sprite-item${mediaIsGif ? ' gif-thumb' : ''}`;
-        mediaContainer.dataset.galleryIndex = i;
-
-        if (type === 'video') {
-            mediaContainer.innerHTML = `
-                <div class="video-thumbnail" title="${escapeHtml(fileName)}">
-                    <video src="${mediaUrl}" preload="metadata" muted></video>
-                    <div class="video-play-overlay"><i class="fa-solid fa-play"></i></div>
-                </div>
-            `;
-        } else {
-            const img = document.createElement('img');
-            img.decoding = 'async';
-            img.title = fileName;
-            if (mediaIsGif) {
-                img.src = mediaUrl;
-                img.dataset.gif = '1';
-                gifImages.push(img);
-            } else {
-                img.dataset.src = mediaUrl;
-                img.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/%3E";
-                img.dataset.gif = '0';
-                observer.observe(img);
-            }
-            mediaContainer.appendChild(img);
-        }
-
-        fragment.appendChild(mediaContainer);
-    }
-
-    state.imagesGrid.appendChild(fragment);
-    if (gifImages.length > 0) _scheduleGifFreeze(gifImages);
+    if (!_galleryState) return;
+    _populateGalleryGridThumb(startIndex, endIndex);
 }
 
 function _populateGalleryGridThumb(startIndex, endIndex) {
@@ -967,7 +894,6 @@ function _populateGalleryGridThumb(startIndex, endIndex) {
 function renderGalleryImages(files, folderName) {
     const grid = document.getElementById('spritesGrid');
     grid.innerHTML = '';
-    if (_galleryImageObserver) { _galleryImageObserver.disconnect(); }
     if (_galleryThumbObserver) { _galleryThumbObserver.disconnect(); _galleryThumbObserver = null; }
     _tabThumbLoader.reset();
     if (_gifFreezePending) { cancelAnimationFrame(_gifFreezePending); _gifFreezePending = null; }
@@ -1151,7 +1077,6 @@ function _renderGalleryPage(page, scroll = true) {
     state.currentPage = page;
 
     state.imagesGrid.innerHTML = '';
-    if (_galleryImageObserver) _galleryImageObserver.disconnect();
     if (_galleryThumbObserver) { _galleryThumbObserver.disconnect(); _galleryThumbObserver = null; }
     _tabThumbLoader.reset();
     if (_gifFreezePending) { cancelAnimationFrame(_gifFreezePending); _gifFreezePending = null; }

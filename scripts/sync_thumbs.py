@@ -21,11 +21,27 @@ Stale thumbs are retired to `<thumbs>/_stale/` rather than deleted, so a wrong
 call is a `mv` away from being undone. Same filesystem, so it is free. The whole
 cache is disposable regardless -- deleting it costs one regeneration pass and no
 data -- which is why this script is allowed to be blunt.
+
+`--galleries` does the same job for the gallery thumb cache instead of the
+avatar one -- docs/PHASE_3C_PLAN.md §5, the replacement for cl-helper's
+`gallery-thumb-cleanup`:
+
+    uv run python scripts/sync_thumbs.py --galleries              # report
+    uv run python scripts/sync_thumbs.py --galleries --apply      # act
+
+  missing  -- a thumbable image (see `thumbs.THUMBABLE_EXTS`) in a live gallery
+              folder with no `_384.jpg` thumb yet.
+  orphaned -- a thumb whose source image left the gallery by some route other
+              than `DELETE .../files/{filename}` (which already forgets its own
+              thumb on the way out) -- `ThumbnailStore.prune_gallery`.
+  dropped  -- a whole thumb-cache folder whose gallery folder no longer exists
+              at all, e.g. after a manual `rm -r` of a gallery.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 from pathlib import Path
 
@@ -39,6 +55,12 @@ def main() -> int:
     )
     parser.add_argument("--archive-dir", type=Path, default=settings.archive_dir)
     parser.add_argument("--thumbs-dir", type=Path, default=settings.thumbs_dir)
+    parser.add_argument("--galleries-dir", type=Path, default=settings.galleries_dir)
+    parser.add_argument(
+        "--galleries",
+        action="store_true",
+        help="sync the gallery thumb cache instead of the avatar one",
+    )
     parser.add_argument(
         "--apply",
         action="store_true",
@@ -51,6 +73,9 @@ def main() -> int:
     )
     parser.add_argument("--limit", type=int, default=20, help="max names to list per section (0 = all)")
     args = parser.parse_args()
+
+    if args.galleries:
+        return _sync_galleries(args)
 
     if not args.archive_dir.is_dir():
         parser.error(f"archive dir does not exist: {args.archive_dir}")
@@ -113,6 +138,65 @@ def main() -> int:
         for path in stale:
             shutil.move(str(path), str(retired / path.name))
         print(f"retired  {len(stale)} stale -> {retired}")
+    return 0
+
+
+def _sync_galleries(args: argparse.Namespace) -> int:
+    if not args.galleries_dir.is_dir():
+        print(f"no galleries dir at {args.galleries_dir}, nothing to do")
+        return 0
+
+    store = thumbs.ThumbnailStore(args.thumbs_dir, args.archive_dir)
+    live_folders = {e.name for e in os.scandir(args.galleries_dir) if e.is_dir() and not e.name.startswith(".")}
+    try:
+        cached_folders = {e.name for e in os.scandir(store.gallery_dir) if e.is_dir()}
+    except OSError:
+        cached_folders = set()
+    dropped_folders = sorted(cached_folders - live_folders)
+
+    missing: list[str] = []
+    orphaned = 0
+    per_folder_files: dict[str, set[str]] = {}
+    for folder in sorted(live_folders):
+        directory = args.galleries_dir / folder
+        try:
+            files = {e.name for e in os.scandir(directory) if e.is_file()}
+        except OSError:
+            continue
+        per_folder_files[folder] = files
+        for name in sorted(files):
+            if Path(name).suffix.lower() not in thumbs.THUMBABLE_EXTS:
+                continue
+            if not store.gallery_path(folder, name).is_file():
+                missing.append(f"{folder}/{name}")
+
+    print(f"galleries: {len(live_folders)} folders in {args.galleries_dir}")
+    print(f"thumbs:    {store.gallery_dir}")
+    _report("missing (to generate)", missing, args.limit)
+    _report("dropped (cache folder, no live gallery)", dropped_folders, args.limit)
+
+    if not args.apply:
+        print("\norphaned (to prune): computed per folder during --apply")
+        print("\nread-only; pass --apply to write")
+        return 0
+
+    generated = failed = 0
+    for entry in missing:
+        folder, _, name = entry.partition("/")
+        source = args.galleries_dir / folder / name
+        if store.generate_gallery(source, folder, name) is None:
+            failed += 1
+        else:
+            generated += 1
+    print(f"generated {generated}" + (f", failed {failed}" if failed else ""))
+
+    for folder, files in per_folder_files.items():
+        orphaned += store.prune_gallery(folder, files)
+    print(f"pruned   {orphaned} orphaned thumb(s)")
+
+    for folder in dropped_folders:
+        shutil.rmtree(store.gallery_dir / folder, ignore_errors=True)
+    print(f"dropped  {len(dropped_folders)} cache folder(s) with no live gallery")
     return 0
 
 

@@ -90,7 +90,6 @@ window.initCustomSelect = initCustomSelect;
 window.closeAllTopbarDropdowns = closeAllTopbarDropdowns;
 window.debounce = debounce;
 window.truncate = truncate;
-window.isMobileMode = isMobileMode;
 window.downloadBlobAsFile = downloadBlobAsFile;
 window.crc32 = crc32;
 window.sanitizeTaglineHtml = sanitizeTaglineHtml;
@@ -196,13 +195,10 @@ window.sanitizeMediaFilename = sanitizeMediaFilename;
 window.downloadViaServerRoute = downloadViaServerRoute;
 window.downloadBytesViaServerRoute = downloadBytesViaServerRoute;
 window.downloadCharacterMedia = downloadCharacterMedia;
-window.markMediaLocalizationComplete = markMediaLocalizationComplete;
-window.getCompletedMediaLocalizations = getCompletedMediaLocalizations;
 window.registerNotificationSection = registerNotificationSection;
 window.refreshNotificationsUI = refreshNotificationsUI;
 window.openNotificationsDropdown = openNotificationsDropdown;
 window.arrayBufferToBase64 = arrayBufferToBase64;
-window.ENDPOINTS = ENDPOINTS;
 
 // Creator Notes - shared between local modal and browse preview
 window.renderCreatorNotesSecure = renderCreatorNotesSecure;

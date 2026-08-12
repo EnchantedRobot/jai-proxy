@@ -5,7 +5,7 @@
 /**
  * Initialize click handlers for expand field buttons
  */
-function initExpandFieldButtons() {
+export function initExpandFieldButtons() {
     document.querySelectorAll('.expand-field-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -20,7 +20,7 @@ function initExpandFieldButtons() {
 /**
  * Initialize section expand buttons for Greetings and Lorebook
  */
-function initSectionExpandButtons() {
+export function initSectionExpandButtons() {
     // Greetings expand button
     const expandGreetingsBtn = document.getElementById('expandGreetingsBtn');
     if (expandGreetingsBtn) {
@@ -30,7 +30,7 @@ function initSectionExpandButtons() {
             openGreetingsModal();
         });
     }
-    
+
     // Lorebook expand button
     const expandLorebookBtn = document.getElementById('expandLorebookBtn');
     if (expandLorebookBtn) {
@@ -50,12 +50,12 @@ function openGreetingsModal() {
     // Get current values from the edit form
     const firstMesField = document.getElementById('editFirstMes');
     const altGreetingsContainer = document.getElementById('altGreetingsEditContainer');
-    
+
     if (!firstMesField) {
         showToast('Greetings fields not found', 'error');
         return;
     }
-    
+
     // Collect current alternate greetings
     const altGreetings = [];
     if (altGreetingsContainer) {
@@ -64,7 +64,7 @@ function openGreetingsModal() {
             altGreetings.push(input.value);
         });
     }
-    
+
     // Build modal HTML
     let altGreetingsHtml = '';
     altGreetings.forEach((greeting, idx) => {
@@ -85,7 +85,7 @@ function openGreetingsModal() {
             </div>
         `;
     });
-    
+
     const modalHtml = `
         <div id="greetingsExpandModal" class="modal-overlay">
             <div class="modal-glass section-expand-modal" id="greetingsExpandModalInner">
@@ -115,7 +115,7 @@ function openGreetingsModal() {
                         <h3 class="expanded-section-label"><i class="fa-solid fa-message"></i> First Message</h3>
                         <textarea id="expandedFirstMes" class="glass-input expanded-greeting-textarea first-message" rows="8" placeholder="Opening message from the character...">${escapeHtml(firstMesField.value)}</textarea>
                     </div>
-                    
+
                     <div class="expanded-greeting-section">
                         <h3 class="expanded-section-label">
                             <i class="fa-solid fa-layer-group"></i> Alternate Greetings
@@ -139,30 +139,30 @@ function openGreetingsModal() {
             </div>
         </div>
     `;
-    
+
     // Remove existing modal if any
     const existingModal = document.getElementById('greetingsExpandModal');
     if (existingModal) existingModal.remove();
-    
+
     document.body.insertAdjacentHTML('beforeend', modalHtml);
-    
+
     const modal = document.getElementById('greetingsExpandModal');
     const expandedFirstMes = document.getElementById('expandedFirstMes');
     const greetingsExpandBody = document.getElementById('greetingsExpandBody');
-    
+
     // Focus first message textarea
     setTimeout(() => expandedFirstMes.focus(), 50);
-    
+
     // Zoom controls
     let greetingsZoom = 100;
     const greetingsZoomDisplay = document.getElementById('greetingsZoomDisplay');
-    
+
     const updateGreetingsZoom = (zoom) => {
         greetingsZoom = Math.max(50, Math.min(200, zoom));
         greetingsZoomDisplay.textContent = `${greetingsZoom}%`;
         greetingsExpandBody.style.zoom = `${greetingsZoom}%`;
     };
-    
+
     document.getElementById('greetingsZoomControls').onclick = (e) => {
         const btn = e.target.closest('.display-control-btn[data-zoom]');
         if (!btn) return;
@@ -171,21 +171,21 @@ function openGreetingsModal() {
         else if (action === 'out') updateGreetingsZoom(greetingsZoom - 10);
         else if (action === 'reset') updateGreetingsZoom(100);
     };
-    
+
     // Close handlers
     const closeModal = () => modal.remove();
-    
+
     document.getElementById('greetingsModalClose').onclick = closeModal;
     modal.onclick = (e) => { if (e.target === modal) closeModal(); };
-    
+
     // Add greeting handler
     document.getElementById('addExpandedGreetingBtn').onclick = () => {
         const container = document.getElementById('expandedAltGreetingsContainer');
-        
+
         // Remove "no greetings" message if present
         const noGreetingsMsg = container.querySelector('.no-alt-greetings');
         if (noGreetingsMsg) noGreetingsMsg.remove();
-        
+
         const idx = container.querySelectorAll('.expanded-greeting-item').length;
         const newGreetingHtml = `
             <div class="expanded-greeting-item" data-index="${idx}">
@@ -203,16 +203,16 @@ function openGreetingsModal() {
             </div>
         `;
         container.insertAdjacentHTML('beforeend', newGreetingHtml);
-        
+
         // Add handlers to new item
         const newItem = container.lastElementChild;
         setupGreetingItemHandlers(newItem);
-        
+
         // Focus the new textarea
         const newTextarea = newItem.querySelector('textarea');
         newTextarea.focus();
     };
-    
+
     // Setup handlers for greeting items (delete + collapse)
     function setupGreetingItemHandlers(item) {
         const deleteBtn = item.querySelector('.expanded-greeting-delete');
@@ -220,13 +220,13 @@ function openGreetingsModal() {
             item.remove();
             renumberExpandedGreetings();
         };
-        
+
         const collapseBtn = item.querySelector('.expanded-greeting-collapse-btn');
         if (collapseBtn) {
             collapseBtn.onclick = () => {
                 const isCollapsed = item.classList.toggle('collapsed');
-                collapseBtn.innerHTML = isCollapsed 
-                    ? '<i class="fa-solid fa-chevron-right"></i>' 
+                collapseBtn.innerHTML = isCollapsed
+                    ? '<i class="fa-solid fa-chevron-right"></i>'
                     : '<i class="fa-solid fa-chevron-down"></i>';
                 // Update preview when collapsing
                 if (isCollapsed) {
@@ -241,7 +241,7 @@ function openGreetingsModal() {
             };
         }
     }
-    
+
     function renumberExpandedGreetings() {
         const container = document.getElementById('expandedAltGreetingsContainer');
         const items = container.querySelectorAll('.expanded-greeting-item');
@@ -250,13 +250,13 @@ function openGreetingsModal() {
             const numSpan = item.querySelector('.expanded-greeting-num');
             if (numSpan) numSpan.textContent = `#${idx + 1}`;
         });
-        
+
         // Show "no greetings" message if empty
         if (items.length === 0) {
             container.innerHTML = '<div class="no-alt-greetings">No alternate greetings yet. Click "Add Greeting" to create one.</div>';
         }
     }
-    
+
     // Collapse/Expand All handlers
     document.getElementById('collapseAllGreetingsBtn').onclick = () => {
         const container = document.getElementById('expandedAltGreetingsContainer');
@@ -274,7 +274,7 @@ function openGreetingsModal() {
             }
         });
     };
-    
+
     document.getElementById('expandAllGreetingsBtn').onclick = () => {
         const container = document.getElementById('expandedAltGreetingsContainer');
         container.querySelectorAll('.expanded-greeting-item').forEach(item => {
@@ -283,10 +283,10 @@ function openGreetingsModal() {
             if (btn) btn.innerHTML = '<i class="fa-solid fa-chevron-down"></i>';
         });
     };
-    
+
     // Setup handlers for initial items
     modal.querySelectorAll('.expanded-greeting-item').forEach(setupGreetingItemHandlers);
-    
+
     // Save/Apply handler
     document.getElementById('greetingsModalSave').onclick = () => {
         // Update First Message
@@ -296,7 +296,7 @@ function openGreetingsModal() {
             firstMesFieldCurrent.value = newFirstMes;
             firstMesFieldCurrent.dispatchEvent(new Event('input', { bubbles: true }));
         }
-        
+
         // Collect and update alternate greetings
         const expandedContainer = document.getElementById('expandedAltGreetingsContainer');
         const expandedGreetings = [];
@@ -305,7 +305,7 @@ function openGreetingsModal() {
                 expandedGreetings.push(textarea.value);
             });
         }
-        
+
         // Clear and repopulate alt greetings container in main edit form
         const altGreetingsContainerCurrent = document.getElementById('altGreetingsEditContainer');
         if (altGreetingsContainerCurrent) {
@@ -314,7 +314,7 @@ function openGreetingsModal() {
                 addAltGreetingField(altGreetingsContainerCurrent, greeting, idx);
             });
         }
-        
+
         closeModal();
         document.removeEventListener('keydown', handleKeydown);
         showToast('Greetings updated', 'success');
@@ -326,12 +326,12 @@ function openGreetingsModal() {
  */
 function openLorebookModal() {
     const lorebookContainer = document.getElementById('lorebookEntriesEdit');
-    
+
     if (!lorebookContainer) {
         showToast('Lorebook container not found', 'error');
         return;
     }
-    
+
     // Collect current lorebook entries from the edit form. Carry each entry's full current data
     // (original fields + any inline edits) on `_full` so the expanded editor round-trips it losslessly
     // instead of reducing it to the 9 editable fields.
@@ -345,13 +345,13 @@ function openLorebookModal() {
             _full: full,
         });
     });
-    
+
     // Build entries HTML
     let entriesHtml = '';
     entries.forEach((entry, idx) => {
         entriesHtml += buildExpandedLorebookEntryHtml(entry, idx);
     });
-    
+
     const modalHtml = `
         <div id="lorebookExpandModal" class="modal-overlay">
             <div class="modal-glass section-expand-modal lorebook-expand-modal" id="lorebookExpandModalInner">
@@ -398,26 +398,26 @@ function openLorebookModal() {
             </div>
         </div>
     `;
-    
+
     // Remove existing modal if any
     const existingModal = document.getElementById('lorebookExpandModal');
     if (existingModal) existingModal.remove();
-    
+
     document.body.insertAdjacentHTML('beforeend', modalHtml);
-    
+
     const modal = document.getElementById('lorebookExpandModal');
     const lorebookExpandBody = document.getElementById('lorebookExpandBody');
-    
+
     // Zoom controls
     let lorebookZoom = 100;
     const lorebookZoomDisplay = document.getElementById('lorebookZoomDisplay');
-    
+
     const updateLorebookZoom = (zoom) => {
         lorebookZoom = Math.max(50, Math.min(200, zoom));
         lorebookZoomDisplay.textContent = `${lorebookZoom}%`;
         lorebookExpandBody.style.zoom = `${lorebookZoom}%`;
     };
-    
+
     document.getElementById('lorebookZoomControls').onclick = (e) => {
         const btn = e.target.closest('.display-control-btn[data-zoom]');
         if (!btn) return;
@@ -426,13 +426,13 @@ function openLorebookModal() {
         else if (action === 'out') updateLorebookZoom(lorebookZoom - 10);
         else if (action === 'reset') updateLorebookZoom(100);
     };
-    
+
     // Close handlers
     const closeModal = () => modal.remove();
-    
+
     document.getElementById('lorebookModalClose').onclick = closeModal;
     modal.onclick = (e) => { if (e.target === modal) closeModal(); };
-    
+
     // Collapse/Expand All handlers
     document.getElementById('collapseAllLorebookBtn').onclick = () => {
         const container = document.getElementById('expandedLorebookContainer');
@@ -449,7 +449,7 @@ function openLorebookModal() {
             }
         });
     };
-    
+
     document.getElementById('expandAllLorebookBtn').onclick = () => {
         const container = document.getElementById('expandedLorebookContainer');
         container.querySelectorAll('.expanded-lorebook-entry').forEach(entry => {
@@ -458,20 +458,20 @@ function openLorebookModal() {
             if (btn) btn.innerHTML = '<i class="fa-solid fa-chevron-down"></i>';
         });
     };
-    
+
     // Add entry handler
     document.getElementById('addExpandedLorebookEntryBtn').onclick = () => {
         const container = document.getElementById('expandedLorebookContainer');
-        
+
         // Remove "no entries" message if present
         const noEntriesMsg = container.querySelector('.no-lorebook-entries');
         if (noEntriesMsg) noEntriesMsg.remove();
-        
+
         const idx = container.querySelectorAll('.expanded-lorebook-entry').length;
         const newEntry = { name: '', keys: '', secondaryKeys: '', content: '', enabled: true, selective: false, constant: false, order: idx, priority: 10 };
         const newEntryHtml = buildExpandedLorebookEntryHtml(newEntry, idx);
         container.insertAdjacentHTML('beforeend', newEntryHtml);
-        
+
         // Setup handlers for new entry
         const newEntryEl = container.lastElementChild;
         setupExpandedLorebookEntryHandlers(newEntryEl);
@@ -482,12 +482,12 @@ function openLorebookModal() {
             order: String(idx), priority: '10', enabled: true, selective: false, constant: false,
         };
         updateExpandedLorebookCount();
-        
+
         // Focus the name input
         const nameInput = newEntryEl.querySelector('.expanded-lorebook-name');
         nameInput.focus();
     };
-    
+
     // Setup handlers for existing entries
     modal.querySelectorAll('.expanded-lorebook-entry').forEach(setupExpandedLorebookEntryHandlers);
 
@@ -504,7 +504,7 @@ function openLorebookModal() {
             enabled: e.enabled, selective: e.selective, constant: e.constant,
         };
     });
-    
+
     // Save/Apply handler
     document.getElementById('lorebookModalSave').onclick = () => {
         const expandedContainer = document.getElementById('expandedLorebookContainer');
@@ -613,11 +613,11 @@ function setupExpandedLorebookEntryHandlers(entryEl) {
     const entryBody = entryEl.querySelector('.expanded-lorebook-entry-body');
     const preview = entryEl.querySelector('.expanded-lorebook-preview');
     const nameInput = entryEl.querySelector('.expanded-lorebook-name');
-    
+
     collapseBtn.onclick = () => {
         const isCollapsed = entryEl.classList.toggle('collapsed');
-        collapseBtn.innerHTML = isCollapsed 
-            ? '<i class="fa-solid fa-chevron-right"></i>' 
+        collapseBtn.innerHTML = isCollapsed
+            ? '<i class="fa-solid fa-chevron-right"></i>'
             : '<i class="fa-solid fa-chevron-down"></i>';
         // Update preview with keys when collapsing
         if (isCollapsed && preview) {
@@ -626,10 +626,10 @@ function setupExpandedLorebookEntryHandlers(entryEl) {
             preview.innerHTML = `<i class="fa-solid fa-key"></i> ${keysPreview}`;
         }
     };
-    
+
     // Toggle enabled handler
     const toggleLabel = entryEl.querySelector('.expanded-lorebook-toggle');
-    
+
     toggleLabel.onclick = (e) => {
         e.preventDefault();
         const checkbox = entryEl.querySelector('.expanded-lorebook-enabled');
@@ -640,7 +640,7 @@ function setupExpandedLorebookEntryHandlers(entryEl) {
         toggleLabel.innerHTML = `<input type="checkbox" class="expanded-lorebook-enabled" ${newEnabled ? 'checked' : ''} style="display: none;">${newEnabled ? '<i class="fa-solid fa-toggle-on"></i> On' : '<i class="fa-solid fa-toggle-off"></i> Off'}`;
         entryEl.classList.toggle('disabled', !newEnabled);
     };
-    
+
     // Delete handler
     const deleteBtn = entryEl.querySelector('.expanded-lorebook-delete');
     deleteBtn.onclick = () => {
@@ -653,12 +653,12 @@ function setupExpandedLorebookEntryHandlers(entryEl) {
 function renumberExpandedLorebookEntries() {
     const container = document.getElementById('expandedLorebookContainer');
     if (!container) return;
-    
+
     const entries = container.querySelectorAll('.expanded-lorebook-entry');
     entries.forEach((entry, idx) => {
         entry.dataset.index = idx;
     });
-    
+
     // Show "no entries" message if empty
     if (entries.length === 0) {
         container.innerHTML = '<div class="no-lorebook-entries">No lorebook entries yet. Click "Add Entry" to create one.</div>';
@@ -669,7 +669,7 @@ function updateExpandedLorebookCount() {
     const container = document.getElementById('expandedLorebookContainer');
     const countEl = document.getElementById('expandedLorebookCount');
     if (!container || !countEl) return;
-    
+
     const count = container.querySelectorAll('.expanded-lorebook-entry').length;
     countEl.textContent = `${count} ${count === 1 ? 'entry' : 'entries'}`;
 }
@@ -683,10 +683,10 @@ function openExpandedFieldEditor(fieldId, fieldLabel) {
         showToast('Field not found', 'error');
         return;
     }
-    
+
     const currentValue = originalField.value;
     const isCreatorNotes = fieldId === 'editCreatorNotes';
-    
+
     // Get field-specific icon
     const fieldIcons = {
         'editDescription': 'fa-solid fa-user',
@@ -698,14 +698,14 @@ function openExpandedFieldEditor(fieldId, fieldLabel) {
         'editMesExample': 'fa-solid fa-quote-left'
     };
     const fieldIcon = fieldIcons[fieldId] || 'fa-solid fa-expand';
-    
+
     // Preview toggle button only for Creator's Notes
     const previewToggleHtml = isCreatorNotes ? `
         <button id="expandFieldPreviewToggle" class="action-btn secondary" title="Toggle Preview">
             <i class="fa-solid fa-eye"></i> Preview
         </button>
     ` : '';
-    
+
     // Create expand modal
     const expandModalHtml = `
         <div id="expandFieldModal" class="modal-overlay">
@@ -725,31 +725,31 @@ function openExpandedFieldEditor(fieldId, fieldLabel) {
             </div>
         </div>
     `;
-    
+
     // Remove existing modal if any
     const existingModal = document.getElementById('expandFieldModal');
     if (existingModal) existingModal.remove();
-    
+
     document.body.insertAdjacentHTML('beforeend', expandModalHtml);
-    
+
     const expandModal = document.getElementById('expandFieldModal');
     const expandTextarea = document.getElementById('expandFieldTextarea');
-    
+
     // Focus textarea and move cursor to end
     setTimeout(() => {
         expandTextarea.focus();
         expandTextarea.setSelectionRange(expandTextarea.value.length, expandTextarea.value.length);
     }, 50);
-    
+
     // Preview toggle for Creator's Notes
     if (isCreatorNotes) {
         const previewToggle = document.getElementById('expandFieldPreviewToggle');
         const previewDiv = document.getElementById('expandFieldPreview');
         let isPreviewMode = false;
-        
+
         previewToggle.onclick = () => {
             isPreviewMode = !isPreviewMode;
-            
+
             if (isPreviewMode) {
                 // Switch to preview mode
                 expandTextarea.style.display = 'none';
@@ -767,15 +767,15 @@ function openExpandedFieldEditor(fieldId, fieldLabel) {
             }
         };
     }
-    
+
     // Close handlers
     const closeExpandModal = () => {
         expandModal.remove();
     };
-    
+
     document.getElementById('expandFieldClose').onclick = closeExpandModal;
     expandModal.onclick = (e) => { if (e.target === expandModal) closeExpandModal(); };
-    
+
     // Save/Apply handler
     document.getElementById('expandFieldSave').onclick = () => {
         const newValue = expandTextarea.value;
@@ -788,7 +788,7 @@ function openExpandedFieldEditor(fieldId, fieldLabel) {
         } else {
             console.error('[ExpandField] Could not find target field:', fieldId);
         }
-        
+
         closeExpandModal();
         document.removeEventListener('keydown', handleKeydown);
         showToast('Changes applied to field', 'success');
@@ -804,7 +804,7 @@ function openBrowseExpandedView(sectionId, label, iconClass) {
         showToast('Section not found', 'error');
         return;
     }
-    
+
     // Truncated sections (First Message, etc.) stash full content on the element.
     let content;
     if (sectionEl.dataset.fullContent) {
@@ -822,7 +822,7 @@ function openBrowseExpandedView(sectionId, label, iconClass) {
             content = sectionEl.innerHTML;
         }
     }
-    
+
     // Build iframe document like Creator's Notes does
     const iframeStyles = `<style>
         html { background: transparent; color-scheme: dark; }
@@ -853,7 +853,7 @@ function openBrowseExpandedView(sectionId, label, iconClass) {
         }
     </style>`;
     const iframeDoc = `<!DOCTYPE html><html><head><meta charset="UTF-8">${iframeStyles}</head><body>${content}</body></html>`;
-    
+
     // Create expanded view modal with size and zoom controls (same pattern as Creator's Notes)
     const expandModalHtml = `
         <div id="chubExpandModal" class="modal-overlay">
@@ -895,41 +895,41 @@ function openBrowseExpandedView(sectionId, label, iconClass) {
             </div>
         </div>
     `;
-    
+
     // Remove existing modal if any
     const existingModal = document.getElementById('chubExpandModal');
     if (existingModal) existingModal.remove();
-    
+
     document.body.insertAdjacentHTML('beforeend', expandModalHtml);
-    
+
     const expandModal = document.getElementById('chubExpandModal');
     const modalInner = document.getElementById('chubExpandModalInner');
     const iframe = document.getElementById('chubExpandIframe');
-    
+
     // Set iframe content
     iframe.srcdoc = iframeDoc;
-    
+
     // Size control handlers
     document.getElementById('chubExpandSizeControls').onclick = (e) => {
         const btn = e.target.closest('.display-control-btn[data-size]');
         if (!btn) return;
-        
+
         const size = btn.dataset.size;
         document.querySelectorAll('#chubExpandSizeControls .display-control-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         modalInner.dataset.size = size;
     };
-    
+
     // Zoom controls - apply to iframe body (same as Creator's Notes)
     let chubExpandZoom = 100;
     const zoomDisplay = document.getElementById('chubExpandZoomDisplay');
-    
+
     const updateZoom = (zoom) => {
         chubExpandZoom = Math.max(50, Math.min(200, zoom));
         zoomDisplay.textContent = `${chubExpandZoom}%`;
         iframe.contentDocument?.body?.style.setProperty('zoom', `${chubExpandZoom}%`);
     };
-    
+
     document.getElementById('chubExpandZoomControls').onclick = (e) => {
         const btn = e.target.closest('.display-control-btn[data-zoom]');
         if (!btn) return;
@@ -938,10 +938,10 @@ function openBrowseExpandedView(sectionId, label, iconClass) {
         else if (action === 'out') updateZoom(chubExpandZoom - 10);
         else if (action === 'reset') updateZoom(100);
     };
-    
+
     // Close handlers
     const closeExpandModal = () => expandModal.remove();
-    
+
     document.getElementById('chubExpandClose').onclick = closeExpandModal;
     expandModal.onclick = (e) => { if (e.target === expandModal) closeExpandModal(); };
 }
@@ -950,7 +950,7 @@ function openBrowseExpandedView(sectionId, label, iconClass) {
  * Reset per-section uncollapsed state on a browse char modal so each new
  * character preview starts fresh in collapse-all mode.
  */
-function resetBrowseSectionCollapseState(modal) {
+export function resetBrowseSectionCollapseState(modal) {
     if (!modal) return;
     modal.querySelectorAll('.browse-char-section.browse-section-uncollapsed')
         .forEach(section => section.classList.remove('browse-section-uncollapsed'));
@@ -959,7 +959,7 @@ window.resetBrowseSectionCollapseState = resetBrowseSectionCollapseState;
 
 // Alt greetings of the currently-open browse preview; browse views publish via CoreAPI.
 let _browseAltGreetings = null;
-function setBrowseAltGreetings(greetings) {
+export function setBrowseAltGreetings(greetings) {
     _browseAltGreetings = greetings;
 }
 window.setBrowseAltGreetings = setBrowseAltGreetings;
@@ -968,7 +968,7 @@ window.setBrowseAltGreetings = setBrowseAltGreetings;
  * Delegated click handler for browse section titles (expand modal).
  * Uses event delegation since sections are injected dynamically by provider browse views.
  */
-function initBrowseExpandButtons() {
+export function initBrowseExpandButtons() {
     document.addEventListener('click', (e) => {
         // Inline toggle chevron - expand/collapse section content in place
         const toggle = e.target.closest('.browse-section-inline-toggle');
@@ -1022,4 +1022,3 @@ function initBrowseExpandButtons() {
         openBrowseExpandedView(sectionId, label, iconClass);
     });
 }
-

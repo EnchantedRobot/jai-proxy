@@ -218,3 +218,225 @@ def test_media_bytes_unknown_card_is_404(client):
         files={"file": ("photo.png", _png_bytes(), "image/png")},
     )
     assert resp.status_code == 404
+
+
+# --------------------------------------------------------------------------
+# GET /media/status -- the archive-wide summary Bulk Localize reads instead
+# of one request per card (docs/PHASE_3C_PLAN.md §3).
+# --------------------------------------------------------------------------
+
+
+def test_media_status_omits_cards_with_no_gallery_folder(client):
+    body = client.get("/api/v1/media/status").json()
+    # Cleo has a gallery_id but no folder on disk yet -- "never downloaded",
+    # not a zeroed row.
+    assert "Cleo_33334444.png" not in body["cards"]
+
+
+def test_media_status_omits_cards_with_a_folder_but_no_manifest(client, populated_archive):
+    # Abbie's fixture gallery folder has files but no run has ever gone
+    # through the download route, so there is no .media.json yet.
+    body = client.get("/api/v1/media/status").json()
+    assert "Abbie_0d162f5f.png" not in body["cards"]
+
+
+def test_media_status_reflects_a_completed_run(client, populated_archive, stub_download_item):
+    client.post(
+        "/api/v1/characters/Abbie_0d162f5f.png/media",
+        json={"items": [{"url": "https://cdn.example.com/x/a.png"}]},
+    )
+    body = client.get("/api/v1/media/status").json()
+    entry = body["cards"]["Abbie_0d162f5f.png"]
+    assert entry["files"] == 1
+    assert entry["dead"] == 0
+    assert entry["complete"] is True
+    assert entry["last_run"] is not None
+
+
+def test_media_status_incomplete_when_last_run_had_errors(client, populated_archive, monkeypatch):
+    async def fake(client, gallery_dir, folder_name, *, url, filename_hint, prefix, index, index_state, manifest, ledger, thumbnail_store):
+        return media_writer.DownloadOutcome("error", url, reason="boom", permanent=False)
+
+    monkeypatch.setattr(v1.media_writer, "download_item", fake)
+    client.post(
+        "/api/v1/characters/Abbie_0d162f5f.png/media",
+        json={"items": [{"url": "https://cdn.example.com/x/bad.png"}]},
+    )
+    body = client.get("/api/v1/media/status").json()
+    assert body["cards"]["Abbie_0d162f5f.png"]["complete"] is False
+
+
+# --------------------------------------------------------------------------
+# POST /galleries/{folder}/thumbs/prune -- docs/PHASE_3C_PLAN.md §5, the
+# replacement for cl-helper's gallery-thumb-cleanup.
+# --------------------------------------------------------------------------
+
+
+def test_prune_thumbs_drops_orphans_and_keeps_live_ones(client, populated_archive):
+    folder = "Abbie_kzbYR2QbpncC"
+    gallery_dir = populated_archive["galleries"] / folder
+    live_files = [p.name for p in gallery_dir.iterdir() if p.is_file()]
+    assert live_files, "fixture gallery must have at least one file"
+    live_name = live_files[0]
+
+    thumb_dir = populated_archive["thumbs"] / "gallery" / folder
+    thumb_dir.mkdir(parents=True, exist_ok=True)
+    (thumb_dir / f"{live_name}_384.jpg").write_bytes(b"jpg")
+    (thumb_dir / "ghost.png_384.jpg").write_bytes(b"jpg")
+
+    resp = client.post(f"/api/v1/galleries/{folder}/thumbs/prune")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["folder"] == folder
+    assert body["removed"] == 1
+    assert (thumb_dir / f"{live_name}_384.jpg").is_file()
+    assert not (thumb_dir / "ghost.png_384.jpg").is_file()
+
+
+def test_prune_thumbs_unknown_folder_removes_nothing(client, populated_archive):
+    resp = client.post("/api/v1/galleries/NoSuchFolder_ABCDEFGHIJKL/thumbs/prune")
+    assert resp.status_code == 200
+    assert resp.json()["removed"] == 0
+
+
+# ------------------------------------------------------------------
+# POST /media/jobs -- 3C-2, the job runner (docs/PHASE_3C_PLAN.md §7)
+# ------------------------------------------------------------------
+
+
+def _poll_job(client, job_id: str, *, after: int = 0, timeout: float = 5.0) -> dict:
+    """Poll until the job leaves queued/running. The worker runs on the
+    TestClient's own portal loop, concurrently with these synchronous
+    requests, so a real (short) wait loop is the honest way to test it."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    body = {"state": "queued"}
+    while time.monotonic() < deadline:
+        resp = client.get(f"/api/v1/media/jobs/{job_id}", params={"after": after})
+        assert resp.status_code == 200
+        body = resp.json()
+        if body["state"] not in ("queued", "running"):
+            return body
+        time.sleep(0.01)
+    raise AssertionError(f"job {job_id} did not finish in time: {body}")
+
+
+def test_media_job_runs_in_the_background_and_writes_the_manifest(client, populated_archive, stub_download_item):
+    resp = client.post(
+        "/api/v1/media/jobs",
+        json={
+            "card_id": "Bella_11112222.png",
+            "items": [{"url": "https://cdn.example.com/x/pic.png"}],
+            "prefix": "localized_media",
+            "phase": "embedded",
+        },
+    )
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+    assert resp.json()["total"] == 1
+
+    body = _poll_job(client, job_id)
+    assert body["state"] == "done"
+    assert body["saved"] == 1
+    assert body["done"] == 1
+    assert body["events"][0]["status"] == "saved"
+    assert body["events"][0]["file"].startswith("localized_media_")
+
+    folder = populated_archive["galleries"] / "Bella_BBBBBBBBBBBB"
+    assert (folder / media_manifest.MANIFEST_NAME).is_file()
+
+
+def test_media_job_events_cursor_only_returns_new_items(client, populated_archive, stub_download_item):
+    resp = client.post(
+        "/api/v1/media/jobs",
+        json={
+            "card_id": "Bella_11112222.png",
+            "items": [{"url": "https://cdn.example.com/x/a.png"}, {"url": "https://cdn.example.com/x/b.png"}],
+        },
+    )
+    job_id = resp.json()["job_id"]
+    body = _poll_job(client, job_id)
+    assert body["total"] == 2
+    assert len(body["events"]) == 2
+
+    # Re-polling with the cursor the first call handed back yields nothing new.
+    resp = client.get(f"/api/v1/media/jobs/{job_id}", params={"after": body["next_cursor"]})
+    assert resp.json()["events"] == []
+
+
+def test_media_job_unknown_card_404s(client, populated_archive):
+    resp = client.post(
+        "/api/v1/media/jobs",
+        json={"card_id": "NoSuchCard.png", "items": [{"url": "https://cdn.example.com/x.png"}]},
+    )
+    assert resp.status_code == 404
+
+
+def test_media_job_unknown_job_id_404s(client, populated_archive):
+    resp = client.get("/api/v1/media/jobs/does-not-exist")
+    assert resp.status_code == 404
+
+
+def test_cancel_unknown_job_404s(client, populated_archive):
+    resp = client.post("/api/v1/media/jobs/does-not-exist/cancel")
+    assert resp.status_code == 404
+
+
+def test_cancel_stops_a_job_before_it_finishes_every_item(client, populated_archive, monkeypatch):
+    """A slow-item stub gives the test a window to cancel mid-run."""
+    import asyncio
+
+    calls: list[str] = []
+
+    async def slow_fake(client, gallery_dir, folder_name, *, url, filename_hint, prefix, index, index_state, manifest, ledger, thumbnail_store):
+        calls.append(url)
+        await asyncio.sleep(0.05)
+        outcome = media_writer.DownloadOutcome("saved", url, file=f"localized_media_{index}_x.webp", bytes=1)
+        media_manifest.record_saved(manifest, url, outcome.file, "deadbeef")
+        return outcome
+
+    monkeypatch.setattr(v1.media_writer, "download_item", slow_fake)
+
+    resp = client.post(
+        "/api/v1/media/jobs",
+        json={
+            "card_id": "Bella_11112222.png",
+            "items": [{"url": f"https://cdn.example.com/{i}.png"} for i in range(5)],
+        },
+    )
+    job_id = resp.json()["job_id"]
+
+    # Give the worker a moment to start, then cancel.
+    import time
+
+    time.sleep(0.06)
+    cancel_resp = client.post(f"/api/v1/media/jobs/{job_id}/cancel")
+    assert cancel_resp.status_code == 200
+
+    body = _poll_job(client, job_id)
+    assert body["state"] == "cancelled"
+    assert body["done"] < 5
+
+
+def test_list_media_jobs_filters_by_card_and_active(client, populated_archive, stub_download_item):
+    r1 = client.post(
+        "/api/v1/media/jobs",
+        json={"card_id": "Bella_11112222.png", "items": [{"url": "https://cdn.example.com/a.png"}]},
+    )
+    r2 = client.post(
+        "/api/v1/media/jobs",
+        json={"card_id": "Abbie_0d162f5f.png", "items": [{"url": "https://cdn.example.com/b.png"}]},
+    )
+    _poll_job(client, r1.json()["job_id"])
+    _poll_job(client, r2.json()["job_id"])
+
+    resp = client.get("/api/v1/media/jobs", params={"card_id": "Bella_11112222.png"})
+    assert resp.status_code == 200
+    jobs = resp.json()
+    assert len(jobs) == 1
+    assert jobs[0]["card_id"] == "Bella_11112222.png"
+    assert jobs[0]["events"] == []  # list view omits per-item events
+
+    resp = client.get("/api/v1/media/jobs", params={"active": True})
+    assert resp.json() == []

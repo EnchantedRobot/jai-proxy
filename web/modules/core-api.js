@@ -975,11 +975,6 @@ export function downloadCharacterMedia(character, folderName, options) {
     return window.downloadCharacterMedia?.(character, folderName, options);
 }
 
-/** Mark a character's media localization as complete (Files-API set). */
-export function markMediaLocalizationComplete(...args) {
-    return window.markMediaLocalizationComplete?.(...args);
-}
-
 /** Contribute a section to the topbar notifications dropdown. */
 export function registerNotificationSection(...args) {
     return window.registerNotificationSection?.(...args);
@@ -988,11 +983,6 @@ export function registerNotificationSection(...args) {
 /** Recompute the notifications button icon/badge/visibility from all sections. */
 export function refreshNotificationsUI(...args) {
     return window.refreshNotificationsUI?.(...args);
-}
-
-/** @returns {Set<string>} avatars with completed media localization */
-export function getCompletedMediaLocalizations(...args) {
-    return window.getCompletedMediaLocalizations?.(...args);
 }
 
 /**
@@ -1404,8 +1394,6 @@ export default {
     downloadViaServerRoute,
     downloadBytesViaServerRoute,
     downloadCharacterMedia,
-    markMediaLocalizationComplete,
-    getCompletedMediaLocalizations,
     registerNotificationSection,
     refreshNotificationsUI,
     downloadMediaToMemory,

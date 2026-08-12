@@ -38,4 +38,3 @@ window.saveWorldInfoData = async function() {
 window.listWorldInfoFiles = async function() {
     return [];
 };
-

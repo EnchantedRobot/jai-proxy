@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import logging
 import sys
@@ -15,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from proxy import chub_mapper, dashboard as dashboard_mod, datacat_mapper
 from proxy import janitor_mapper, saucepan_mapper
-from proxy.api import v1_router
+from proxy.api import v1, v1_router
 from proxy.api.datacat import router as datacat_router
 from proxy.avatar import AvatarFetcher
 from proxy.capture_store import CaptureStore
@@ -57,7 +58,17 @@ WEB_DIR = ROOT / "web"
 # and every call site below is a no-op then (see _record_download).
 DASHBOARD: dashboard_mod.Dashboard | None = None
 
-app = FastAPI(title="jai-proxy")
+
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    # Binds proxy/api/v1.py's `job_store` to the loop uvicorn is actually
+    # running on (docs/PHASE_3C_PLAN.md §7) -- module import happens before
+    # that loop exists, so this can't be done at module scope.
+    v1.job_store.bind(asyncio.get_running_loop())
+    yield
+
+
+app = FastAPI(title="jai-proxy", lifespan=_lifespan)
 
 # The archive's own contract: browse, download, export. Deliberately namespaced
 # under /api/v1 and deliberately not shaped like SillyTavern's /api -- see

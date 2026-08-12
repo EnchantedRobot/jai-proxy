@@ -28,6 +28,20 @@ let _notifyTimer = 0;
 // while every live char.avatar carries .png. The queue keys jobs by avatar
 // (live lookups, completed-set checks, deletion eviction), so normalize at
 // the boundary; this also heals entries persisted before the fix.
+// Which characters are already done -- read live from the archive's own
+// manifests (docs/PHASE_3C_PLAN.md §3), not a client-tracked completed set.
+async function fetchMediaStatus() {
+    try {
+        const resp = await fetch('/api/v1/media/status');
+        if (!resp.ok) return {};
+        const body = await resp.json();
+        return body?.cards || {};
+    } catch (e) {
+        CoreAPI.debugLog('[MediaDLQueue] /media/status fetch failed:', e?.message || e);
+        return {};
+    }
+}
+
 function canonicalAvatar(avatar) {
     const a = String(avatar || '');
     if (!a) return a;
@@ -287,7 +301,6 @@ async function runNext() {
             job.error = `${result?.totals?.errors || 0} download error(s)`;
         } else {
             job.state = 'done';
-            CoreAPI.markMediaLocalizationComplete(job.avatar);
         }
     } catch (e) {
         job.state = 'failed';
@@ -310,7 +323,7 @@ async function resumePersistedJobs() {
     const persisted = await loadQueueFile();
     CoreAPI.debugLog(`[MediaDLQueue] Resume check: ${persisted.length} persisted entr${persisted.length === 1 ? 'y' : 'ies'}`);
     if (!persisted.length) return;
-    const completed = CoreAPI.getCompletedMediaLocalizations() || new Set();
+    const mediaStatus = await fetchMediaStatus();
     const all = CoreAPI.getAllCharacters();
     let resumed = 0;
     for (const entry of persisted) {
@@ -319,7 +332,7 @@ async function resumePersistedJobs() {
             continue;
         }
         const avatar = canonicalAvatar(entry.avatar);
-        if (completed.has?.(avatar)) {
+        if (mediaStatus[avatar]?.complete) {
             CoreAPI.debugLog('[MediaDLQueue] Resume skip (already completed):', avatar);
             continue;
         }
