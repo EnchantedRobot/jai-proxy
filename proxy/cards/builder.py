@@ -15,6 +15,7 @@ from proxy.cards.naming import id_fragment, safe_filename
 from proxy.cards.avatar_image import normalize_avatar
 from proxy.config import settings
 from proxy.text.macros import MacroSanitizer
+from proxy.text.tags import normalize_tags
 from proxy.cards.models import CaptureRecord, CharacterBook, CharacterCardV3, ProfileFields
 
 def _gallery_id_on_disk(path: Path) -> Any | None:
@@ -116,7 +117,7 @@ class CardBuilder:
             alternate_greetings=alternate_greetings,
             creator=profile.creator,
             creator_notes=creator_notes,
-            tags=profile.tags,
+            tags=normalize_tags(profile.tags),
             character_book=book,
         )
         return card, warnings

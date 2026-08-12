@@ -1,37 +1,15 @@
 import json
 from pathlib import Path
 
-import pytest
 from bs4 import BeautifulSoup
 
-from proxy.text.html_md import clean_tag, html_to_md, normalize_quotes, serialize_md, tidy_text
+from proxy.text.html_md import html_to_md, normalize_quotes, serialize_md, tidy_text
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 
 def _load_character(name: str) -> dict:
     return json.loads((FIXTURES / "hampter" / f"{name}.json").read_text(encoding="utf-8"))
-
-
-# ---------------------------------------------------------------------------
-# clean_tag -- real emoji-prefixed tag chips (SillyTavern can't render emoji
-# in tags, so the JanitorAI tag names must be stripped down to plain words).
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "raw,expected",
-    [
-        ("👩‍🦰 Female", "Female"),
-        ("👤 AnyPOV", "AnyPOV"),
-        ("🧬 Demi-Human", "Demi-Human"),
-        ("#ottergirl", "ottergirl"),
-        ("  # slowburn", "slowburn"),
-        ("TheValentine", "TheValentine"),
-    ],
-)
-def test_clean_tag_strips_leading_emoji_and_hash(raw, expected):
-    assert clean_tag(raw) == expected
 
 
 # ---------------------------------------------------------------------------

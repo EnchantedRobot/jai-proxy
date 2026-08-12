@@ -38,6 +38,17 @@ def test_profile_fields_map_definition():
     assert "Female" in fields.tags
 
 
+def test_tags_normalized_through_the_shared_intake_pipeline():
+    # JannyAI's own to_profile_fields does no tag cleaning at all -- CardBuilder
+    # is the shared choke point that catches #/emoji/whitespace/case-dupes for
+    # this source. See docs/PHASE_5_TAGS_PLAN.md §2/§6 step 3.
+    data = load_data("abby")
+    data["tags"] = ["#wildwest", "👤 outlaw", "  slow   burn  ", "Femdom", "femdom"]
+    profile = mapper.to_profile_fields(data)
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+    assert card.tags == ["wildwest", "outlaw", "slow burn", "Femdom"]
+
+
 def test_creator_notes_are_dehtmled():
     data = load_data("abby")
     assert "<" in data["creator_notes"]  # raw JannyAI HTML in the source

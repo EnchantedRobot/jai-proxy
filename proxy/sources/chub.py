@@ -36,9 +36,9 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from proxy.text.html_md import clean_tag
 from proxy.text.notes_html import clean_creator_notes
 from proxy.text.macros import MacroSanitizer
+from proxy.text.tags import normalize_tags
 
 # Reconstruct the canonical Chub character URL from the card's full_path so an
 # imported card can record a source_url the way natively retrieved cards do.
@@ -184,14 +184,10 @@ def clean_card(
     # plainer notes flatten to markdown; then sanitize any macros in the prose.
     card["creator_notes"] = scrub(clean_creator_notes(card.get("creator_notes") or ""))
 
-    # tags: strip leading emoji / "#" SillyTavern can't render, drop any that
-    # clean down to nothing.
+    # tags: intake normalizer -- strip leading emoji/"#", collapse whitespace,
+    # drop empties, dedupe case-insensitively. See proxy/text/tags.py.
     if isinstance(card.get("tags"), list):
-        card["tags"] = [
-            cleaned
-            for cleaned in (clean_tag(t) for t in card["tags"] if isinstance(t, str))
-            if cleaned
-        ]
+        card["tags"] = normalize_tags(card["tags"])
 
     # Lorebook entry *content* carries the same macros; sanitize only the prose,
     # leaving keys / positions / probabilities / ids exactly as Chub wrote them.

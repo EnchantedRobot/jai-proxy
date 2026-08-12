@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from proxy.cards.builder import CardBuilder
 from proxy.sources import janitor as mapper
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "hampter"
@@ -70,6 +71,19 @@ def test_akane_maps_to_trusted_reference_metadata():
     assert fields.description.startswith(">Character Information:")
     assert fields.mes_example == ""  # example_dialogs is empty for this card
     assert fields.creator_notes.startswith("You're not dating yet.")
+
+
+def test_tags_normalized_through_the_shared_intake_pipeline():
+    # janitor's own tags() already strips emoji/#; CardBuilder is what also
+    # collapses whitespace and dedupes case-insensitively. See
+    # docs/PHASE_5_TAGS_PLAN.md §2/§6 step 3.
+    character = {
+        "tags": [{"name": "#wildwest"}, {"name": "👤 outlaw"}, {"name": "  slow   burn  "}],
+        "custom_tags": ["Femdom", "femdom"],
+    }
+    profile = mapper.to_profile_fields(character)
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+    assert card.tags == ["wildwest", "outlaw", "slow burn", "Femdom"]
 
 
 def test_chat_name_is_stripped():

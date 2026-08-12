@@ -349,6 +349,99 @@ def test_bulk_with_nothing_to_do_is_rejected(client):
     assert resp.status_code == 422
 
 
+# --- tag plan apply (corpus-wide) -------------------------------------------
+#
+# Different route from bulk tags above: a literal {rename, remove} plan is
+# applied over every card in the archive in one pass, not a selection. Cards:
+# Abbie=[Female, Vampire], Bella=[Male], Cleo=[Female].
+
+
+def test_apply_renames_across_every_card_with_the_tag(client, populated_archive):
+    resp = client.post("/api/v1/tags/apply", json={"rename": {"Female": "Vampiress"}})
+    assert resp.status_code == 200
+    assert resp.json()["changed"] == 2  # Abbie and Cleo, not Bella
+
+    assert read_card(populated_archive["characters"] / "Abbie_0d162f5f.png")["tags"] == [
+        "Vampiress", "Vampire",
+    ]
+    assert read_card(populated_archive["characters"] / "Cleo_33334444.png")["tags"] == ["Vampiress"]
+    assert read_card(populated_archive["characters"] / "Bella_11112222.png")["tags"] == ["Male"]
+
+
+def test_apply_removes_a_tag(client, populated_archive):
+    resp = client.post("/api/v1/tags/apply", json={"remove": ["Vampire"]})
+    assert resp.status_code == 200
+    assert resp.json()["changed"] == 1
+    assert read_card(populated_archive["characters"] / "Abbie_0d162f5f.png")["tags"] == ["Female"]
+
+
+def test_apply_matches_literally_not_case_insensitively(client, populated_archive):
+    """Unlike bulk remove, apply is a resolved plan -- literal string equality,
+    no casing normalization of its own. See docs/PHASE_5_TAGS_PLAN.md §5."""
+    resp = client.post("/api/v1/tags/apply", json={"remove": ["female"]})
+    assert resp.status_code == 200
+    assert resp.json() == {"changed": 0, "unchanged": 3, "failed": {}}
+
+
+def test_apply_dedupes_two_tags_renaming_onto_the_same_canonical(client, populated_archive):
+    """Abbie carries [Female, Vampire]; renaming both onto "Undead" must
+    collapse to a single tag, not two identical ones."""
+    resp = client.post(
+        "/api/v1/tags/apply",
+        json={"rename": {"Female": "Undead", "Vampire": "Undead"}},
+    )
+    assert resp.status_code == 200
+    assert read_card(populated_archive["characters"] / "Abbie_0d162f5f.png")["tags"] == ["Undead"]
+
+
+def test_apply_dedupes_a_rename_landing_on_a_tag_already_present(client, populated_archive):
+    """Abbie carries [Female, Vampire]; renaming Female -> Vampire must not
+    produce a duplicate."""
+    resp = client.post("/api/v1/tags/apply", json={"rename": {"Female": "Vampire"}})
+    assert resp.status_code == 200
+    assert read_card(populated_archive["characters"] / "Abbie_0d162f5f.png")["tags"] == ["Vampire"]
+
+
+def test_apply_does_not_rewrite_cards_the_plan_does_not_touch(client, populated_archive):
+    path = populated_archive["characters"] / "Bella_11112222.png"
+    before = path.stat().st_mtime_ns
+
+    resp = client.post("/api/v1/tags/apply", json={"remove": ["Female"]})
+    assert resp.json()["unchanged"] == 1  # Bella, untouched
+    assert path.stat().st_mtime_ns == before
+
+
+def test_apply_is_idempotent(client, populated_archive):
+    plan = {"rename": {"Female": "Vampiress"}}
+    first = client.post("/api/v1/tags/apply", json=plan).json()
+    assert first["changed"] == 2
+
+    second = client.post("/api/v1/tags/apply", json=plan).json()
+    assert second == {"changed": 0, "unchanged": 3, "failed": {}}
+
+
+def test_apply_reports_partial_failure_without_undoing_the_rest(client, populated_archive, monkeypatch):
+    from proxy.cards import edit
+
+    real_patch = edit.patch_card
+
+    def flaky(path, data):
+        if "Bella" in path.name:
+            raise edit.WriteError("simulated failure")
+        return real_patch(path, data)
+
+    monkeypatch.setattr(edit, "patch_card", flaky)
+    resp = client.post("/api/v1/tags/apply", json={"rename": {"Male": "Werewolf"}})
+    body = resp.json()
+    assert body["changed"] == 0
+    assert "Bella_11112222.png" in body["failed"]
+
+
+def test_apply_with_nothing_to_do_is_rejected(client):
+    resp = client.post("/api/v1/tags/apply", json={})
+    assert resp.status_code == 422
+
+
 # --- gallery writes ---------------------------------------------------------
 
 

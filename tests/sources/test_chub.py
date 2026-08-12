@@ -110,6 +110,17 @@ def test_tags_cleaned():
     assert all(t == t.strip() for t in cleaned["tags"])
 
 
+def test_tags_normalized_through_the_shared_intake_pipeline():
+    # A tag list carrying #, emoji, stray whitespace and a case-dupe -- the
+    # regression that would have caught the DataCat gap (Phase 5 plan §2/§6
+    # step 3). Chub is the one source that never builds a ProfileFields, so it
+    # needs its own coverage of proxy.text.tags.normalize_tags.
+    data = load_data("sakura_makoto")
+    data["tags"] = ["#wildwest", "👤 outlaw", "  slow   burn  ", "Femdom", "femdom"]
+    cleaned, _ = mapper.clean_card(data, MacroSanitizer(user_names=["USER"]))
+    assert cleaned["tags"] == ["wildwest", "outlaw", "slow burn", "Femdom"]
+
+
 def test_post_history_original_macro_not_warned():
     # {{original}} is a real ST macro that Chub cards carry in
     # post_history_instructions; it must not surface as an unresolved-macro

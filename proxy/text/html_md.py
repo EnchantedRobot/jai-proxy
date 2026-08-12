@@ -34,18 +34,6 @@ def tidy_text(s: str) -> str:
     return s.strip()
 
 
-def clean_tag(t: str) -> str:
-    """Strip a leading emoji / "#" / punctuation run from a tag chip's text
-    so "\U0001f469‍\U0001f9b0 Female" -> "Female", "#ottergirl" -> "ottergirl".
-    SillyTavern doesn't support emoji in tags, so the raw JanitorAI tag names
-    (which are emoji-prefixed) must be cleaned before they land on a card."""
-    t = re.sub(r"^[\s#]+", "", t)
-    i = 0
-    while i < len(t) and not t[i].isalnum():
-        i += 1
-    return t[i:].strip()
-
-
 # ---------------------------------------------------------------------------
 # Rich-text -> markdown serialization
 #

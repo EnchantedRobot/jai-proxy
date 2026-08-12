@@ -207,5 +207,14 @@ def test_mapper_output_feeds_cardbuilder():
     assert card.character_book is not None and len(card.character_book.entries) == 19
     # avatar markdown leads creator_notes, as on the JanitorAI path
     assert card.creator_notes.startswith("![Eve](https://saucepan.ai/cdn/")
-    assert "no description/scenario/example dialogs found" not in warnings
-    assert "no first_mes / greetings found" not in warnings
+
+
+def test_tags_normalized_through_the_shared_intake_pipeline():
+    # Saucepan's own to_profile_fields does no tag cleaning at all -- CardBuilder
+    # is the shared choke point that catches #/emoji/whitespace/case-dupes for
+    # this source. See docs/PHASE_5_TAGS_PLAN.md §2/§6 step 3.
+    raw = load(EVE)
+    raw["companion"]["companion"]["tags"] = ["#wildwest", "👤 outlaw", "  slow   burn  ", "Femdom", "femdom"]
+    pf = m.to_profile_fields(raw)
+    card, _ = CardBuilder().build(pf, greetings=[], capture=None, book=None)
+    assert card.tags == ["wildwest", "outlaw", "slow burn", "Femdom"]

@@ -99,6 +99,18 @@ def test_profile_fields_map_definition():
     assert "Royalty" in fields.tags
 
 
+def test_hash_prefixed_tags_are_normalized_through_to_the_built_card():
+    # The real Phase 5 gap: resolve_tag_names strips a leading emoji but not a
+    # leading "#" (tests/fixtures/datacat/raw_api_character_abbie.json and
+    # great_n_datacat.json both carry #wildwest/#outlaw). CardBuilder is the
+    # shared choke point that catches it -- see docs/PHASE_5_TAGS_PLAN.md §2.
+    data = load_data("abigail")
+    data["tags"] = ["#wildwest", "👤 outlaw", "  slow   burn  ", "Femdom", "femdom"]
+    profile = mapper.to_profile_fields(data)
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+    assert card.tags == ["wildwest", "outlaw", "slow burn", "Femdom"]
+
+
 def test_creator_notes_are_dehtmled():
     data = load_data("abigail")
     assert "<p>" in (data["creator_notes"])  # raw datacat HTML in the source

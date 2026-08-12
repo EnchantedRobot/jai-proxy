@@ -27,6 +27,8 @@ from proxy.api.schemas import (
     CardWriteIn,
     DeletedOut,
     GalleryOut,
+    TagsApplyIn,
+    TagsApplyOut,
 )
 from proxy.api.v1 import _shared
 from proxy.archive import catalog
@@ -437,6 +439,71 @@ def bulk_tags(body: BulkTagsIn) -> BulkTagsOut:
     if changed:
         catalog.index().refresh(force=True)
     return BulkTagsOut(changed=changed, unchanged=unchanged, failed=failed)
+
+
+@router.post("/tags/apply", response_model=TagsApplyOut, summary="Apply a tag rename/removal plan across the archive")
+def apply_tags(body: TagsApplyIn) -> TagsApplyOut:
+    """Apply a literal `{rename, remove}` plan to every card in the archive.
+
+    The plan is resolved client-side by the vendored tag-tools JS (`buildBuckets`
+    / `buildApplyPayload`) against a dictionary the user curated in the tag
+    manager -- this route makes no matching decisions of its own, only literal
+    string equality, which is what keeps "what you previewed is what lands on
+    disk" true. See docs/PHASE_5_TAGS_PLAN.md §5.
+
+    Different job from `POST /characters/tags`: that one adds/removes one tag
+    over a selection the caller names; this one applies a whole rename/removal
+    map over the entire archive in a single pass.
+
+    Same partial-success contract as the bulk route: no rollback, and
+    re-posting the same plan is a no-op (every card already reflects it, so
+    `changed` reports 0).
+    """
+    if not body.rename and not body.remove:
+        raise HTTPException(status_code=422, detail="give at least one rename or removal")
+
+    idx = _shared.index()
+    drop = {t for t in body.remove if t.strip()}
+    rename = {k: v for k, v in body.rename.items() if k.strip() and v.strip()}
+
+    changed = unchanged = 0
+    failed: dict[str, str] = {}
+    for record in idx.cards():
+        path = idx.root / record.filename
+        try:
+            _, data = edit.read_card(path)
+            current = [t for t in data.get("tags", []) if isinstance(t, str)]
+
+            mapped: list[str] = []
+            for tag in current:
+                if tag in drop:
+                    continue
+                mapped.append(rename.get(tag, tag))
+
+            # Two tags renaming onto the same canonical -- or a rename landing
+            # on a tag the card already carries -- must collapse to one,
+            # case-insensitively, keeping the first occurrence's casing.
+            deduped: list[str] = []
+            seen: set[str] = set()
+            for tag in mapped:
+                key = tag.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                deduped.append(tag)
+
+            if deduped == current:
+                unchanged += 1
+                continue
+            data["tags"] = deduped
+            edit.patch_card(path, data)
+            changed += 1
+        except edit.WriteError as exc:
+            failed[record.filename] = str(exc)
+
+    if changed:
+        catalog.index().refresh(force=True)
+    return TagsApplyOut(changed=changed, unchanged=unchanged, failed=failed)
 
 
 @router.get("/characters/{card_id}/png", summary="Download the card PNG")

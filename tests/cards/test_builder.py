@@ -62,6 +62,24 @@ def test_build_maps_greetings_to_first_mes_and_alternates():
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Tag normalization -- CardBuilder is the single choke point for the four
+# sources that build a ProfileFields (janitor, datacat, saucepan, jannyai);
+# see proxy/text/tags.py and docs/PHASE_5_TAGS_PLAN.md §2/§6 step 3. Chub
+# never goes through ProfileFields, so it gets its own test in test_chub.py.
+# ---------------------------------------------------------------------------
+
+
+def test_build_normalizes_tags_through_the_shared_pipeline():
+    profile = ProfileFields(
+        name="Test",
+        description="d",
+        tags=["#wildwest", "👤 outlaw", "  slow   burn  ", "Femdom", "femdom"],
+    )
+    card, _ = CardBuilder().build(profile, greetings=[], capture=None, book=None)
+    assert card.tags == ["wildwest", "outlaw", "slow burn", "Femdom"]
+
+
 def test_hidden_capture_fills_gap_when_dom_definition_empty():
     profile = ProfileFields(name="Lyra", description="", scenario="", mes_example="")
     capture = CaptureRecord(

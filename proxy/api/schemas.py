@@ -181,6 +181,33 @@ class BulkTagsOut(BaseModel):
     )
 
 
+class TagsApplyIn(BaseModel):
+    """A literal, corpus-wide tag rename/removal plan -- the apply half of the
+    tag manager (see docs/PHASE_5_TAGS_PLAN.md). The plan is resolved client-side
+    (vendored JS owns tag-matching semantics; the server makes no decisions of
+    its own here), so every key is an exact string match against a card's tags,
+    applied over every card in the archive rather than a selected subset -- the
+    different job `BulkTagsIn` covers.
+    """
+
+    rename: dict[str, str] = Field(
+        default={}, description="Exact card tag -> exact canonical it becomes."
+    )
+    remove: list[str] = Field(default=[], description="Exact card tags to drop.")
+
+
+class TagsApplyOut(BaseModel):
+    """What a plan apply did. Same partial-success contract as `BulkTagsOut`:
+    no rollback across a corpus-wide rewrite, so what worked stays worked."""
+
+    changed: int
+    unchanged: int
+    failed: dict[str, str] = Field(
+        default={},
+        description="Card id to the reason it could not be written. Partial success is normal and reported rather than rolled back.",
+    )
+
+
 class DeletedOut(BaseModel):
     """Where a delete put things. Paths, not booleans, because the whole point
     of binning rather than unlinking is that someone can go and get it back."""

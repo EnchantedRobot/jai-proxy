@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from proxy.text.html_md import clean_tag
+from proxy.text.tags import clean_tag
 from proxy.text.notes_html import clean_creator_notes
 from proxy.cards.models import ProfileFields
 
