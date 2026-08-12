@@ -33,19 +33,10 @@ const DEFAULT_SETTINGS = {
     janitoraiEmail: null,
     janitoraiPassword: null,
     janitoraiBrowserEndpoint: null,
-    // 'managed' lets cl-helper own a headless browser here, spawned lazily on first real use.
+    // 'managed' spawns a headless browser lazily on first real use.
     janitoraiBrowserMode: 'managed',
     janitoraiNsfw: false,
     janitoraiExtractOnUpdate: false,
-    botbooruToken: null,
-    botbooruUsername: null,
-    botbooruPassword: null,
-    botbooruTrackDownloads: true,
-    botbooruMinTokens: 0,
-    botbooruNsfw: false,
-    botbooruShowNsfl: false,
-    botbooruNsfwAccountSynced: false,
-    botbooruUseTagWeights: false,
     ctCookie: null,
 
     // ---- NSFW Toggles ----
