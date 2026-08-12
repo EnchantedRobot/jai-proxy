@@ -526,13 +526,9 @@ function setupSettingsModal() {
     
     // Media Localization
     const mediaLocalizationCheckbox = document.getElementById('settingsMediaLocalization');
-    const fixFilenamesCheckbox = document.getElementById('settingsFixFilenames');
     const includeProviderGalleryCheckbox = document.getElementById('settingsIncludeProviderGallery');
     const includeLorebookCheckbox = document.getElementById('settingsIncludeLorebook');
-    const fastFilenameSkipCheckbox = document.getElementById('settingsFastFilenameSkip');
-    const fastSkipValidateHeadersCheckbox = document.getElementById('settingsFastSkipValidateHeaders');
     const importMediaActionSelect = document.getElementById('settingsImportMediaAction');
-    const fastSkipValidateRow = document.getElementById('fastSkipValidateRow');
     const includeExternalGalleriesCheckbox = document.getElementById('settingsIncludeExternalGalleries');
     const galleryThumbnailsCheckbox = document.getElementById('settingsGalleryThumbnails');
     const galleryThumbPrewarmCheckbox = document.getElementById('settingsGalleryThumbPrewarm');
@@ -1530,24 +1526,14 @@ function setupSettingsModal() {
         if (mediaLocalizationCheckbox) {
             mediaLocalizationCheckbox.checked = getSetting('mediaLocalizationEnabled') !== false; // Default true
         }
-        if (fixFilenamesCheckbox) {
-            fixFilenamesCheckbox.checked = getSetting('fixFilenames') !== false; // Default true
-        }
         if (includeProviderGalleryCheckbox) {
             includeProviderGalleryCheckbox.checked = getSetting('includeProviderGallery') !== false;
         }
         if (includeLorebookCheckbox) {
             includeLorebookCheckbox.checked = getSetting('includeLorebook') || false;
         }
-        if (fastFilenameSkipCheckbox) {
-            fastFilenameSkipCheckbox.checked = getSetting('fastFilenameSkip') || false;
-            if (fastSkipValidateRow) fastSkipValidateRow.style.display = fastFilenameSkipCheckbox.checked ? '' : 'none';
-        }
         if (importMediaActionSelect) {
             importMediaActionSelect.value = getSetting('importMediaAction') || 'ask';
-        }
-        if (fastSkipValidateHeadersCheckbox) {
-            fastSkipValidateHeadersCheckbox.checked = getSetting('fastSkipValidateHeaders') || false;
         }
         if (includeExternalGalleriesCheckbox) {
             includeExternalGalleriesCheckbox.checked = getSetting('includeExternalGalleries') !== false;
@@ -1825,13 +1811,6 @@ function setupSettingsModal() {
         });
     }
     
-    // Fast skip sub-option visibility
-    if (fastFilenameSkipCheckbox && fastSkipValidateRow) {
-        fastFilenameSkipCheckbox.addEventListener('change', () => {
-            fastSkipValidateRow.style.display = fastFilenameSkipCheckbox.checked ? '' : 'none';
-        });
-    }
-
     // Thumbnail pre-warm sub-option visibility
     if (galleryThumbnailsCheckbox && galleryThumbPrewarmRow) {
         galleryThumbnailsCheckbox.addEventListener('change', () => {
@@ -2059,11 +2038,8 @@ function setupSettingsModal() {
             showNameToggle: showNameToggleCheckbox ? showNameToggleCheckbox.checked : true,
             highlightColor: newHighlightColor,
             mediaLocalizationEnabled: mediaLocalizationCheckbox ? mediaLocalizationCheckbox.checked : false,
-            fixFilenames: fixFilenamesCheckbox ? fixFilenamesCheckbox.checked : false,
             includeProviderGallery: includeProviderGalleryCheckbox ? includeProviderGalleryCheckbox.checked : false,
             includeLorebook: includeLorebookCheckbox ? includeLorebookCheckbox.checked : false,
-            fastFilenameSkip: fastFilenameSkipCheckbox ? fastFilenameSkipCheckbox.checked : false,
-            fastSkipValidateHeaders: fastSkipValidateHeadersCheckbox ? fastSkipValidateHeadersCheckbox.checked : false,
             importMediaAction: importMediaActionSelect ? (importMediaActionSelect.value || 'ask') : 'ask',
             includeExternalGalleries: includeExternalGalleriesCheckbox ? includeExternalGalleriesCheckbox.checked : true,
             galleryThumbnails: galleryThumbnailsCheckbox ? galleryThumbnailsCheckbox.checked : true,

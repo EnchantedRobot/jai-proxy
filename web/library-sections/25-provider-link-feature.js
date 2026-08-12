@@ -625,9 +625,7 @@ async function downloadLinkedGallery() {
     
     try {
         const characterName = getCharacterName(activeChar, 'unknown');
-        // Use character object to get unique folder name if available
-        const folderName = getGalleryFolderName(activeChar);
-        const result = await galleryProvider.downloadGallery(linkInfo, folderName, {});
+        const result = await galleryProvider.downloadGallery(linkInfo, activeChar.avatar, {});
         
         if (result.success > 0) {
             showToast(`Downloaded ${result.success} gallery image${result.success > 1 ? 's' : ''}`, 'success');

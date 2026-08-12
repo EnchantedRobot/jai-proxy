@@ -214,9 +214,10 @@ with it.
 
 ### Everything else
 
-Untouched apart from the trim. `modules/batch-transfer.js` and
-`modules/media-dedup.js` still address `/user/images/...`, but they reach it
-through `fetch()`, so `archive-api.js` handles them and no edit is needed.
+Untouched apart from the trim. `modules/batch-transfer.js` still addresses
+`/user/images/...`, but it reaches it through `fetch()`, so `archive-api.js`
+handles it and no edit is needed. `modules/media-dedup.js` is gone as of
+Phase 3C step 5 — dedup and the dead-URL ledger moved server-side.
 
 ## Verifying a change
 
@@ -377,14 +378,13 @@ trips for a 500-card selection, against one request now.
 - **The shared LLM client is dead code.** `lorebook-manager` was its last live
   consumer and went in Phase 3. ~250 lines in `library.js`, still exported
   through `core-api.js`, reachable by nothing.
-- **Some frontend state still lives in `localStorage`.** Filter presets, the
-  media-dedup ledger, playlists — everything the frontend stores as a file under
-  `user/files/`. The settings blob has moved to `data/settings.json` (above);
-  this is the remainder, and it is origin-keyed with the same consequences. The
-  ~5 MB quota is a real limit for the ledger on a large library; a write that
-  would overflow fails loudly rather than truncating. Moving it beside the
-  settings is the obvious next step — it was left out because the settings were
-  urgent (they hold credentials that exist nowhere else) and a ledger rebuilds.
+- **Some frontend state still lives in `localStorage`.** Filter presets,
+  playlists — everything the frontend stores as a file under `user/files/`.
+  The settings blob has moved to `data/settings.json` (above); this is the
+  remainder, and it is origin-keyed with the same consequences. The media
+  dedup/dead-URL ledger that used to be the largest blob here moved
+  server-side in Phase 3C step 5 (`proxy/media_manifest.py`), so it no longer
+  counts against the ~5 MB quota.
 - **Dead provider settings keys remain in `DEFAULT_SETTINGS`.**
   `pygmalion*`, `wyvern*`, `botbooru*`, `saucepan*`, `ctCookie` and the
   `janitorai*` pair are still declared and still written into

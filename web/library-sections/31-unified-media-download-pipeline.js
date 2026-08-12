@@ -110,22 +110,24 @@ async function downloadCharacterMedia(character, folderName, options = {}) {
         return result;
     }
 
-    // Build shared dedup state once
-    const dedupState = await buildDedupState(folderName);
+    // The card's own archive id -- every phase below downloads through the
+    // server route, which resolves the gallery folder from this itself
+    // (docs/PHASE_3C_PLAN.md §3), so it's what the phases need, not folderName.
+    const cardId = character.avatar;
 
-    const sharedOpts = { shouldAbort, abortSignal: signal, dedupState };
+    const sharedOpts = { shouldAbort, abortSignal: signal };
 
     // Phase 1: Embedded media
     if (hasEmbedded && !isAborted()) {
         onPhaseStart?.('embedded', { count: embeddedUrls.length });
-        const r = await downloadEmbeddedMediaForCharacter(folderName, embeddedUrls, {
+        const r = await downloadEmbeddedMediaForCharacter(cardId, embeddedUrls, {
             ...sharedOpts,
             prefix: 'localized_media',
+            phase: 'embedded',
             onProgress: onProgress ? (cur, tot) => onProgress('embedded', cur, tot) : undefined,
-            onLog,
-            onLogUpdate
+            onLog
         });
-        result.embedded = { success: r.success, skipped: r.skipped, errors: r.errors, renamed: r.renamed || 0, filenameSkipped: r.filenameSkipped || 0 };
+        result.embedded = { success: r.success, skipped: r.skipped, errors: r.errors, renamed: 0, filenameSkipped: 0 };
         onPhaseEnd?.('embedded', result.embedded);
         if (r.aborted) { result.aborted = true; return sumTotals(result); }
     }
@@ -133,14 +135,14 @@ async function downloadCharacterMedia(character, folderName, options = {}) {
     // Phase 2: Lorebook media
     if (hasLorebook && !isAborted()) {
         onPhaseStart?.('lorebook', { count: lorebookUrls.length });
-        const r = await downloadEmbeddedMediaForCharacter(folderName, lorebookUrls, {
+        const r = await downloadEmbeddedMediaForCharacter(cardId, lorebookUrls, {
             ...sharedOpts,
             prefix: 'lorebook_media',
+            phase: 'lorebook',
             onProgress: onProgress ? (cur, tot) => onProgress('lorebook', cur, tot) : undefined,
-            onLog,
-            onLogUpdate
+            onLog
         });
-        result.lorebook = { success: r.success, skipped: r.skipped, errors: r.errors, renamed: r.renamed || 0, filenameSkipped: r.filenameSkipped || 0 };
+        result.lorebook = { success: r.success, skipped: r.skipped, errors: r.errors, renamed: 0, filenameSkipped: 0 };
         onPhaseEnd?.('lorebook', result.lorebook);
         if (r.aborted) { result.aborted = true; return sumTotals(result); }
     }
@@ -151,11 +153,10 @@ async function downloadCharacterMedia(character, folderName, options = {}) {
         result.providerGallery.providerName = providerLabel;
         onPhaseStart?.('providerGallery', { provider: providerLabel, linkInfo: providerLinkInfo });
         try {
-            const r = await galleryProvider.downloadGallery(providerLinkInfo, folderName, {
+            const r = await galleryProvider.downloadGallery(providerLinkInfo, cardId, {
                 ...sharedOpts,
                 onProgress: onProgress ? (cur, tot) => onProgress('providerGallery', cur, tot) : undefined,
-                onLog,
-                onLogUpdate
+                onLog
             });
             result.providerGallery.success = r.success || 0;
             result.providerGallery.skipped = r.skipped || 0;
@@ -175,12 +176,11 @@ async function downloadCharacterMedia(character, folderName, options = {}) {
     // Phase 4: External galleries
     if (hasExtGallery && !isAborted()) {
         onPhaseStart?.('extGallery', { count: galleryPageUrls.length });
-        const r = await downloadExternalGalleryForCharacter(character, folderName, {
+        const r = await downloadExternalGalleryForCharacter(character, cardId, {
             ...sharedOpts,
             galleryPageUrls,
             onProgress: onProgress ? (cur, tot) => onProgress('extGallery', cur, tot) : undefined,
-            onLog,
-            onLogUpdate
+            onLog
         });
         result.extGallery = { success: r.success || 0, skipped: r.skipped || 0, errors: r.errors || 0, renamed: 0, filenameSkipped: 0 };
         onPhaseEnd?.('extGallery', result.extGallery);
@@ -188,26 +188,7 @@ async function downloadCharacterMedia(character, folderName, options = {}) {
     }
 
     if (isAborted()) result.aborted = true;
-    const finalResult = sumTotals(result);
-
-    // Persist anything the ledger learned this run
-    await window.MediaDedup?.flushLedger();
-
-    // Pre-warm thumbnails for any newly saved images
-    if (finalResult.totals.success > 0) {
-        try {
-            const safeFolderName = sanitizeFolderName(folderName);
-            const listResp = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: safeFolderName, type: 7 });
-            if (listResp.ok) {
-                const files = await listResp.json();
-                if (Array.isArray(files) && files.length > 0) {
-                    prewarmThumbnails(safeFolderName, files);
-                }
-            }
-        } catch { /* non-critical */ }
-    }
-
-    return finalResult;
+    return sumTotals(result);
 }
 
 function sumTotals(result) {

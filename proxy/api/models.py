@@ -10,7 +10,7 @@ make an incidental change to a build payload look like a breaking API change.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -246,3 +246,65 @@ class StatsOut(BaseModel):
     archive_dir: str
     thumbs: ThumbStatsOut
     index: IndexStatsOut
+
+
+class MediaItemIn(BaseModel):
+    """One URL for the media download route to fetch. `filename` is an
+    extractor-supplied real name, when the caller has one -- it beats
+    guessing from the URL, which is worthless for synthetic sources like
+    `mega://folder/handle`."""
+
+    url: str
+    filename: str | None = Field(default=None, description="Extractor-supplied real filename, if known.")
+
+
+class MediaDownloadIn(BaseModel):
+    """`POST /characters/{id}/media` body -- docs/PHASE_3C_PLAN.md §3."""
+
+    items: list[MediaItemIn]
+    prefix: str = Field(
+        default="localized_media",
+        description="Filename prefix and dedupe-priority class: localized_media, lorebook_media, extgallery, or <provider>gallery.",
+    )
+    phase: str = Field(default="embedded", description="Label only, recorded in the manifest's run history.")
+
+
+class MediaManifestFileOut(BaseModel):
+    file: str
+    sha256: str
+    at: str
+
+
+class MediaManifestDeadOut(BaseModel):
+    reason: str
+    attempts: int
+    at: str
+
+
+class MediaManifestRunOut(BaseModel):
+    at: str
+    phase: str
+    saved: int
+    skipped: int
+    errors: int
+
+
+class MediaManifestOut(BaseModel):
+    """A gallery's `.media.json`, as-is -- the client renders it directly
+    rather than the server reshaping it into a second view."""
+
+    folder: str
+    files: dict[str, MediaManifestFileOut]
+    dead: dict[str, MediaManifestDeadOut]
+    runs: list[MediaManifestRunOut]
+
+
+class MediaBytesOut(BaseModel):
+    """`POST /characters/{id}/media/bytes` response -- one item, not a batch,
+    so no NDJSON framing (docs/PHASE_3C_PLAN.md §6, the browser-fetch door for
+    MEGA/Pixiv)."""
+
+    status: Literal["saved", "skipped", "error"]
+    file: str | None = None
+    reason: str | None = None
+    bytes: int | None = None

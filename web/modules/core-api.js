@@ -921,23 +921,6 @@ export function embedCharacterDataInPng(pngData, charData) {
 // ========================================
 
 /**
- * Get existing file hashes for a gallery folder (dedup check)
- * @param {string} folderName - Gallery folder name
- * @returns {Promise<Map>} Map of hash → filename
- */
-export function getExistingFileHashes(folderName) {
-    return window.getExistingFileHashes?.(folderName) || Promise.resolve(new Map());
-}
-
-/**
- * @param {string} folderName
- * @returns {Promise<Map<string, {fileName: string, localPath: string}>>}
- */
-export function getExistingFileIndex(folderName) {
-    return window.getExistingFileIndex?.(folderName) || Promise.resolve(new Map());
-}
-
-/**
  * @param {string} url
  * @returns {string}
  */
@@ -954,12 +937,31 @@ export function sanitizeMediaFilename(...args) {
 }
 
 /**
- * Build shared dedup state for a gallery folder. Call once, pass to all download phases.
- * @param {string} folderName
- * @returns {Promise<Object>}
+ * Batch-download URLs through the server's media pipeline -- the download
+ * route's thin client (docs/PHASE_3C_PLAN.md §3, step 4/5).
+ * @param {string} cardId
+ * @param {{url: string, filename?: string}[]} items
+ * @param {string} prefix
+ * @param {string} phase
+ * @param {Object} [options]
+ * @returns {Promise<{success: number, skipped: number, errors: number, aborted: boolean}>}
  */
-export function buildDedupState(folderName) {
-    return window.buildDedupState?.(folderName);
+export function downloadViaServerRoute(cardId, items, prefix, phase, options) {
+    return window.downloadViaServerRoute?.(cardId, items, prefix, phase, options)
+        || Promise.resolve({ success: 0, skipped: 0, errors: 0, aborted: false });
+}
+
+/**
+ * Save one already-fetched media item through the server's second entry
+ * door (MEGA/Pixiv -- docs/PHASE_3C_PLAN.md §6).
+ * @param {string} cardId
+ * @param {{url: string, filename?: string, arrayBuffer: ArrayBuffer, contentType?: string}} item
+ * @param {string} prefix
+ * @returns {Promise<{status: string, file?: string, reason?: string, bytes?: number}>}
+ */
+export function downloadBytesViaServerRoute(cardId, item, prefix) {
+    return window.downloadBytesViaServerRoute?.(cardId, item, prefix)
+        || Promise.resolve({ status: 'error', reason: 'download bridge unavailable' });
 }
 
 /**
@@ -1397,11 +1399,10 @@ export default {
     embedCharacterDataInPng,
     
     // Gallery Media Pipeline
-    getExistingFileHashes,
-    getExistingFileIndex,
     extractSanitizedUrlName,
     sanitizeMediaFilename,
-    buildDedupState,
+    downloadViaServerRoute,
+    downloadBytesViaServerRoute,
     downloadCharacterMedia,
     markMediaLocalizationComplete,
     getCompletedMediaLocalizations,

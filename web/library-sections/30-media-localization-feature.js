@@ -35,322 +35,157 @@ function extractSanitizedUrlName(url) {
     }
 }
 
-// Index build lives in modules/media-dedup.js (fork-local). Without it we return
-// an empty index, which just means every file falls through to the hash path.
-async function getExistingFileIndex(folderName) {
-    if (!window.MediaDedup) {
-        console.warn('[Localize] MediaDedup module unavailable; name-based skip disabled');
-        return new Map();
+/**
+ * Batch-download URLs through the server's media pipeline -- guard, fetch,
+ * sniff, WebP-normalize, dedupe, write, thumbnail, manifest, all server side
+ * now (docs/PHASE_3C_PLAN.md §3, step 4). Streams NDJSON and maps each
+ * finished item onto one `onLog` line, so the calling UI (log panel,
+ * progress bar) doesn't change even though the per-item "Checking..." /
+ * "Saving..." pending states are gone -- there's nothing to show between
+ * request and result once the fetch itself moved server side.
+ * @param {string} cardId - the card's archive id (character.avatar)
+ * @param {{url: string, filename?: string}[]} items
+ * @param {string} prefix - 'localized_media' | 'lorebook_media' | 'extgallery' | '{provider}gallery'
+ * @param {string} phase - label only, recorded in the manifest's run history
+ * @param {Object} [options]
+ * @param {function} [options.onLog] - (message, status) => void
+ * @param {function} [options.onProgress] - (current, total) => void
+ * @param {function} [options.shouldAbort] - () => boolean
+ * @param {AbortSignal} [options.abortSignal]
+ * @returns {Promise<{success: number, skipped: number, errors: number, aborted: boolean}>}
+ */
+async function downloadViaServerRoute(cardId, items, prefix, phase, options = {}) {
+    const { onLog, onProgress, shouldAbort, abortSignal } = options;
+
+    if (!items || items.length === 0) {
+        return { success: 0, skipped: 0, errors: 0, aborted: false };
     }
-    return window.MediaDedup.buildFileIndex(folderName);
+
+    let success = 0, skipped = 0, errors = 0, done = 0;
+    const total = items.length;
+
+    let response;
+    try {
+        response = await fetch(`/api/v1/characters/${encodeURIComponent(cardId)}/media`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                items: items.map(i => ({ url: i.url, filename: i.filename || null })),
+                prefix,
+                phase
+            }),
+            signal: abortSignal
+        });
+    } catch (err) {
+        if (err.name === 'AbortError') return { success: 0, skipped: 0, errors: 0, aborted: true };
+        if (onLog) onLog(`Download request failed: ${err.message}`, 'error');
+        return { success: 0, skipped: 0, errors: items.length, aborted: false };
+    }
+
+    if (!response.ok || !response.body) {
+        const text = await response.text().catch(() => '');
+        if (onLog) onLog(`Download request failed: HTTP ${response.status} ${text}`, 'error');
+        return { success: 0, skipped: 0, errors: items.length, aborted: false };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let aborted = false;
+
+    const handleLine = (line) => {
+        if (!line.trim()) return;
+        const evt = JSON.parse(line);
+        if (evt.type !== 'item') return;
+        done++;
+        const displayUrl = evt.url.length > 60 ? evt.url.substring(0, 60) + '...' : evt.url;
+        if (evt.status === 'saved') {
+            success++;
+            if (onLog) onLog(`Saved: ${evt.file}`, 'success');
+        } else if (evt.status === 'skipped') {
+            skipped++;
+            if (evt.file) {
+                if (onLog) onLog(`Skipped (${evt.reason || 'already have it'}): ${evt.file}`, 'success');
+            } else {
+                if (onLog) onLog(`Unreachable, skipping: ${displayUrl}${evt.reason ? ` (${evt.reason})` : ''}`, 'info');
+            }
+        } else {
+            errors++;
+            if (onLog) onLog(`Failed: ${displayUrl} - ${evt.reason || 'unknown error'}`, 'error');
+        }
+        if (onProgress) onProgress(done, total);
+    };
+
+    while (true) {
+        if ((shouldAbort && shouldAbort()) || abortSignal?.aborted) {
+            aborted = true;
+            try { await reader.cancel(); } catch {}
+            break;
+        }
+        const { done: streamDone, value } = await reader.read();
+        if (streamDone) break;
+        buffer += decoder.decode(value, { stream: true });
+        let newlineIdx;
+        while ((newlineIdx = buffer.indexOf('\n')) >= 0) {
+            handleLine(buffer.slice(0, newlineIdx));
+            buffer = buffer.slice(newlineIdx + 1);
+        }
+    }
+    if (!aborted && buffer.trim()) handleLine(buffer);
+
+    return { success, skipped, errors, aborted };
 }
 
 /**
- * Build shared dedup state for a gallery folder. Call once per character, pass to all download phases.
- * @param {string} folderName
- * @returns {Promise<{fileNameIndex: Map|null, hashMap: Map|null, ensureHashMap: function, useFastSkip: boolean, validateHeaders: boolean}>}
+ * Save one already-fetched media item through the server's second entry door
+ * (docs/PHASE_3C_PLAN.md §6, "one writer, two entry doors") -- for MEGA's
+ * AES-CTR decrypt and Pixiv's session-proxied fetch, which have to happen in
+ * the browser, but still need sniff/normalize/dedupe/write/thumbnail/
+ * manifest applied exactly the way a server-fetched item does.
+ * @param {string} cardId
+ * @param {{url: string, filename?: string, arrayBuffer: ArrayBuffer, contentType?: string}} item
+ * @param {string} prefix
+ * @returns {Promise<{status: 'saved'|'skipped'|'error', file?: string, reason?: string, bytes?: number}>}
  */
-async function buildDedupState(folderName) {
-    const useFastSkip = getSetting('fastFilenameSkip') || false;
-    const validateHeaders = useFastSkip && (getSetting('fastSkipValidateHeaders') || false);
+async function downloadBytesViaServerRoute(cardId, item, prefix) {
+    try {
+        const form = new FormData();
+        const blob = new Blob([item.arrayBuffer], { type: item.contentType || 'application/octet-stream' });
+        form.append('file', blob, item.filename || 'media');
+        form.append('url', item.url);
+        if (item.filename) form.append('filename', item.filename);
+        form.append('prefix', prefix);
 
-    // Needed by every phase's pre-download dead-URL check.
-    await window.MediaDedup?.loadLedger();
-
-    let fileNameIndex = null;
-    let hashMap = null;
-
-    if (useFastSkip) {
-        fileNameIndex = await getExistingFileIndex(folderName);
-        debugLog(`[DedupState] Fast skip: ${fileNameIndex.size} indexed files for ${folderName}`);
-    } else {
-        hashMap = await getExistingFileHashes(folderName);
-        debugLog(`[DedupState] Hash map: ${hashMap.size} entries for ${folderName}`);
-    }
-
-    async function ensureHashMap() {
-        if (!hashMap) {
-            hashMap = await getExistingFileHashes(folderName);
-            debugLog(`[DedupState] Lazy hash map built: ${hashMap.size} entries for ${folderName}`);
+        const resp = await fetch(`/api/v1/characters/${encodeURIComponent(cardId)}/media/bytes`, {
+            method: 'POST',
+            body: form
+        });
+        if (!resp.ok) {
+            const text = await resp.text().catch(() => '');
+            return { status: 'error', reason: `HTTP ${resp.status} ${text}` };
         }
-        return hashMap;
+        return await resp.json();
+    } catch (err) {
+        return { status: 'error', reason: err.message || String(err) };
     }
-
-    return { fileNameIndex, hashMap, ensureHashMap, useFastSkip, validateHeaders };
 }
 
 /**
  * Download embedded media for a character (core function used by both localize button and import summary)
- * @param {string} folderName - The gallery folder name (use getGalleryFolderName() for unique folders)
+ * @param {string} cardId - The card's archive id (character.avatar)
  * @param {string[]} mediaUrls - Array of URLs to download
  * @param {Object} options - Optional callbacks for progress/logging
- * @returns {Promise<{success: number, skipped: number, errors: number, renamed: number}>}
+ * @returns {Promise<{success: number, skipped: number, errors: number}>}
  */
-async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options = {}) {
-    const { onProgress, onLog, onLogUpdate, shouldAbort, abortSignal, prefix = 'localized_media', dedupState: externalDedup, downloadFnMap, nameHints } = options;
-    
-    let successCount = 0;
-    let errorCount = 0;
-    let skippedCount = 0;
-    let renamedCount = 0;
-    
+async function downloadEmbeddedMediaForCharacter(cardId, mediaUrls, options = {}) {
+    const { onProgress, onLog, shouldAbort, abortSignal, prefix = 'localized_media', phase = 'embedded', nameHints } = options;
+
     if (!mediaUrls || mediaUrls.length === 0) {
-        return { success: 0, skipped: 0, errors: 0, renamed: 0, aborted: false };
+        return { success: 0, skipped: 0, errors: 0, aborted: false };
     }
-    
-    // Use shared dedup state if provided, otherwise build our own
-    const dedup = externalDedup || await buildDedupState(folderName);
-    const { useFastSkip, validateHeaders, ensureHashMap } = dedup;
-    let { fileNameIndex } = dedup;
-    const MD = window.MediaDedup;
-    
-    let startIndex = Date.now(); // Use timestamp as start index for unique filenames
-    let filenameSkippedCount = 0;
-    
-    for (let i = 0; i < mediaUrls.length; i++) {
-        // Check for abort signal
-        if ((shouldAbort && shouldAbort()) || abortSignal?.aborted) {
-            return { success: successCount, skipped: skippedCount, errors: errorCount, renamed: renamedCount, filenameSkipped: filenameSkippedCount, aborted: true };
-        }
-        
-        const url = mediaUrls[i];
-        const fileIndex = startIndex + i;
-        
-        // Extractors resolve a real filename; it beats guessing from the URL,
-        // which is worthless for synthetic ones like mega://folder/handle.
-        const nameHint = nameHints?.get(url) || '';
-        // '' means "no usable hint" — saveMediaFromMemory keeps its URL-derived name
-        const saveName = MD?.saveNameFor(url, nameHint) || '';
 
-        // Truncate URL for display
-        const displayUrl = url.length > 60 ? url.substring(0, 60) + '...' : url;
-        const logEntry = onLog ? onLog(`Checking ${displayUrl}`, 'pending') : null;
-        
-        // Name match against what's already on disk — before any bytes move.
-        // Runs ahead of the dead check so a file we already hold logs as a
-        // filename match even if its source has since gone away.
-        if (useFastSkip && fileNameIndex && MD) {
-            const match = await MD.findExistingFile({ url, filename: nameHint }, {
-                index: fileNameIndex,
-                prefix,
-                validateHeaders,
-                fixFilenames: getSetting('fixFilenames') !== false,
-            });
-            if (match) {
-                skippedCount++;
-                filenameSkippedCount++;
-                if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (filename match): ${match.fileName}`, 'success');
-                if (onProgress) onProgress(i + 1, mediaUrls.length);
-                continue;
-            }
-        }
-
-        // Known-dead URL — never spend a request on it again. Counted as skipped,
-        // not failed: there is nothing to retry and nothing the user can fix.
-        if (MD?.isDead(url)) {
-            skippedCount++;
-            if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Unreachable, skipping: ${displayUrl} (${MD.deadReason(url)})`, 'info');
-            if (onProgress) onProgress(i + 1, mediaUrls.length);
-            continue;
-        }
-        
-        // Download to memory first to check hash (with 30s timeout)
-        const customDownloadFn = downloadFnMap?.get(url);
-        let downloadResult;
-        if (customDownloadFn) {
-            try {
-                downloadResult = await customDownloadFn(abortSignal);
-            } catch (err) {
-                if (err.name === 'AbortError' || err.name === 'TimeoutError') {
-                    return { success: successCount, skipped: skippedCount, errors: errorCount, renamed: renamedCount, filenameSkipped: filenameSkippedCount, aborted: true };
-                }
-                downloadResult = { success: false, error: err.message };
-            }
-        } else {
-            downloadResult = await downloadMediaToMemory(url, 30000, abortSignal);
-        }
-        
-        if (!downloadResult.success) {
-            // A 404 is not a retryable error: bank it so this character can
-            // still reach "complete" instead of failing forever.
-            const failure = MD?.recordFailure(url, MD.classifyFailure(downloadResult));
-            if (failure?.dead) {
-                skippedCount++;
-                if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Unreachable, giving up: ${displayUrl} - ${downloadResult.error}`, 'info');
-            } else {
-                errorCount++;
-                if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Failed: ${displayUrl} - ${downloadResult.error}`, 'error');
-            }
-            downloadResult = null;
-            if (onProgress) onProgress(i + 1, mediaUrls.length);
-            continue;
-        }
-        MD?.recordSuccess(url);
-        
-        // Calculate hash of downloaded content
-        const hashMap = await ensureHashMap();
-        const contentHash = await calculateHash(downloadResult.arrayBuffer);
-        
-        const existingFile = hashMap.get(contentHash);
-        if (existingFile) {
-            // File exists - check if we should rename it
-            // Always rename provider gallery files (e.g. {provider}gallery_*) to localized_media_* (embedded takes precedence)
-            // Also rename files that don't follow localized_media_* naming convention
-            // Also rename if extension doesn't match actual content type (fixes corrupted files)
-            const isProviderGalleryFile = (window.ProviderRegistry?.getAllProviders() || [])
-                .some(p => existingFile.fileName.startsWith(p.galleryFilePrefix + '_'));
-            const isAlreadyLocalized = existingFile.fileName.startsWith('localized_media_') || existingFile.fileName.startsWith('lorebook_media_') || existingFile.fileName.startsWith('extgallery_');
-            const hasCorrectPrefix = existingFile.fileName.startsWith(prefix + '_');
-            
-            // Check if extension matches detected content type
-            let hasWrongExtension = false;
-            if (downloadResult.contentType && isAlreadyLocalized) {
-                const currentExt = existingFile.fileName.includes('.') 
-                    ? existingFile.fileName.substring(existingFile.fileName.lastIndexOf('.') + 1).toLowerCase()
-                    : '';
-                const expectedExtMap = {
-                    'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif',
-                    'image/bmp': 'bmp', 'image/svg+xml': 'svg',
-                    'video/mp4': 'mp4', 'video/webm': 'webm',
-                    'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/wav': 'wav', 'audio/ogg': 'ogg',
-                    'audio/flac': 'flac', 'audio/aac': 'aac', 'audio/mp4': 'm4a'
-                };
-                const expectedExt = expectedExtMap[downloadResult.contentType];
-                // Check if current extension mismatches expected (e.g., audio saved as .png)
-                if (expectedExt && currentExt !== expectedExt) {
-                    // Special case: jpg vs jpeg are equivalent
-                    if (!(currentExt === 'jpeg' && expectedExt === 'jpg') && !(currentExt === 'jpg' && expectedExt === 'jpeg')) {
-                        hasWrongExtension = true;
-                        debugLog(`[EmbeddedMedia] Extension mismatch: ${existingFile.fileName} has .${currentExt} but content is ${downloadResult.contentType} (should be .${expectedExt})`);
-                    }
-                }
-            }
-            
-            const fixFilenames = getSetting('fixFilenames') !== false;
-            // Prefix priority: localized_media > lorebook_media > extgallery > provider gallery > unknown
-            // Never reclassify a higher-priority prefix to a lower one
-            const PREFIX_PRIORITY = { 'localized_media': 4, 'lorebook_media': 3, 'extgallery': 2 };
-            const existingPriority = Object.entries(PREFIX_PRIORITY).find(([p]) => existingFile.fileName.startsWith(p + '_'))?.[1] || (isProviderGalleryFile ? 1 : 0);
-            const currentPriority = PREFIX_PRIORITY[prefix] || (isProviderGalleryFile ? 1 : 0);
-            const wouldDowngrade = hasCorrectPrefix ? false : existingPriority >= currentPriority;
-            const needsRename = hasWrongExtension || (isProviderGalleryFile && currentPriority > 1) || (!isAlreadyLocalized && !isProviderGalleryFile) || (fixFilenames && !hasCorrectPrefix && !wouldDowngrade);
-            
-            if (needsRename) {
-                const renameResult = await renameToLocalizedFormat(existingFile, url, folderName, fileIndex, downloadResult, prefix, saveName);
-                downloadResult = null;
-                if (renameResult.success) {
-                    renamedCount++;
-                    const action = isProviderGalleryFile ? 'Converted' : (!hasCorrectPrefix && isAlreadyLocalized) ? 'Reclassified' : (hasWrongExtension ? 'Fixed extension' : 'Renamed');
-                    if (onLogUpdate && logEntry) onLogUpdate(logEntry, `${action}: ${existingFile.fileName} → ${renameResult.newName}`, 'success');
-                } else {
-                    skippedCount++;
-                    if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (rename failed): ${displayUrl}`, 'success');
-                }
-            } else {
-                // Check if existing file was saved under a different URL's name.
-                // If so, save an additional copy so both URLs resolve during localization lookup.
-                // Only for localized/lorebook files — provider gallery files aren't part of text localization.
-                const existingSanitized = isAlreadyLocalized
-                    ? existingFile.fileName.match(/^(?:localized_media|lorebook_media)_\d+_(.+)\.[^.]+$/)
-                    : null;
-                const currentSanitized = existingSanitized ? (saveName || extractSanitizedUrlName(url)) : null;
-                if (existingSanitized && currentSanitized && existingSanitized[1] !== currentSanitized) {
-                    const aliasResult = await saveMediaFromMemory({ arrayBuffer: downloadResult.arrayBuffer, contentType: downloadResult.contentType }, url, folderName, fileIndex, prefix, saveName);
-                    downloadResult = null;
-                    if (aliasResult.success) {
-                        successCount++;
-                        hashMap.set(contentHash + '_alias_' + currentSanitized, { fileName: aliasResult.filename, localPath: aliasResult.localPath });
-                        if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Saved alias: ${aliasResult.filename} (same content as ${existingFile.fileName})`, 'success');
-                    } else {
-                        skippedCount++;
-                        if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (already localized): ${displayUrl}`, 'success');
-                    }
-                } else {
-                    skippedCount++;
-                    downloadResult = null;
-                    if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (already localized): ${displayUrl}`, 'success');
-                }
-            }
-            debugLog(`[EmbeddedMedia] Duplicate found: ${url} -> ${existingFile.fileName}`);
-            if (onProgress) onProgress(i + 1, mediaUrls.length);
-            continue;
-        }
-        
-        // Not a duplicate, save the file
-        if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Saving ${displayUrl}...`, 'pending');
-        const result = await saveMediaFromMemory(downloadResult, url, folderName, fileIndex, prefix, saveName);
-        downloadResult = null; // Release after save
-        
-        if (result.success) {
-            successCount++;
-            // Add to hash map to avoid downloading same file twice in this session
-            hashMap.set(contentHash, { fileName: result.filename, localPath: result.localPath });
-            // Update filename index for cross-phase fast-skip
-            if (fileNameIndex) MD?.noteSavedFile(fileNameIndex, { url, filename: nameHint }, result);
-            if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Saved: ${result.filename}`, 'success');
-        } else {
-            // A save can fail for reasons a retry will never fix (e.g. ST core
-            // rejecting a format outside its own upload whitelist, like svg/avif)
-            // just as surely as a download 404 — ledger it the same way.
-            const failure = MD?.recordFailure(url, MD.classifyFailure(result));
-            if (failure?.dead) {
-                skippedCount++;
-                if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Unreachable, giving up: ${displayUrl} - ${result.error}`, 'info');
-            } else {
-                errorCount++;
-                if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Failed: ${displayUrl} - ${result.error}`, 'error');
-            }
-        }
-        
-        if (onProgress) onProgress(i + 1, mediaUrls.length);
-        
-        // Yield to browser for GC between media uploads (critical for mobile)
-        await new Promise(r => setTimeout(r, 50));
-    }
-    
-    return { success: successCount, skipped: skippedCount, errors: errorCount, renamed: renamedCount, filenameSkipped: filenameSkippedCount, aborted: false };
-}
-
-/**
- * Rename an existing file to {prefix}_* format
- * Since there's no rename API, we delete old + save new (data already in memory)
- * @param {Object} existingFile - Existing file info
- * @param {string} originalUrl - Original URL of the media
- * @param {string} folderName - Gallery folder name (use getGalleryFolderName() for unique folders)
- * @param {number} index - File index for naming
- * @param {Object} downloadResult - Result from downloadMediaToMemory
- * @param {string} [prefix='localized_media'] - Filename prefix
- * @param {string} [nameHint] - Preferred base name (extractor-supplied filename)
- */
-async function renameToLocalizedFormat(existingFile, originalUrl, folderName, index, downloadResult, prefix = 'localized_media', nameHint = '') {
-    try {
-        // Save with new name using saveMediaFromMemory which determines correct extension
-        // from the detected content type (via magic bytes), not the old filename
-        const saveResult = await saveMediaFromMemory(downloadResult, originalUrl, folderName, index, prefix, nameHint);
-        
-        if (!saveResult.success) {
-            return { success: false, error: saveResult.error };
-        }
-        
-        // Delete the old file - API expects full relative path like "/user/images/CharName/file.png"
-        const safeFolderName = sanitizeFolderName(folderName);
-        const deletePath = `/user/images/${safeFolderName}/${existingFile.fileName}`;
-        const deleteResponse = await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', {
-            path: deletePath
-        });
-        await deleteResponse.text().catch(() => {});
-        
-        if (!deleteResponse.ok) {
-            console.warn(`[EmbeddedMedia] Could not delete old file ${existingFile.fileName} (path: ${deletePath}), but new file was saved`);
-        } else {
-            debugLog(`[EmbeddedMedia] Deleted old file: ${deletePath}`);
-        }
-        
-        return { success: true, newName: saveResult.filename };
-    } catch (error) {
-        console.error('[EmbeddedMedia] Rename error:', error);
-        return { success: false, error: error.message };
-    }
+    const items = mediaUrls.map(url => ({ url, filename: nameHints?.get(url) || undefined }));
+    return downloadViaServerRoute(cardId, items, prefix, phase, { onLog, onProgress, shouldAbort, abortSignal });
 }
 
 /**
@@ -494,61 +329,6 @@ function findCharacterMediaUrls(character, { split = false } = {}) {
     lorebookUrls.forEach(url => mediaUrls.add(url));
     debugLog(`[Localize] Found ${mediaUrls.size} remote media URLs in character`);
     return Array.from(mediaUrls);
-}
-
-/**
- * Get hashes of all existing files in a character's gallery
- * @returns {Promise<Map<string, {fileName: string, localPath: string}>>} Map of hash -> file info
- */
-async function getExistingFileHashes(characterName) {
-    const hashMap = new Map();
-    
-    try {
-        // Request all media types: IMAGE=1, VIDEO=2, AUDIO=4, so 7 = all
-        const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: characterName, type: 7 });
-        
-        if (!response.ok) {
-            debugLog('[Localize] Could not list existing files');
-            return hashMap;
-        }
-        
-        const files = await response.json();
-        if (!files || files.length === 0) {
-            return hashMap;
-        }
-        
-        // Sanitize folder name to match SillyTavern's folder naming convention
-        const safeFolderName = sanitizeFolderName(characterName);
-        
-        // Calculate hash for each existing file
-        // Process one at a time and null the buffer immediately to keep peak memory low
-        for (const file of files) {
-            const fileName = (typeof file === 'string') ? file : file.name;
-            if (!fileName) continue;
-            
-            // Only check media files
-            if (!fileName.match(/\.(png|jpg|jpeg|webp|gif|bmp|mp3|wav|ogg|m4a|mp4|webm)$/i)) continue;
-            
-            const localPath = galleryFileUrl(safeFolderName, fileName);
-            
-            try {
-                const fileResponse = await fetch(localPath);
-                if (fileResponse.ok) {
-                    let buffer = await fileResponse.arrayBuffer();
-                    const hash = await calculateHash(buffer);
-                    buffer = null; // Release immediately — critical for mobile memory
-                    hashMap.set(hash, { fileName, localPath });
-                }
-            } catch (e) {
-                console.warn(`[Localize] Could not hash existing file: ${fileName}`);
-            }
-        }
-        
-        return hashMap;
-    } catch (error) {
-        console.error('[Localize] Error getting existing file hashes:', error);
-        return hashMap;
-    }
 }
 
 /**
@@ -975,153 +755,35 @@ async function downloadMediaToMemory(url, timeoutMs = 30000, abortSignal = null)
 }
 
 /**
- * Save a media file from memory (already downloaded ArrayBuffer) to character's gallery
- * @param {Object} downloadResult - Result from downloadMediaToMemory
- * @param {string} url - Original URL of the media
- * @param {string} folderName - Gallery folder name (use getGalleryFolderName() for unique folders)
- * @param {number} index - File index for naming
- * @param {string} [prefix='localized_media'] - Filename prefix
- * @param {string} [nameHint] - Preferred base name (extractor-supplied filename)
- */
-async function saveMediaFromMemory(downloadResult, url, folderName, index, prefix = 'localized_media', nameHint = '') {
-    try {
-        const { arrayBuffer, contentType } = downloadResult;
-        
-        // Determine file extension from content type (detected via magic bytes)
-        let extension = 'png'; // Default for images
-        if (contentType) {
-            const mimeToExt = {
-                // Images
-                'image/png': 'png',
-                'image/jpeg': 'jpg',
-                'image/webp': 'webp',
-                'image/gif': 'gif',
-                'image/bmp': 'bmp',
-                'image/svg+xml': 'svg',
-                // Video
-                'video/mp4': 'mp4',
-                'video/webm': 'webm',
-                'video/quicktime': 'mov',
-                // Audio
-                'audio/mpeg': 'mp3',
-                'audio/mp3': 'mp3',
-                'audio/wav': 'wav',
-                'audio/wave': 'wav',
-                'audio/x-wav': 'wav',
-                'audio/ogg': 'ogg',
-                'audio/flac': 'flac',
-                'audio/x-flac': 'flac',
-                'audio/aac': 'aac',
-                'audio/mp4': 'm4a',
-                'audio/x-m4a': 'm4a'
-            };
-            
-            // Try exact match first
-            if (mimeToExt[contentType]) {
-                extension = mimeToExt[contentType];
-            } else if (contentType.startsWith('audio/')) {
-                // Unknown audio type - extract subtype as extension, don't default to png!
-                const subtype = contentType.split('/')[1].split(';')[0];
-                extension = subtype.replace('x-', '') || 'audio';
-                debugLog(`[EmbeddedMedia] Unknown audio type '${contentType}', using extension: ${extension}`);
-            } else if (contentType.startsWith('video/')) {
-                // Unknown video type - extract subtype as extension
-                const subtype = contentType.split('/')[1].split(';')[0];
-                extension = subtype.replace('x-', '') || 'video';
-                debugLog(`[EmbeddedMedia] Unknown video type '${contentType}', using extension: ${extension}`);
-            }
-            // For unknown image types, 'png' default is acceptable
-        } else {
-            const urlMatch = url.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
-            if (urlMatch) {
-                extension = urlMatch[1].toLowerCase();
-            }
-        }
-        
-        // Prefer an extractor-supplied name; otherwise derive from the URL
-        // (which handles CDN variant segments).
-        const sanitizedName = nameHint || extractSanitizedUrlName(url) || 'media';
-        
-        // Generate local filename
-        const filenameBase = `${prefix}_${index}_${sanitizedName}`;
-        
-        // Convert arrayBuffer to base64 then release the buffer immediately.
-        // This prevents holding both the raw buffer (5MB) and the base64 string (6.7MB)
-        // simultaneously during the upload await — critical for mobile memory.
-        let base64Data = arrayBufferToBase64(arrayBuffer);
-        // Break the reference so the ArrayBuffer can be GC'd during upload
-        downloadResult.arrayBuffer = null;
-        
-        // Build JSON body, then release the base64 string — the JSON body contains it.
-        const bodyStr = JSON.stringify({
-            image: base64Data,
-            filename: filenameBase,
-            format: extension,
-            ch_name: folderName
-        });
-        base64Data = null; // Release — serialized into bodyStr
-        
-        // Use fetch directly (instead of apiRequest) so we control the body lifecycle
-        const csrfToken = getCSRFToken();
-        const saveResponse = await fetch(`${API_BASE}${ENDPOINTS.IMAGES_UPLOAD}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken
-            },
-            body: bodyStr
-        });
-        
-        if (!saveResponse.ok) {
-            const errorText = await saveResponse.text();
-            throw new Error(`Upload failed: ${errorText}`);
-        }
-        
-        const saveResult = await saveResponse.json();
-        
-        if (!saveResult || !saveResult.path) {
-            throw new Error('No path returned from upload');
-        }
-        
-        return {
-            success: true,
-            localPath: saveResult.path,
-            filename: `${filenameBase}.${extension}`
-        };
-        
-    } catch (error) {
-        return {
-            success: false,
-            error: error.message || String(error)
-        };
-    }
-}
-
-/**
  * Download images from external gallery pages found in a character's text fields.
  * Phase 3 of the localization pipeline (after embedded + provider gallery).
+ *
+ * Extraction stays entirely in the browser (session cookies, page scraping --
+ * docs/PHASE_3C_PLAN.md §6, "extgallery still needs the browser's
+ * extractors"). Once a page yields images, plain-URL ones go through the
+ * batch JSON route same as embedded media; `downloadFn`-bearing ones (MEGA's
+ * AES-CTR decrypt, Pixiv's session-proxied fetch) still run in the browser,
+ * then their bytes go through the second entry door.
+ *
  * @param {Object} character - Character object (must be hydrated)
- * @param {string} folderName - Gallery folder name
+ * @param {string} cardId - The card's archive id (character.avatar)
  * @param {Object} [options]
  * @param {function} [options.onLog] - Log entry callback
- * @param {function} [options.onLogUpdate] - Log update callback
  * @param {function} [options.onProgress] - Progress callback (current, total)
  * @param {function} [options.shouldAbort] - Abort check callback
  * @param {AbortSignal} [options.abortSignal] - Abort signal
  * @returns {Promise<{success: number, skipped: number, errors: number, aborted: boolean}>}
  */
-async function downloadExternalGalleryForCharacter(character, folderName, options = {}) {
-    const { onLog, onLogUpdate, onProgress, shouldAbort, abortSignal, dedupState, galleryPageUrls: overrideUrls } = options;
+async function downloadExternalGalleryForCharacter(character, cardId, options = {}) {
+    const { onLog, onProgress, shouldAbort, abortSignal, galleryPageUrls: overrideUrls } = options;
 
     const result = { success: 0, skipped: 0, errors: 0, aborted: false };
-    const MD = window.MediaDedup;
 
     const galleryUrls = overrideUrls || (typeof window.findCharacterGalleryUrls === 'function'
         ? window.findCharacterGalleryUrls(character)
         : []);
     if (galleryUrls.length === 0) return result;
 
-    await MD?.loadLedger();
     let allImages = [];
 
     for (let i = 0; i < galleryUrls.length; i++) {
@@ -1133,76 +795,89 @@ async function downloadExternalGalleryForCharacter(character, folderName, option
         const gUrl = galleryUrls[i];
         const displayUrl = gUrl.length > 60 ? gUrl.substring(0, 60) + '...' : gUrl;
 
-        // A deleted MEGA folder is the usual way a character gets pinned in a
-        // permanent retry loop — the page itself is ledgered, not just its files.
-        if (MD?.isDead(gUrl)) {
-            result.skipped++;
-            if (onLog) onLog(`Unreachable gallery, skipping: ${displayUrl} (${MD.deadReason(gUrl)})`, 'info');
-            continue;
-        }
-
-        const logEntry = onLog ? onLog(`Extracting: ${displayUrl}`, 'pending') : null;
+        if (onLog) onLog(`Extracting: ${displayUrl}`, 'pending');
 
         try {
             const extracted = await window.extractGalleryImages(gUrl, { signal: abortSignal, character });
             if (extracted.aborted) {
-                if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Aborted: ${displayUrl}`, 'error');
                 result.aborted = true;
                 return result;
             }
             if (extracted.error) {
-                const failure = MD?.recordFailure(gUrl, MD.classifyExtractionFailure(extracted.error));
-                if (failure?.dead) {
-                    result.skipped++;
-                    if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Unreachable gallery, giving up: ${displayUrl} (${extracted.error})`, 'info');
-                } else {
-                    result.errors++;
-                    if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Failed to extract: ${displayUrl} (${extracted.error})`, 'error');
-                }
+                result.errors++;
+                if (onLog) onLog(`Failed to extract: ${displayUrl} (${extracted.error})`, 'error');
                 continue;
             }
-            MD?.recordSuccess(gUrl);
             if (extracted.images.length > 0) {
-                if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Found ${extracted.images.length} image(s) from ${displayUrl}`, 'success');
+                if (onLog) onLog(`Found ${extracted.images.length} image(s) from ${displayUrl}`, 'success');
                 allImages.push(...extracted.images);
             } else {
-                if (onLogUpdate && logEntry) onLogUpdate(logEntry, `No images found at ${displayUrl}`, 'info');
+                if (onLog) onLog(`No images found at ${displayUrl}`, 'info');
             }
         } catch (err) {
             if (err.name === 'AbortError') { result.aborted = true; return result; }
-            if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Error extracting ${displayUrl}: ${err.message}`, 'error');
+            if (onLog) onLog(`Error extracting ${displayUrl}: ${err.message}`, 'error');
             result.errors++;
         }
     }
 
     if (allImages.length === 0) return result;
 
-    const imageUrls = allImages.map(img => img.url);
-    const downloadFnMap = new Map();
-    const nameHints = new Map();
+    const plainItems = [];
+    const downloadFnItems = [];
     for (const img of allImages) {
-        if (typeof img.downloadFn === 'function') downloadFnMap.set(img.url, img.downloadFn);
-        // The real filename is the only usable dedup key for extractors whose
-        // URLs are synthetic (MEGA) or all-identical (Drive's /uc?id=...).
-        if (img.filename) nameHints.set(img.url, img.filename);
+        if (typeof img.downloadFn === 'function') downloadFnItems.push(img);
+        else plainItems.push({ url: img.url, filename: img.filename });
     }
 
-    const downloadResult = await downloadEmbeddedMediaForCharacter(folderName, imageUrls, {
-        prefix: 'extgallery',
-        onProgress,
-        onLog,
-        onLogUpdate,
-        shouldAbort,
-        abortSignal,
-        dedupState,
-        downloadFnMap,
-        nameHints
-    });
+    if (plainItems.length > 0) {
+        const r = await downloadViaServerRoute(cardId, plainItems, 'extgallery', 'extGallery', {
+            onLog, onProgress, shouldAbort, abortSignal
+        });
+        result.success += r.success;
+        result.skipped += r.skipped;
+        result.errors += r.errors;
+        if (r.aborted) { result.aborted = true; return result; }
+    }
 
-    result.success += downloadResult.success;
-    result.skipped += downloadResult.skipped;
-    result.errors += downloadResult.errors;
-    result.aborted = !!downloadResult.aborted;
+    for (const img of downloadFnItems) {
+        if ((shouldAbort && shouldAbort()) || abortSignal?.aborted) {
+            result.aborted = true;
+            return result;
+        }
+        const displayUrl = img.url.length > 60 ? img.url.substring(0, 60) + '...' : img.url;
+        let dl;
+        try {
+            dl = await img.downloadFn(abortSignal);
+        } catch (err) {
+            if (err.name === 'AbortError' || err.name === 'TimeoutError') {
+                result.aborted = true;
+                return result;
+            }
+            dl = { success: false, error: err.message };
+        }
+        if (!dl?.success) {
+            result.errors++;
+            if (onLog) onLog(`Failed: ${displayUrl} - ${dl?.error || 'unknown error'}`, 'error');
+            continue;
+        }
+        const saved = await downloadBytesViaServerRoute(cardId, {
+            url: img.url,
+            filename: img.filename,
+            arrayBuffer: dl.arrayBuffer,
+            contentType: dl.contentType
+        }, 'extgallery');
+        if (saved.status === 'saved') {
+            result.success++;
+            if (onLog) onLog(`Saved: ${saved.file}`, 'success');
+        } else if (saved.status === 'skipped') {
+            result.skipped++;
+            if (onLog) onLog(`Skipped (${saved.reason || 'already have it'}): ${saved.file || displayUrl}`, 'success');
+        } else {
+            result.errors++;
+            if (onLog) onLog(`Failed: ${displayUrl} - ${saved.reason || 'unknown error'}`, 'error');
+        }
+    }
 
     return result;
 }

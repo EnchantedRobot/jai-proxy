@@ -2316,24 +2316,6 @@ https://jannyai.com/characters/uuid_slug
                                 <span class="settings-hint">Detect and download images from external gallery pages (Imgchest, ImgBB, Imgbox) linked in character card text.</span>
                             </div>
                             <div class="settings-row">
-                                <label>
-                                    <input type="checkbox" id="settingsFixFilenames" checked> Fix filenames during localization
-                                </label>
-                                <span class="settings-hint">Rename files to their correct prefix format when duplicates are detected.</span>
-                            </div>
-                            <div class="settings-row">
-                                <label>
-                                    <input type="checkbox" id="settingsFastFilenameSkip"> Fast skip (filename match)
-                                </label>
-                                <span class="settings-hint">Skip already-localized files by matching filenames instead of downloading and hashing. Much faster for re-runs, but won't detect corrupted or truncated files.</span>
-                            </div>
-                            <div class="settings-row" id="fastSkipValidateRow" style="padding-left: 24px; display: none;">
-                                <label>
-                                    <input type="checkbox" id="settingsFastSkipValidateHeaders"> Validate file size on match
-                                </label>
-                                <span class="settings-hint">When a filename match is found, verify the file is at least 1 KB via a HEAD request. Catches empty or truncated files.</span>
-                            </div>
-                            <div class="settings-row">
                                 <label for="settingsImportMediaAction">When an import has extra media:</label>
                                 <select id="settingsImportMediaAction" class="glass-select">
                                     <option value="ask" data-icon="fa-solid fa-circle-question" selected>Ask me (show a download prompt)</option>

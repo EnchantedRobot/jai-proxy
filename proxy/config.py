@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     # part of an export, so we stash it here on first sight and skip the fetch
     # every later time. Purely a cache -- wipe/refresh via POST /clear-lorebooks.
     lorebook_cache_dir: Path = ROOT / "data" / "state" / "lorecache"
+    # Cross-character dead-URL ledger for server-side media downloads (Phase
+    # 3C). One file, not a directory -- its parent (data/state/) already
+    # exists once captures_dir/lorebook_cache_dir are created below. Global
+    # because the same dead catbox link shows up on dozens of cards; see
+    # proxy/media_manifest.py.
+    dead_urls_file: Path = ROOT / "data" / "state" / "dead_urls.json"
 
     # Draw the live terminal dashboard (proxy/dashboard.py) instead of a plain
     # scrolling log. Ignored -- and the plain log used -- when stdout is not a

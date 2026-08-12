@@ -1,8 +1,5 @@
 // Provider Interface - contract for external character sources
 
-import { saveGalleryImage } from './provider-utils.js';
-import MediaDedup from '../media-dedup.js';
-
 /**
  * @typedef {Object} ProviderLinkInfo
  * @property {string} providerId   - which provider owns this link (e.g. 'chub')
@@ -534,154 +531,42 @@ export class ProviderBase {
     async fetchGalleryImages(linkInfo) { return []; }
 
     /**
-     * Download gallery images to a local folder with dedup and progress.
-     * Default implementation calls fetchGalleryImages() then uses
-     * CoreAPI download helpers (via the api reference from init()).
-     * Providers can override
-     * for custom naming conventions or CDN-specific handling.
+     * Download gallery images through the server's media pipeline (guard,
+     * fetch, sniff, WebP-normalize, dedupe, write, thumbnail, manifest --
+     * docs/PHASE_3C_PLAN.md §3, step 5). Default implementation calls
+     * fetchGalleryImages() then hands the URLs to the download route in one
+     * batch; providers can override for custom naming conventions or
+     * CDN-specific handling.
      *
      * @param {ProviderLinkInfo} linkInfo
-     * @param {string} folderName - gallery folder name (already resolved)
+     * @param {string} cardId - the card's archive id (character.avatar)
      * @param {Object} [options]
      * @param {function} [options.onProgress] - (current, total)
-     * @param {function} [options.onLog]      - (message, status) → entry
-     * @param {function} [options.onLogUpdate] - (entry, message, status)
+     * @param {function} [options.onLog]      - (message, status) => void
      * @param {function} [options.shouldAbort] - () → boolean
      * @param {AbortSignal} [options.abortSignal]
      * @returns {Promise<{success: number, skipped: number, errors: number, aborted: boolean}>}
      */
-    async downloadGallery(linkInfo, folderName, options = {}) {
+    async downloadGallery(linkInfo, cardId, options = {}) {
         const api = this._coreAPI;
         if (!api) return { success: 0, skipped: 0, errors: 0, filenameSkipped: 0, aborted: false };
 
-        const { onProgress, onLog, onLogUpdate, shouldAbort, abortSignal, dedupState: externalDedup } = options;
-        let successCount = 0, errorCount = 0, skippedCount = 0;
-        let filenameSkippedCount = 0;
+        const { onProgress, onLog, shouldAbort, abortSignal } = options;
 
-        const logEntry = onLog?.('Fetching gallery list...', 'pending') ?? null;
+        onLog?.('Fetching gallery list...', 'pending');
         const galleryImages = await this.fetchGalleryImages(linkInfo);
 
         if (galleryImages.length === 0) {
-            if (onLogUpdate && logEntry) onLogUpdate(logEntry, 'No gallery images found', 'success');
+            onLog?.('No gallery images found', 'success');
             return { success: 0, skipped: 0, errors: 0, filenameSkipped: 0, aborted: false };
         }
-        if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Found ${galleryImages.length} gallery image(s)`, 'success');
+        onLog?.(`Found ${galleryImages.length} gallery image(s)`, 'success');
 
-        // Use shared dedup state if provided, otherwise build our own
-        const dedup = externalDedup || await api.buildDedupState?.(folderName) || (() => {
-            // Fallback: build inline if buildDedupState not available
-            const useFastSkip = api.getSetting?.('fastFilenameSkip') || false;
-            const validateHeaders = useFastSkip && (api.getSetting?.('fastSkipValidateHeaders') || false);
-            let _fileNameIndex = null;
-            let _hashMap = null;
-            return {
-                useFastSkip,
-                validateHeaders,
-                get fileNameIndex() { return _fileNameIndex; },
-                set fileNameIndex(v) { _fileNameIndex = v; },
-                ensureHashMap: async () => {
-                    if (!_hashMap) _hashMap = await api.getExistingFileHashes?.(folderName) || new Map();
-                    return _hashMap;
-                }
-            };
-        })();
-        const { useFastSkip, validateHeaders, ensureHashMap } = dedup;
-        let { fileNameIndex } = dedup;
-
-        if (useFastSkip && !fileNameIndex) {
-            fileNameIndex = await api.getExistingFileIndex?.(folderName) || new Map();
-            dedup.fileNameIndex = fileNameIndex;
-        } else if (!useFastSkip && !fileNameIndex) {
-            // Pre-build hash map eagerly when not using fast skip
-            await ensureHashMap();
-        }
-
-        // buildDedupState normally does this; the inline fallback above doesn't.
-        await MediaDedup.loadLedger();
-
-        for (let i = 0; i < galleryImages.length; i++) {
-            if ((shouldAbort?.()) || abortSignal?.aborted) {
-                return { success: successCount, skipped: skippedCount, errors: errorCount, filenameSkipped: filenameSkippedCount, aborted: true };
-            }
-
-            const image = galleryImages[i];
-            const displayUrl = image.url.length > 60 ? image.url.substring(0, 60) + '...' : image.url;
-            const imgLog = onLog?.(`Checking ${displayUrl}`, 'pending') ?? null;
-
-            // Name match runs ahead of the dead check so a file we already hold
-            // logs as a filename match even if its source has since gone away.
-            if (useFastSkip && fileNameIndex) {
-                // fixFilenames stays off here: this loop has no rename path, so a
-                // mis-prefixed match has nothing better to fall through to.
-                const match = await MediaDedup.findExistingFile(
-                    { url: image.url, filename: image.name },
-                    { index: fileNameIndex, validateHeaders }
-                );
-                if (match) {
-                    skippedCount++;
-                    filenameSkippedCount++;
-                    if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Skipped (filename match): ${match.fileName}`, 'success');
-                    onProgress?.(i + 1, galleryImages.length);
-                    continue;
-                }
-            }
-
-            // Known-dead URL — never spend a request on it again. Counted as
-            // skipped, not failed: there is nothing to retry.
-            if (MediaDedup.isDead(image.url)) {
-                skippedCount++;
-                if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Unreachable, skipping: ${displayUrl} (${MediaDedup.deadReason(image.url)})`, 'info');
-                onProgress?.(i + 1, galleryImages.length);
-                continue;
-            }
-
-            let dl = await api.downloadMediaToMemory?.(image.url, 30000, abortSignal);
-            if (!dl?.success) {
-                const failure = MediaDedup.recordFailure(image.url, MediaDedup.classifyFailure(dl));
-                if (failure.dead) {
-                    skippedCount++;
-                    if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Unreachable, giving up: ${displayUrl} - ${dl?.error || 'unknown'}`, 'info');
-                } else {
-                    errorCount++;
-                    if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Failed: ${displayUrl} - ${dl?.error || 'unknown'}`, 'error');
-                }
-                dl = null;
-                onProgress?.(i + 1, galleryImages.length);
-                continue;
-            }
-            MediaDedup.recordSuccess(image.url);
-
-            const hashMap = await ensureHashMap();
-            const contentHash = await api.calculateHash?.(dl.arrayBuffer);
-            if (hashMap.has(contentHash)) {
-                skippedCount++;
-                dl = null;
-                if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Skipped (duplicate): ${displayUrl}`, 'success');
-                onProgress?.(i + 1, galleryImages.length);
-                continue;
-            }
-
-            if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Saving ${displayUrl}...`, 'pending');
-            const saveResult = await saveGalleryImage(dl, image, folderName, contentHash, this.galleryFilePrefix, api);
-            dl = null;
-
-            if (saveResult.success) {
-                successCount++;
-                hashMap.set(contentHash, { fileName: saveResult.filename });
-                if (fileNameIndex) {
-                    MediaDedup.noteSavedFile(fileNameIndex, { url: image.url, filename: image.name }, saveResult);
-                }
-                if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Saved: ${saveResult.filename}`, 'success');
-            } else {
-                errorCount++;
-                if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Failed: ${displayUrl} - ${saveResult.error}`, 'error');
-            }
-
-            onProgress?.(i + 1, galleryImages.length);
-            await new Promise(r => setTimeout(r, 50));
-        }
-
-        return { success: successCount, skipped: skippedCount, errors: errorCount, filenameSkipped: filenameSkippedCount, aborted: false };
+        const items = galleryImages.map(img => ({ url: img.url, filename: img.name }));
+        const r = await api.downloadViaServerRoute(cardId, items, this.galleryFilePrefix, 'providerGallery', {
+            onProgress, onLog, shouldAbort, abortSignal
+        });
+        return { success: r.success, skipped: r.skipped, errors: r.errors, filenameSkipped: 0, aborted: r.aborted };
     }
 
     /**

@@ -283,18 +283,17 @@
     // CLIENT-SIDE BLOB STORE  (ST's /user/files)
     // ========================================
     //
-    // The frontend also persists bulkier working state -- filter presets, the
-    // media-dedup ledger, playlists -- as JSON files under SillyTavern's
-    // `user/files/`. None of it is archive data: it is this browser's view of
-    // the archive, and it has no business in the cards directory.
+    // The frontend also persists bulkier working state -- filter presets,
+    // playlists -- as JSON files under SillyTavern's `user/files/`. None of
+    // it is archive data: it is this browser's view of the archive, and it
+    // has no business in the cards directory. (The media dedup/dead-URL
+    // ledger that used to live here moved server-side in Phase 3C step 5.)
     //
-    // This is still localStorage, unlike the settings above. The quota is ~5 MB
-    // and the dedup ledger is the one blob that can approach it on a large
-    // library; a write that would overflow throws, is caught, and reports
-    // failure rather than truncating. Moving it to `data/` alongside the
-    // settings is the obvious next step and deliberately not bundled into this
-    // change -- the settings were urgent because they hold credentials that
-    // exist nowhere else, and a ledger is rebuildable.
+    // This is still localStorage, unlike the settings above. The quota is
+    // ~5 MB; a write that would overflow throws, is caught, and reports
+    // failure rather than truncating. What used to be the one blob that could
+    // approach that quota -- the media dedup/dead-URL ledger -- is gone from
+    // here now, so this store is far from the limit in practice.
 
     const BLOB_PREFIX = 'cl_userfile:';
 
