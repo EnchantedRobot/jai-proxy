@@ -453,6 +453,14 @@ async def test_download_item_second_call_skips_by_name_index(gallery_dir, thumbn
     assert second.reason == "filename match"
     assert len(calls) == 1  # the second URL was never fetched
 
+    # The skip still records the url -> file mapping, exactly as the hash-dedupe
+    # branch does. Without it a card whose media all predates this pipeline
+    # reports `files: 0` from /media/status forever.
+    entry = manifest["files"]["https://other-cdn.example.com/y/photo.png"]
+    assert entry["file"] == second.file
+    assert entry["sha256"] == manifest["files"]["https://cdn.example.com/x/photo.png"]["sha256"]
+    assert entry["size"] == (gallery_dir / second.file).stat().st_size
+
 
 @pytest.mark.asyncio
 async def test_download_item_cross_character_dead_ledger_skips_without_fetch(gallery_dir, thumbnail_store):

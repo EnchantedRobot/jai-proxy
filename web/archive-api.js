@@ -150,8 +150,17 @@
             date_added: Date.parse(card.linked_at || card.modified) || 0,
             // Prose the list payload does not carry. Empty, not absent: the
             // frontend's search folds `creator_notes` into its lowercase index
-            // and `undefined` would throw. See "known gaps" in VENDORED.md --
-            // notes search is the one browse feature this costs.
+            // and `undefined` would throw.
+            //
+            // This blank is real data the frontend must get elsewhere, so
+            // `creator_notes` is in HEAVY_FIELDS (13-slim-index.js) and the
+            // detail fetch backfills it. It was not, once, and the panel, Copy
+            // Raw Card Data and the media scanner all read '' and said nothing.
+            // Anything else blanked here needs the same treatment.
+            //
+            // What the backfill cannot reach is the *search index*: the lowercase
+            // keys are built from the list payload, so notes search stays broken
+            // until the list carries prose. See "known gaps" in VENDORED.md.
             creator_notes: '',
             // Computed server-side from the same five prompt fields the frontend
             // would sum if it held them (see prepareCharacterKeys in library.js,

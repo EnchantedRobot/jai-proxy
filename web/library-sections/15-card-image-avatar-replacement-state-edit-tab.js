@@ -1882,30 +1882,7 @@ function refreshModalDisplay() {
     }
     
     // Update Creator Notes
-    const creatorNotes = char.creator_notes || (char.data ? char.data.creator_notes : "") || "";
-    const notesBox = document.getElementById('modalCreatorNotesBox');
-    const notesContainer = document.getElementById('modalCreatorNotes');
-    if (creatorNotes && notesBox && notesContainer) {
-        notesBox.style.display = 'block';
-        const detailsEl = document.getElementById('creatorNotesDetails');
-        if (detailsEl) detailsEl.open = !!getSetting('expandCreatorNotes');
-        // Store raw content for fullscreen expand feature
-        window.currentCreatorNotesContent = creatorNotes;
-        renderCreatorNotesSecure(creatorNotes, char.name, notesContainer);
-        initCreatorNotesHandlers();
-        // Show/hide expand button based on content length
-        const expandBtn = document.getElementById('creatorNotesExpandBtn');
-        if (expandBtn) {
-            const lineCount = (creatorNotes.match(/\n/g) || []).length + 1;
-            const charCount = creatorNotes.length;
-            const showExpand = lineCount >= CreatorNotesConfig.MIN_LINES_FOR_EXPAND || 
-                               charCount >= CreatorNotesConfig.MIN_CHARS_FOR_EXPAND;
-            expandBtn.style.display = showExpand ? 'flex' : 'none';
-        }
-    } else if (notesBox) {
-        notesBox.style.display = 'none';
-        window.currentCreatorNotesContent = null;
-    }
+    const creatorNotes = renderModalCreatorNotes(char);
 
     // Tagline (from active namespace: provider id when linked, 'cl' when unlinked).
     wireProviderTaglineExpand();

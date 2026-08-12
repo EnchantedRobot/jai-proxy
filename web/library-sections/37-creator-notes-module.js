@@ -409,6 +409,49 @@ function cleanupCreatorNotesContainer(container) {
     container.innerHTML = '';
 }
 
+/**
+ * Paint the detail modal's Creator Notes panel from `char`, and return the raw
+ * notes string so callers can hand it on (media localization wants it).
+ *
+ * Called twice per open: once on the synchronous paint, and again after
+ * hydrateCharacter resolves -- a slim card carries no notes (the archive's list
+ * payload has no prose), so the first call always hides the panel and the second
+ * is the one that fills it. Shared rather than duplicated because the two call
+ * sites drifting is what hid the panel in the first place.
+ *
+ * @param {Object} char
+ * @returns {string} the notes, or '' when the card has none
+ */
+function renderModalCreatorNotes(char) {
+    const creatorNotes = char.creator_notes || (char.data ? char.data.creator_notes : "") || "";
+    const notesBox = document.getElementById('modalCreatorNotesBox');
+    const notesContainer = document.getElementById('modalCreatorNotes');
+
+    if (creatorNotes && notesBox && notesContainer) {
+        notesBox.style.display = 'block';
+        const detailsEl = document.getElementById('creatorNotesDetails');
+        if (detailsEl) detailsEl.open = !!getSetting('expandCreatorNotes');
+        // Store raw content for fullscreen expand feature
+        window.currentCreatorNotesContent = creatorNotes;
+        renderCreatorNotesSecure(creatorNotes, char.name, notesContainer);
+        initCreatorNotesHandlers();
+        // Show/hide expand button based on content length
+        const expandBtn = document.getElementById('creatorNotesExpandBtn');
+        if (expandBtn) {
+            const lineCount = (creatorNotes.match(/\n/g) || []).length + 1;
+            const charCount = creatorNotes.length;
+            const showExpand = lineCount >= CreatorNotesConfig.MIN_LINES_FOR_EXPAND ||
+                               charCount >= CreatorNotesConfig.MIN_CHARS_FOR_EXPAND;
+            expandBtn.style.display = showExpand ? 'flex' : 'none';
+        }
+    } else if (notesBox) {
+        notesBox.style.display = 'none';
+        window.currentCreatorNotesContent = null;
+    }
+
+    return creatorNotes;
+}
+
 function renderCreatorNotesSecure(content, charName, container) {
     if (!content || !container) return;
 

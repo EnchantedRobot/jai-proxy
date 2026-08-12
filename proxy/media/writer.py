@@ -258,6 +258,7 @@ class GalleryIndex:
 
     by_key: dict[str, str] = field(default_factory=dict)  # media_key -> filename
     by_hash: dict[str, str] = field(default_factory=dict)  # sha256 -> filename
+    digest_of: dict[str, str] = field(default_factory=dict)  # filename -> sha256
 
     @classmethod
     def build(cls, gallery_dir: Path) -> "GalleryIndex":
@@ -286,6 +287,7 @@ class GalleryIndex:
             except OSError:
                 continue
             idx.by_hash.setdefault(digest, name)
+            idx.digest_of[name] = digest
         return idx
 
     def find_by_name(self, url: str, filename_hint: str | None, prefix: str) -> str | None:
@@ -310,6 +312,7 @@ class GalleryIndex:
         for key in media_names.keys_for_item(url, filename_hint):
             self.by_key[key] = file_name
         self.by_hash.setdefault(digest, file_name)
+        self.digest_of[file_name] = digest
 
 
 # --------------------------------------------------------------------------
@@ -325,6 +328,13 @@ class DownloadOutcome:
     reason: str | None = None
     bytes: int | None = None
     permanent: bool | None = None
+
+
+def _size_of(path: Path) -> int | None:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return None
 
 
 def _preflight_dns(url: str) -> str | None:
@@ -461,6 +471,19 @@ async def download_item(
     # 2. Name index -- already have an equivalent file, before any bytes move.
     existing_name = index_state.find_by_name(url, filename_hint, prefix)
     if existing_name:
+        # Record the mapping even though nothing was fetched: this URL *is*
+        # satisfied by that file, and the hash-dedupe branch in `finish_item`
+        # already records its equivalent. Without this a card whose media was
+        # all downloaded under SillyTavern reports `files: 0` from
+        # `/media/status` forever -- 18k inherited files invisible to it.
+        # `build()` already hashed the folder, so this costs one stat.
+        media_manifest.record_saved(
+            manifest,
+            url,
+            existing_name,
+            index_state.digest_of.get(existing_name, ""),
+            size=_size_of(gallery_dir / existing_name),
+        )
         return DownloadOutcome("skipped", url, file=existing_name, reason="filename match")
 
     dns_reason = _preflight_dns(url)

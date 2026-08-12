@@ -1461,17 +1461,10 @@ https://jannyai.com/characters/uuid_slug
                             <ul>
                                 <li>Enable in <strong>Settings &rarr; General &rarr; Grid Card Thumbnails &rarr; Use thumbnails in characters view</strong></li>
                                 <li>Applies to <strong>mobile only</strong> by default. Toggle <strong>"Also use on desktop"</strong> to extend coverage</li>
-                                <li>Two backends:
+                                <li>Two sizes:
                                     <ul>
-                                        <li><strong>cl-helper</strong> (recommended): resizes via jimp and caches each thumbnail on disk at the size you pick (384 / 512 / 640 / 768px wide). 512 is a good baseline. Requires the cl-helper plugin installed</li>
-                                        <li><strong>ST's built-in /thumbnail</strong>: fixed at 96x144, which looks blurry on high-DPR phones. Used automatically if cl-helper isn't available or you turn the cl-helper option off</li>
-                                    </ul>
-                                </li>
-                                <li><strong>Cache management</strong> (cl-helper backend, in the same settings group):
-                                    <ul>
-                                        <li><strong>Populate at current size</strong>: pre-generates a thumbnail for every character at the size selected above. Already-cached entries are skipped. Useful after a bulk import or after changing the size</li>
-                                        <li><strong>Purge cache</strong>: deletes every cached thumbnail (any size). Next scroll regenerates on demand</li>
-                                        <li>Live cache stats (count + on-disk size) update under the buttons</li>
+                                        <li><strong>High-resolution</strong> (recommended): the archive renders each thumbnail at the size you pick (384 / 512 / 640 / 768px wide) on first request, then caches it on disk. 512 is a good baseline</li>
+                                        <li><strong>Inherited 96x144</strong>: the thumbnail cache carried over from SillyTavern. Already complete for every card, but blurry on high-DPR phones. Used when the high-resolution option is off</li>
                                     </ul>
                                 </li>
                             </ul>
@@ -1995,19 +1988,12 @@ https://jannyai.com/characters/uuid_slug
                                 </label>
                                 <span class="settings-hint">Off (default): thumbnails on mobile only. On: thumbnails everywhere. Desktop has plenty of decode budget, so the win is mostly bandwidth on large libraries.</span>
                             </div>
-                            <div class="cl-helper-banner cl-hidden" id="gridThumbsClHelperBanner">
-                                <i class="fa-solid fa-puzzle-piece"></i>
-                                <div>
-                                    <strong>cl-helper required for custom sizes &amp; disk cache</strong>
-                                    <span>Thumbnails still work without it via ST's built-in <code>/thumbnail</code> (96x144 fixed). For larger / sharper sizes and on-disk caching, install cl-helper. <a href="#" class="cl-goto-info">Open cl-helper status &rarr;</a></span>
-                                </div>
-                            </div>
                             <div id="settingsGridThumbClHelperFields">
                                 <div class="settings-row" id="settingsGridThumbClHelperRow" style="padding-left: 24px;">
                                     <label>
-                                        <input type="checkbox" id="settingsGridThumbClHelper" checked> Use cl-helper to generate thumbnails (recommended)
+                                        <input type="checkbox" id="settingsGridThumbClHelper" checked> High-resolution thumbnails
                                     </label>
-                                    <span class="settings-hint">On: cl-helper resizes via jimp + caches on disk at the size you pick below. Requires the cl-helper plugin installed. Off: ST's built-in /thumbnail endpoint, fixed at 96x144 which looks blurry on retina-DPR phones.</span>
+                                    <span class="settings-hint">On: the archive renders a thumbnail at the size you pick below, cached on disk after the first request. Off: the inherited 96x144 cache, which is already complete for every card but looks blurry on retina-DPR screens.</span>
                                 </div>
                                 <div class="settings-row" id="settingsGridThumbSizeRow" style="padding-left: 24px;">
                                     <label for="settingsGridThumbSize">Thumbnail size:</label>
@@ -2018,15 +2004,6 @@ https://jannyai.com/characters/uuid_slug
                                         <option value="768" data-icon="fa-solid fa-image">Extra Large (768px wide)</option>
                                     </select>
                                     <span class="settings-hint">Larger = sharper on high-DPR screens, more decode cost. 512 is a good baseline.</span>
-                                </div>
-                                <div class="settings-row" id="settingsGridThumbCacheRow" style="padding-left: 24px;">
-                                    <label>Cache:</label>
-                                    <div class="settings-input-group">
-                                        <button id="settingsGridThumbPopulate" class="settings-action-btn primary"><i class="fa-solid fa-download"></i> Populate at current size</button>
-                                        <button id="settingsGridThumbPurge" class="settings-action-btn danger"><i class="fa-solid fa-trash"></i> Purge cache</button>
-                                    </div>
-                                    <span id="settingsGridThumbCacheStats" class="settings-hint">Loading...</span>
-                                    <span class="settings-hint">Populate pre-generates a thumbnail for every character at the size selected above (skips already-cached). Purge deletes all cached thumbnails (any size); next scroll regenerates on demand.</span>
                                 </div>
                             </div>
                         </div>
@@ -2484,31 +2461,6 @@ https://jannyai.com/characters/uuid_slug
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
                                 <span class="settings-hint" style="font-family: monospace;">Character Library <span id="clAppVersion">(version unavailable)</span></span>
-                            </div>
-                        </div>
-
-                        <div class="settings-group cl-hidden" id="clHelperStatusGroup">
-                            <div class="settings-group-title"><i class="fa-solid fa-puzzle-piece"></i> cl-helper Plugin</div>
-                            <div class="settings-row cl-hidden" id="clHelperStatusOk">
-                                <span class="settings-hint" style="font-family: monospace;">v<span id="clHelperStatusVersion">unknown</span> <i class="fa-solid fa-circle-check cl-helper-status-check"></i></span>
-                            </div>
-                            <div class="settings-row cl-hidden" id="clHelperStatusMissing">
-                                <span class="settings-hint">Not installed (optional, needed for some provider auth flows). <a href="https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary#cl-helper-plugin-not-detected" target="_blank" rel="noopener noreferrer">Setup guide &rarr;</a></span>
-                            </div>
-                        </div>
-
-                        <div class="cl-helper-banner cl-helper-update cl-hidden" id="clHelperUpdateBanner">
-                            <div class="cl-helper-banner-row">
-                                <i class="fa-solid fa-arrows-rotate"></i>
-                                <div>
-                                    <strong id="clHelperUpdateTitle">cl-helper update available</strong>
-                                    <span id="clHelperUpdateBody"></span>
-                                </div>
-                            </div>
-                            <div class="cl-helper-update-actions cl-hidden" id="clHelperUpdateActions">
-                                <button class="settings-action-btn primary" id="clHelperUpdateBtn">
-                                    <i class="fa-solid fa-arrows-rotate"></i> Update plugin files
-                                </button>
                             </div>
                         </div>
 

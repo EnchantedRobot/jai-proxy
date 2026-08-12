@@ -236,8 +236,15 @@ function extractMediaUrls(text) {
         urls.push(match[1]);
     }
     
-    // Match raw URLs for media files
-    const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+\.(?:png|jpg|jpeg|gif|webp|svg|mp4|webm|mov|mp3|wav|ogg|m4a)(?:\/[^\s<>"'{}|\\^`\[\]]+)?)/gi;
+    // Match raw URLs for media files. Parens terminate the match: bare URLs
+    // almost never contain them, but the text around them constantly does --
+    // a markdown closer `![](url.jpg)` left a trailing `)` on 1,323 URLs in the
+    // corpus, and `![]{{random:(a.jpg),(b.jpg),(c.jpg)}}` (a JanitorAI macro)
+    // ran the whole list together into one unfetchable string, so those cards'
+    // media never downloaded and the fake URLs landed in the dead ledger.
+    // The paren-bearing URLs that are real (postimg's "(1).png") arrive through
+    // the markdown branch above, which balances them deliberately.
+    const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`\[\]()]+\.(?:png|jpg|jpeg|gif|webp|svg|mp4|webm|mov|mp3|wav|ogg|m4a)(?:\/[^\s<>"'{}|\\^`\[\]()]+)?)/gi;
     while ((match = urlPattern.exec(text)) !== null) {
         urls.push(match[1]);
     }

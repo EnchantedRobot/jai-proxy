@@ -1,10 +1,49 @@
 # Phase 3C — Media download: one path, and the server owns the bytes
 
-> Status: **PLANNED.** Phase 3B (acquiring a card from Chub / DataCat through the browser)
-> is done and verified live. Phase 4 stays parked until this lands. 3C is a repair phase,
-> not a feature phase: media download is the last thing that came across from
-> SillyTavern-CharacterLibrary still wired to a host we deleted, and it is currently
-> *worse than broken* — it fails silently and records the failure as success.
+> Status: **BUILT AND EXERCISED — all acceptance items have evidence (2026-08-12).**
+>
+> Sequencing steps 1–8 have landed. `proxy/media/{names,writer,manifest,jobs,guard}.py`
+> exist, the server owns the bytes, both 3C-1 (the route) and 3C-2 (the job runner,
+> `POST /api/v1/media/jobs`) shipped, and the three poisoned `localStorage` blobs are
+> gone — the §1 defect below is fixed, not pending. Step 8 ran on 2026-08-12: 1,993
+> gallery files converted to WebP plus 2 pre-existing jpg/webp duplicates binned, so
+> `find data/galleries -name '*.jpg' | wc -l` is now **0**; `sync_thumbs.py --galleries`
+> reports **0 missing / 0 orphans** (12,319 thumbs regenerated after the renames, 4,327
+> orphans pruned, 521 dead cache folders dropped). The Playwright smoke gate exits 0
+> with zero console errors and zero failed requests.
+>
+> **Exercised for the first time on 2026-08-12** — a 14-card sample run through the
+> real browser path (`downloadCharacterMedia`, embedded + lorebook phases). All seven
+> acceptance items now have evidence; see §10.
+>
+> Two defects the sample found and closed, both outside the pipeline itself:
+>
+> - **`extractMediaUrls` mangled paren-bearing text** (`30-…:240`). Its bare-URL
+>   pattern excluded `{}` but not `()`, so a markdown closer left a trailing `)` on
+>   **1,323 URLs** corpus-wide and JanitorAI's `![]{{random:(a.jpg),(b.jpg)}}` macro
+>   ran a whole list into one unfetchable string. Those fabricated URLs 404ed and were
+>   filed as permanently dead — §1's laundering, one layer earlier than §1 looked.
+>   Excluding parens drops 1,323 junk URLs, loses **0** real ones (the genuine
+>   paren URLs — postimg's `(16).jpg` — come through the markdown branch, which
+>   balances them on purpose) and **recovers 385 URLs across 3 cards** that had never
+>   been downloadable. Regression test: `web/tests/media-urls.test.js`.
+> - **A name-match skip recorded nothing in the manifest**, while the hash-match skip
+>   beside it did. So a card whose media all predates this pipeline — 18,097 inherited
+>   files — reported `files: 0` from `/media/status` forever. `GalleryIndex` already
+>   hashes the folder, so the mapping costs one `stat`.
+>
+> Also fixed: `MediaManifestFileOut` omitted `size`, so `GET /characters/{id}/media`
+> dropped a field that was on disk.
+>
+> **Read §1 as history, not as a live bug** — but read it, because it is why the two
+> localStorage blobs were discarded rather than migrated.
+>
+> One thing this plan did not enumerate: four gallery extractors (dropbox, civitai,
+> imgchest, pixiv) still call `/plugins/cl-helper/*` routes that do not exist. Measured
+> against the corpus this is small — pixiv 10 URLs, civitai 17, dropbox 1, and
+> imgchest's 1,104 hits are direct `cdn.imgchest.com` links that need no extractor at
+> all (only password-protected posts use the unlock route). They degrade to a clear
+> error message, so they were left alone deliberately.
 
 ## 1. The headline defect
 
@@ -298,3 +337,30 @@ Then:
 8. `normalize_gallery_media.py`, dry-run reviewed, then `--apply`.
 9. 3C-2 — the job runner.
 10. Memory + `web/VENDORED.md` known-gaps updated.
+
+## 10. The first real run (2026-08-12)
+
+A 14-card sample, driven through the browser's own `downloadCharacterMedia` so
+discovery stayed where §3 puts it. Cards were picked to span the corpus's shapes:
+already-complete (the common case — 3,144 of the 3,187 cards carrying media URLs
+were fully downloaded under SillyTavern), partially complete, never downloaded,
+no gallery folder at all, and genuinely-dead links.
+
+| # | Acceptance item | Evidence |
+| --- | --- | --- |
+| 1 | §1 bug gone | Asari-Sensei (no gallery folder at all) → folder created, 2 files saved, 0 dead. Cassandra/Nyx/Rosalind → **385 files saved, 0 errors** after the discovery fix. |
+| 2 | Truly-dead is graceful | Sera (`files.catbox.moe/pmf0ex.webp`) and Ali (`i.redd.it/…`) → `skipped` with `HTTP 404`, both confirmed genuinely 404 by an independent `curl`. Recorded in `dead`, still `complete: true`, and the second run finished in 441 ms without re-fetching. |
+| 3 | Format | Every file written by the run is WebP — 100/100 for Cassandra, 126/126 for Nyx. `find data/galleries -name '*.jpg'` → 0. |
+| 4 | Thumbs | 100 files → 100 thumbs, 126 → 126, present the moment the response closed. `sync_thumbs.py --galleries` → 0 missing, 0 dead cache folders. |
+| 5 | Tracking | `GET /api/v1/media/status` answers for the whole archive in one call. Re-running Cassandra's 100 items took **485 ms with zero network**. |
+| 6 | Parity | The decisive test, and it is the corpus-wide case: cards whose galleries were filled by SillyTavern + CharacterLibrary report `skipped (filename match)` on every URL — Aelin 3/3, Ashley 3/3, Akari, Emma, Chika, Amelia, Vyxen 3/3. `names.py` reproduces CL's keys exactly; a divergence would have shown up as re-downloads. |
+| 7 | Console discipline | 0 console errors/warnings and 0 failed same-origin requests across every run, and the Playwright smoke gate still exits 0. |
+
+**Not covered by this sample**, and still unexercised: the `providerGallery` and
+`extGallery` phases (the run restricted itself to `embedded` + `lorebook`), the
+`POST .../media/bytes` door (MEGA/Pixiv), and the background job runner
+(`POST /api/v1/media/jobs`) — the sample called the streaming route directly.
+
+**Ledger hygiene.** The pre-fix run wrote 45 fabricated URLs into
+`data/state/dead_urls.json` and 41 into two manifests; all were purged (any dead
+URL containing a paren). The ledger holds 3 real entries.

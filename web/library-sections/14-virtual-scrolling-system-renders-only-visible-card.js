@@ -1462,33 +1462,9 @@ async function openModal(char, { navList } = {}) {
         if (taglineRow) taglineRow.style.display = 'none';
     }
 
-    // Creator Notes - Secure rendering with DOMPurify + sandboxed iframe
-    const creatorNotes = char.creator_notes || (char.data ? char.data.creator_notes : "") || "";
-    const notesBox = document.getElementById('modalCreatorNotesBox');
-    const notesContainer = document.getElementById('modalCreatorNotes');
-
-    if (creatorNotes && notesBox && notesContainer) {
-        notesBox.style.display = 'block';
-        const detailsEl = document.getElementById('creatorNotesDetails');
-        if (detailsEl) detailsEl.open = !!getSetting('expandCreatorNotes');
-        // Store raw content for fullscreen expand feature
-        window.currentCreatorNotesContent = creatorNotes;
-        // Use the shared secure rendering function
-        renderCreatorNotesSecure(creatorNotes, char.name, notesContainer);
-        initCreatorNotesHandlers();
-        // Show/hide expand button based on content length
-        const expandBtn = document.getElementById('creatorNotesExpandBtn');
-        if (expandBtn) {
-            const lineCount = (creatorNotes.match(/\n/g) || []).length + 1;
-            const charCount = creatorNotes.length;
-            const showExpand = lineCount >= CreatorNotesConfig.MIN_LINES_FOR_EXPAND || 
-                               charCount >= CreatorNotesConfig.MIN_CHARS_FOR_EXPAND;
-            expandBtn.style.display = showExpand ? 'flex' : 'none';
-        }
-    } else if (notesBox) {
-        notesBox.style.display = 'none';
-        window.currentCreatorNotesContent = null;
-    }
+    // Creator Notes - Secure rendering with DOMPurify + sandboxed iframe.
+    // A slim card has none yet; the post-hydrate call below is what fills the panel.
+    let creatorNotes = renderModalCreatorNotes(char);
 
     if (char._slim) {
         const sk = '<div class="cl-skeleton-line"></div><div class="cl-skeleton-line"></div><div class="cl-skeleton-line short"></div>';
@@ -1638,6 +1614,11 @@ async function openModal(char, { navList } = {}) {
             document.getElementById('modalFirstMes').innerHTML = err;
             return;
         }
+
+        // Notes only arrive with the detail fetch, so this is the call that
+        // actually paints the panel -- and the value paintModalHeavyContent
+        // must forward to the media scanner.
+        creatorNotes = renderModalCreatorNotes(char);
     }
 
     paintModalHeavyContent(char, creatorNotes, gen);

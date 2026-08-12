@@ -18,6 +18,22 @@
 > feature — deleting the stubs would turn their errors from a clean 501 message into
 > a raw 404. `provider-utils.js:importFromPng` (and its now-orphaned helpers) WAS
 > deleted, since nothing calls it anymore now that both providers use `postCapture()`.
+>
+> **B4 finished 2026-08-12.** It was recorded as shipped above but only the
+> `CL_HELPER_PLUGIN_BASE` repoint had actually happened; the UI was still there and the
+> boot probe still fired, which is what kept the Playwright gate failing on three 404s
+> (`/plugins/cl-helper/health`, `/avatar-thumb-stats`, `/avatar-thumb-populate-status`).
+> Now deleted: the probe and its cached state, the update banner + self-update flow, the
+> `clHelperStatusGroup`, the thumb banner, the avatar-thumb cache-management row (no
+> route ever backed it), the `minClHelperVersion` provider gate (dead — neither chub nor
+> datacat overrides it) and `compareVersions` with it. ~215 lines out of
+> `06-settings-migrations.js`. The thumbnail size selector was **kept and relabelled**:
+> it drives a real archive route, only the "cl-helper" naming was fiction. The gate now
+> exits 0 with zero console errors.
+>
+> Still cl-helper-shaped and deliberately left: the Civitai / Pixiv / botbooru key-sync
+> handlers and four gallery extractors. They fire only on user action, degrade to a clear
+> message, and cover a measured handful of corpus URLs — see the 3C plan's status header.
 
 ## 1. What went wrong in Phase 3A
 

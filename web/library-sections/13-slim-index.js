@@ -2,10 +2,17 @@
 // SLIM INDEX
 // ========================================
 
+// `creator_notes` is heavy here even though SillyTavern served it on the list
+// endpoint: the archive's list payload carries no prose (archive-api.js
+// toCharacter blanks it -- 13.3 MB of notes would more than double the boot
+// payload), so the detail fetch is the only place it arrives. Leaving it out
+// blanked the modal's notes panel, made Copy Raw Card Data emit
+// `creator_notes: ""`, and -- worst -- hid it from the media scanner's field
+// list, which is where most cards keep their gallery links.
 const HEAVY_FIELDS = [
     'description', 'first_mes', 'personality', 'scenario',
     'mes_example', 'system_prompt', 'post_history_instructions',
-    'alternate_greetings', 'character_book'
+    'alternate_greetings', 'character_book', 'creator_notes'
 ];
 
 /**

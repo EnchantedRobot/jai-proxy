@@ -273,6 +273,9 @@ class MediaManifestFileOut(BaseModel):
     file: str
     sha256: str
     at: str
+    # Recorded by the writer and summed by `GET /media/status`; without it here
+    # the per-card read silently drops a field that is on disk.
+    size: int | None = None
 
 
 class MediaManifestDeadOut(BaseModel):

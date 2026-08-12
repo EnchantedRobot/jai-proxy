@@ -25,6 +25,17 @@ def ignored(text):
     return any(p.search(text) for p in IGNORE)
 
 
+def foreign(url):
+    """True for a request to somewhere other than the server under test.
+
+    Cards carry remote CDN links -- creator-notes images especially -- and the
+    sandboxed notes iframe fetches them for real. Whether janitorai's CDN answers
+    is not what this test is about (that is media localization's job); a route
+    *we* failed to implement is. Judge only our own origin.
+    """
+    return not url.startswith(BASE)
+
+
 def main():
     errors, failed = [], []
     result = {"label": LABEL}
@@ -39,10 +50,10 @@ def main():
         page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
         page.on("requestfailed", lambda r: (
             failed.append(f"{r.url} {r.failure}")
-            if not ignored(r.url) else None))
+            if not ignored(r.url) and not foreign(r.url) else None))
         page.on("response", lambda r: (
             failed.append(f"HTTP {r.status} {r.url}")
-            if r.status >= 400 and not ignored(r.url) else None))
+            if r.status >= 400 and not ignored(r.url) and not foreign(r.url) else None))
 
         try:
             drive(page, result)
@@ -66,9 +77,14 @@ def drive(page, result):
             ".character-card, .char-card", "els => els.length")
         result["total_characters"] = page.evaluate(
             "() => (window.allCharacters || []).length")
+        # An `<img>` with no src attribute reports i.src as the page origin, not '' --
+        # the markup has five such placeholders (gv-image, provider-link-avatar, ...)
+        # waiting to be pointed at something. They are not failures; excluding them
+        # is what makes a non-zero count here mean an image that genuinely would not load.
         result["thumbs_broken"] = page.evaluate(
             "() => [...document.images].filter(i => i.complete && "
-            "i.naturalWidth === 0 && i.src && !i.src.startsWith('data:')).length")
+            "i.naturalWidth === 0 && i.src && !i.src.startsWith('data:') && "
+            "i.src !== location.origin + '/').length")
 
         # --- detail modal ---
         page.eval_on_selector(".character-card, .char-card", "el => el.click()")
@@ -79,6 +95,13 @@ def drive(page, result):
         result["portrait_ok"] = page.evaluate(
             "() => { const i = document.querySelector('#charModal img'); "
             "return !!i && i.naturalWidth > 0; }")
+
+        # Creator notes arrive only with the detail fetch (they are not in the
+        # list payload), so a hydration gap blanks them silently -- the panel
+        # just stays hidden and nothing errors. 79% of the archive has notes,
+        # so a card with none is possible but a *string* is not optional.
+        result["creator_notes_len"] = page.evaluate(
+            "() => (window.currentCreatorNotesContent || '').length")
 
         # --- gallery tab ---
         tab = page.query_selector("#charModal .tab-btn[data-tab='gallery']")

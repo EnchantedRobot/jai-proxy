@@ -266,222 +266,6 @@ function updateThemeCustomizerVisibility() {
     row.style.display = getSetting('themeCustomizer') ? '' : 'none';
 }
 
-// Last /health answer, so the provider enable gate does not re-probe. _clHelperProbed stays false
-// until one probe finishes either way, so an early click fails open instead of crying "missing".
-let _clHelperRunningVersion = null;
-let _clHelperAvailable = false;
-let _clHelperProbed = false;
-
-/**
- * Compare dotted numeric versions. Fails OPEN on anything unparseable, so a malformed version
- * can never gate a user out of enabling something.
- * @returns {number} negative if a < b, 0 if equal or unknown, positive if a > b
- */
-function compareVersions(a, b) {
-    const parse = (v) => {
-        const m = String(v ?? '').trim().match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
-        return m ? [Number(m[1]), Number(m[2] || 0), Number(m[3] || 0)] : null;
-    };
-    const pa = parse(a);
-    const pb = parse(b);
-    if (!pa || !pb) return 0;
-    for (let i = 0; i < 3; i++) {
-        if (pa[i] !== pb[i]) return pa[i] - pb[i];
-    }
-    return 0;
-}
-
-/**
- * Check cl-helper plugin availability and update settings UI accordingly.
- */
-async function checkClHelperPlugin(...pairs) {
-    let available = false;
-    let runningVersion = null;
-    let linkedInstall = false;
-    let isAdmin = false;
-    try {
-        const resp = await apiRequest('/plugins/cl-helper/health');
-        if (resp.ok) {
-            const data = await resp.json();
-            available = data?.ok === true;
-            runningVersion = data?.version || null;
-            linkedInstall = data?.linked === true;
-            isAdmin = data?.admin === true;
-            debugLog('[cl-helper] health:', JSON.stringify(data));
-        } else {
-            debugLog('[cl-helper] health check failed:', resp.status);
-        }
-    } catch (e) { debugLog('[cl-helper] not reachable:', e.message); }
-    // Assigned outside the ok-branch so a helper that WAS present and went away cannot leave a
-    // stale-positive cache behind for the provider version gate.
-    _clHelperAvailable = available;
-    _clHelperRunningVersion = available ? runningVersion : null;
-    _clHelperProbed = true;
-
-    refreshClHelperUpdateBanner(available, runningVersion, linkedInstall, isAdmin);
-
-    for (let i = 0; i < pairs.length; i += 2) {
-        const banner = pairs[i];
-        const field = pairs[i + 1];
-        if (!banner || !field) continue;
-        if (available) {
-            banner.classList.add('cl-hidden');
-            field.classList.remove('cl-helper-fields-disabled');
-        } else {
-            banner.classList.remove('cl-hidden');
-            field.classList.add('cl-helper-fields-disabled');
-        }
-    }
-    return available;
-}
-
-let _bundledClHelperVersion = null;
-let _bundledClHelperFetchInflight = null;
-
-async function _fetchBundledClHelperVersion() {
-    if (_bundledClHelperVersion !== null) return _bundledClHelperVersion;
-    if (_bundledClHelperFetchInflight) return _bundledClHelperFetchInflight;
-    _bundledClHelperFetchInflight = (async () => {
-        try {
-            const r = await fetch('../extras/cl-helper/package.json', { cache: 'no-cache' });
-            if (!r.ok) return null;
-            const pkg = await r.json();
-            return pkg?.version ? String(pkg.version) : null;
-        } catch { return null; }
-    })();
-    const v = await _bundledClHelperFetchInflight;
-    if (v) _bundledClHelperVersion = v;
-    _bundledClHelperFetchInflight = null;
-    return v;
-}
-
-async function refreshClHelperUpdateBanner(available, runningVersion, linkedInstall, isAdmin) {
-    const statusGroup = document.getElementById('clHelperStatusGroup');
-    const banner = document.getElementById('clHelperUpdateBanner');
-    if (!statusGroup || !banner) return;
-    const statusOk = document.getElementById('clHelperStatusOk');
-    const statusMissing = document.getElementById('clHelperStatusMissing');
-
-    if (!available || !runningVersion) {
-        if (statusOk) statusOk.classList.add('cl-hidden');
-        if (statusMissing) statusMissing.classList.remove('cl-hidden');
-        statusGroup.classList.remove('cl-hidden');
-        banner.classList.add('cl-hidden');
-        return;
-    }
-
-    const bundled = await _fetchBundledClHelperVersion();
-    const upToDate = !bundled || bundled === runningVersion;
-
-    if (upToDate) {
-        if (statusMissing) statusMissing.classList.add('cl-hidden');
-        if (statusOk) statusOk.classList.remove('cl-hidden');
-        const versionEl = document.getElementById('clHelperStatusVersion');
-        if (versionEl) versionEl.textContent = runningVersion;
-        statusGroup.classList.remove('cl-hidden');
-        banner.classList.add('cl-hidden');
-        return;
-    }
-
-    statusGroup.classList.add('cl-hidden');
-    const titleEl = document.getElementById('clHelperUpdateTitle');
-    const bodyEl = document.getElementById('clHelperUpdateBody');
-    const actionsEl = document.getElementById('clHelperUpdateActions');
-    if (titleEl) titleEl.textContent = `cl-helper update available (running ${runningVersion}, bundled ${bundled})`;
-    if (bodyEl) {
-        if (linkedInstall) {
-            bodyEl.textContent = 'Symlinked to the extension. Restart SillyTavern to load.';
-        } else if (!isAdmin) {
-            bodyEl.textContent = 'Ask your SillyTavern administrator to update the cl-helper plugin.';
-        } else {
-            bodyEl.textContent = 'Update the plugin files, then restart SillyTavern.';
-        }
-    }
-    if (actionsEl) actionsEl.classList.toggle('cl-hidden', linkedInstall || !isAdmin);
-    banner.classList.remove('cl-hidden');
-}
-
-async function performClHelperSelfUpdate(btn) {
-    if (!btn) return;
-    const origHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Preparing...';
-    let files;
-    let installPath = 'SillyTavern/plugins/cl-helper/';
-    let runningVersion = 'unknown';
-    let bundledVersion = 'unknown';
-    try {
-        files = {};
-        for (const name of ['package.json', 'index.js']) {
-            const r = await fetch(`../extras/cl-helper/${name}`, { cache: 'no-cache' });
-            if (!r.ok) throw new Error(`could not read bundled ${name} (${r.status})`);
-            files[name] = await r.text();
-        }
-        const healthResp = await apiRequest('/plugins/cl-helper/health');
-        const health = healthResp.ok ? await healthResp.json().catch(() => null) : null;
-        if (health?.installPath) installPath = String(health.installPath);
-        if (health?.version) runningVersion = String(health.version);
-        try {
-            const parsed = JSON.parse(files['package.json']);
-            if (parsed?.version) bundledVersion = String(parsed.version);
-        } catch {}
-    } catch (e) {
-        btn.disabled = false;
-        btn.innerHTML = origHtml;
-        showToast(`Update preflight failed: ${e.message}`, 'error', 6000);
-        return;
-    }
-    btn.disabled = false;
-    btn.innerHTML = origHtml;
-
-    const fmtSize = (s) => {
-        const bytes = new Blob([s]).size;
-        return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
-    };
-    const messageHtml = `
-        <div class="cl-helper-update-summary">
-            <div><span class="cl-update-label">Source:</span> <code>extras/cl-helper/</code> in your Character Library extension folder (v${escapeHtml(bundledVersion)})</div>
-            <div><span class="cl-update-label">Destination:</span> <code>${escapeHtml(installPath)}</code> (currently v${escapeHtml(runningVersion)})</div>
-            <div><span class="cl-update-label">Files to write:</span></div>
-            <ul>
-                <li><code>package.json</code> (${fmtSize(files['package.json'])})</li>
-                <li><code>index.js</code> (${fmtSize(files['index.js'])})</li>
-            </ul>
-            <p class="cl-update-note">The current files will be saved as <code>package.json.bak</code> and <code>index.js.bak</code> next to the originals. After the update, restart SillyTavern to load the new version.</p>
-        </div>
-    `;
-    const confirmed = await showConfirm({
-        title: 'Update cl-helper plugin?',
-        messageHtml,
-        icon: 'fa-solid fa-arrows-rotate',
-        confirmLabel: 'Update plugin files',
-        cancelLabel: 'Cancel',
-    });
-    if (!confirmed) return;
-
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Updating...';
-    try {
-        const resp = await apiRequest('/plugins/cl-helper/self-update', 'POST', { files });
-        const data = await resp.json().catch(() => null);
-        if (!resp.ok || !data?.ok) {
-            throw new Error(data?.error || `HTTP ${resp.status}`);
-        }
-        const installedVersion = data?.version || bundledVersion;
-        showToast(`cl-helper updated to v${installedVersion}. Restart SillyTavern to load it.`, 'success', 8000);
-        const titleEl = document.getElementById('clHelperUpdateTitle');
-        const bodyEl = document.getElementById('clHelperUpdateBody');
-        const actionsEl = document.getElementById('clHelperUpdateActions');
-        if (titleEl) titleEl.textContent = 'cl-helper update installed';
-        if (bodyEl) bodyEl.textContent = `Restart SillyTavern to load v${installedVersion}.`;
-        if (actionsEl) actionsEl.classList.add('cl-hidden');
-    } catch (e) {
-        showToast(`Update failed: ${e.message}. Copy extras/cl-helper/ over SillyTavern/plugins/cl-helper/ manually instead.`, 'error', 8000);
-        btn.disabled = false;
-        btn.innerHTML = origHtml;
-    }
-}
-
 /**
  * Setup the Gallery Settings Modal
  */
@@ -553,10 +337,6 @@ function setupSettingsModal() {
     const gridThumbDesktopRow = document.getElementById('settingsGridThumbDesktopRow');
     const gridThumbClHelperRow = document.getElementById('settingsGridThumbClHelperRow');
     const gridThumbSizeRow = document.getElementById('settingsGridThumbSizeRow');
-    const gridThumbCacheRow = document.getElementById('settingsGridThumbCacheRow');
-    const gridThumbCacheStats = document.getElementById('settingsGridThumbCacheStats');
-    const gridThumbPopulateBtn = document.getElementById('settingsGridThumbPopulate');
-    const gridThumbPurgeBtn = document.getElementById('settingsGridThumbPurge');
     
     // Appearance
     const mobileModeSelect = document.getElementById('settingsMobileMode');
@@ -599,36 +379,12 @@ function setupSettingsModal() {
         if (orderItem) orderItem.classList.toggle('provider-disabled', isNowDisabled);
     }
 
-    /**
-     * Advisory, not blocking: the user can enable anyway and fix the plugin after.
-     * @returns {Promise<boolean>} true to continue enabling
-     */
-    async function confirmClHelperVersion(prov) {
-        const need = prov?.minClHelperVersion;
-        if (!need || !_clHelperProbed) return true;
-        const running = _clHelperRunningVersion;
-        const tooOld = _clHelperAvailable && running && compareVersions(running, need) < 0;
-        if (_clHelperAvailable && !tooOld) return true;
-
-        return showConfirm({
-            title: `${prov.name} needs the cl-helper plugin`,
-            message: tooOld
-                ? `${prov.name} needs cl-helper ${need} or newer, and this server is running ${running}. Until it is updated, its features will fail. You can update it under Settings > Info, which also explains how.`
-                : `${prov.name} needs the cl-helper plugin, which is not installed on this server. Without it, its features will fail. Settings > Info has the install steps.`,
-            icon: 'fa-solid fa-plug-circle-exclamation',
-            confirmLabel: 'Enable anyway',
-        });
-    }
-
     function wireProviderToggleListeners(container, viewProviders) {
         container.querySelectorAll('.provider-toggle-btn').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const isCurrentlyDisabled = btn.classList.contains('disabled');
                 const pid = btn.dataset.provider;
                 const prov = viewProviders.find(p => p.id === pid);
-
-                // Version first: a stale helper blocks the provider, enableWarning only warns.
-                if (isCurrentlyDisabled && !(await confirmClHelperVersion(prov))) return;
 
                 if (isCurrentlyDisabled && prov?.enableWarning) {
                     // Canonical confirm: stacks above the settings cl-modal (a raw .confirm-modal sits
@@ -1464,13 +1220,8 @@ function setupSettingsModal() {
             });
         }
 
-        // Check cl-helper plugin availability for provider + cl-helper-backed feature sections
-        const gridThumbsClHelperBanner = document.getElementById('gridThumbsClHelperBanner');
-        const settingsGridThumbClHelperFields = document.getElementById('settingsGridThumbClHelperFields');
-        checkClHelperPlugin(gridThumbsClHelperBanner, settingsGridThumbClHelperFields);
         // DataCat's own session transport lives in the archive server now, not
-        // behind cl-helper (see docs/PHASE_3B_PLAN.md S2) -- its status badge no
-        // longer waits on that probe.
+        // behind a plugin (see docs/PHASE_3B_PLAN.md S2).
         if (datacatSessionStatus) {
             datacatSessionStatus.className = 'settings-status-badge inactive';
             datacatSessionStatus.innerHTML = '<i class="fa-solid fa-circle"></i> Checking...';
@@ -1656,13 +1407,6 @@ function setupSettingsModal() {
         }
 
         settingsModal.classList.add('visible');
-        // cl-helper may not be ready at page load, so refresh stats every time the panel opens.
-        refreshGridThumbCacheStats?.();
-        // If a populate job is running (from earlier in this or a previous session), reattach to it.
-        fetch('/api/plugins/cl-helper/avatar-thumb-populate-status').then(r => r.ok ? r.json() : null).then(job => {
-            if (job?.running) startPopulatePolling?.();
-            else paintPopulateButton?.(null);
-        }).catch(() => {});
     };
     
     // Settings sidebar navigation
@@ -1683,14 +1427,6 @@ function setupSettingsModal() {
         });
     });
 
-    // Inline "Open cl-helper status" links inside cl-helper-banner blocks jump to the Info section.
-    settingsModal.addEventListener('click', (e) => {
-        const link = e.target.closest('.cl-goto-info');
-        if (!link) return;
-        e.preventDefault();
-        switchSettingsSection('info');
-    });
-    
     // Settings search/filter
     const settingsSearchInput = document.getElementById('settingsSearchInput');
     if (settingsSearchInput) {
@@ -1860,115 +1596,15 @@ function setupSettingsModal() {
         if (gridThumbDesktopRow) gridThumbDesktopRow.classList.toggle('disabled', !masterOn);
         if (gridThumbClHelperCheckbox) gridThumbClHelperCheckbox.disabled = !masterOn;
         if (gridThumbClHelperRow) gridThumbClHelperRow.classList.toggle('disabled', !masterOn);
-        // Size + cache management only meaningful when master AND cl-helper are on.
+        // Size only meaningful when master AND high-res thumbs are on.
         if (gridThumbSizeSelect) gridThumbSizeSelect.disabled = !sizeOn;
         if (gridThumbSizeRow) gridThumbSizeRow.classList.toggle('disabled', !sizeOn);
-        if (gridThumbPopulateBtn) gridThumbPopulateBtn.disabled = !sizeOn;
-        if (gridThumbPurgeBtn) gridThumbPurgeBtn.disabled = !sizeOn;
-        if (gridThumbCacheRow) gridThumbCacheRow.classList.toggle('disabled', !sizeOn);
     }
     if (useGridThumbnailsCheckbox) {
         useGridThumbnailsCheckbox.addEventListener('change', applyGridThumbsDisabledStates);
     }
     if (gridThumbClHelperCheckbox) {
         gridThumbClHelperCheckbox.addEventListener('change', applyGridThumbsDisabledStates);
-    }
-
-    function formatBytes(b) {
-        if (b < 1024) return `${b} B`;
-        if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-        if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`;
-        return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-    }
-    async function refreshGridThumbCacheStats() {
-        if (!gridThumbCacheStats) return;
-        try {
-            const r = await fetch('/api/plugins/cl-helper/avatar-thumb-stats');
-            if (!r.ok) { gridThumbCacheStats.textContent = 'cl-helper unavailable'; return; }
-            const d = await r.json();
-            if (!d.available) { gridThumbCacheStats.textContent = 'cl-helper unavailable'; return; }
-            gridThumbCacheStats.textContent = `${d.count} file(s), ${formatBytes(d.bytes)}`;
-        } catch {
-            gridThumbCacheStats.textContent = 'cl-helper unreachable';
-        }
-    }
-    let _populatePollTimer = null;
-    function stopPopulatePolling() {
-        if (_populatePollTimer) { clearInterval(_populatePollTimer); _populatePollTimer = null; }
-    }
-    function paintPopulateButton(job) {
-        if (!gridThumbPopulateBtn) return;
-        if (!job || !job.running) {
-            gridThumbPopulateBtn.innerHTML = '<i class="fa-solid fa-download"></i> Populate at current size';
-            applyGridThumbsDisabledStates();
-            return;
-        }
-        gridThumbPopulateBtn.disabled = true;
-        gridThumbPopulateBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${job.processed}/${job.total}`;
-    }
-    async function pollPopulateStatus() {
-        try {
-            const r = await fetch('/api/plugins/cl-helper/avatar-thumb-populate-status');
-            if (!r.ok) return;
-            const job = await r.json();
-            paintPopulateButton(job);
-            refreshGridThumbCacheStats();
-            if (job && !job.running && job.finishedAt) {
-                stopPopulatePolling();
-                showToast?.(`Populate done: ${job.generated} new, ${job.skipped} cached, ${job.failed} failed`, job.failed ? 'warning' : 'success');
-            }
-        } catch { /* keep polling until next tick */ }
-    }
-    function startPopulatePolling() {
-        stopPopulatePolling();
-        pollPopulateStatus();
-        _populatePollTimer = setInterval(pollPopulateStatus, 1500);
-    }
-    if (gridThumbPopulateBtn) {
-        gridThumbPopulateBtn.addEventListener('click', async () => {
-            const size = parseInt(gridThumbSizeSelect?.value) || 512;
-            gridThumbPopulateBtn.disabled = true;
-            try {
-                const r = await apiRequest(`/plugins/cl-helper/avatar-thumb-populate?s=${size}`, 'POST');
-                if (r.ok) {
-                    const d = await r.json();
-                    showToast?.(`Populating ${d.total} characters in the background...`, 'info');
-                    startPopulatePolling();
-                } else if (r.status === 409) {
-                    showToast?.('Populate already running, attaching to existing job', 'info');
-                    startPopulatePolling();
-                } else {
-                    showToast?.(`Populate failed to start (HTTP ${r.status})`, 'error');
-                    applyGridThumbsDisabledStates();
-                }
-            } catch (e) {
-                showToast?.(`Populate failed: ${e.message}`, 'error');
-                applyGridThumbsDisabledStates();
-            }
-        });
-    }
-    if (gridThumbPurgeBtn) {
-        gridThumbPurgeBtn.addEventListener('click', async () => {
-            if (!confirm('Purge all cached avatar thumbnails? They will be regenerated on next scroll.')) return;
-            const original = gridThumbPurgeBtn.innerHTML;
-            gridThumbPurgeBtn.disabled = true;
-            gridThumbPurgeBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Purging...';
-            try {
-                const r = await apiRequest('/plugins/cl-helper/avatar-thumb-cleanup', 'POST');
-                if (r.ok) {
-                    const d = await r.json();
-                    showToast?.(`Purged ${d.deleted} cached thumbnail(s)`, 'success');
-                } else {
-                    showToast?.(`Purge failed (HTTP ${r.status})`, 'error');
-                }
-            } catch (e) {
-                showToast?.(`Purge failed: ${e.message}`, 'error');
-            } finally {
-                gridThumbPurgeBtn.innerHTML = original;
-                applyGridThumbsDisabledStates();
-                refreshGridThumbCacheStats();
-            }
-        });
     }
 
     if (themeCustomizerCheckbox) {
@@ -3079,11 +2715,6 @@ function setupSettingsModal() {
     document.addEventListener('cl-extensions-recovered', () => {
         updateGalleryMigrationStatus();
     });
-
-    const clHelperUpdateBtn = document.getElementById('clHelperUpdateBtn');
-    if (clHelperUpdateBtn) {
-        clHelperUpdateBtn.addEventListener('click', () => performClHelperSelfUpdate(clHelperUpdateBtn));
-    }
 }
 
 // Helper to get cookie value
