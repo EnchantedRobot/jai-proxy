@@ -29,6 +29,7 @@ from proxy.api.build_schemas import (
     DatacatBuildRequest,
     SaucepanBuildRequest,
 )
+from proxy.archive import catalog
 from proxy.cards.models import CaptureRecord, CharacterBook, CharacterCardV3, ProfileFields
 from proxy.runtime import dashboard
 from proxy.sources import chub, datacat, janitor, saucepan
@@ -171,6 +172,14 @@ async def fetch_avatar_and_write(
     for a raw dict), and announce the result on the dashboard."""
     avatar_bytes = await deps.avatar_fetcher.fetch(avatar_url, avatar_b64)
     path = write_fn(avatar_bytes)
+    # The archive index debounces its stat sweep by 2s, and the browser reads the
+    # card back the moment this returns (finishBrowseImport -> /api/characters/get,
+    # ~200ms later). Without forcing the sweep here that read 404s, the fallback
+    # full-list refetch lands inside the same window and misses the card too, and
+    # the just-imported character stays out of `allCharacters` -- so the browse
+    # grid never marks it as in-library. The v1 write routes force the same
+    # refresh for the same reason.
+    catalog.index().refresh(force=True)
     _record_download(source=source, name=name, creator=creator, filename=path.name)
     return BuildResponse(ok=True, path=str(path), warnings=warnings, fields_present=fields_present)
 
