@@ -553,10 +553,6 @@ export function renderSkeletonGrid(...args) {
     window.renderSkeletonGrid?.(...args);
 }
 
-export function openGalleryInfoModal(...args) {
-    window.openGalleryInfoModal?.(...args);
-}
-
 export function renderEmptyState(container, opts) {
     window.renderEmptyState?.(container, opts);
 }
@@ -1337,7 +1333,6 @@ export default {
     // Rendering
     renderLoadingState,
     renderSkeletonGrid,
-    openGalleryInfoModal,
     renderEmptyState,
     getCharacterAvatarStThumbUrl,
     getListingNameFromExtensions,

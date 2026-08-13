@@ -248,7 +248,6 @@ window.registerOverlay?.({ id: 'importSummaryModal', tier: 4, close: () => handl
 // Tier 7 so they close before charModal (tier 8) on back/Escape.
 const _hideClModalVisible = id => () => document.getElementById(id)?.classList.remove('visible');
 window.registerOverlay?.({ id: 'gallerySettingsModal',      tier: 7, close: _hideClModalVisible('gallerySettingsModal') });
-window.registerOverlay?.({ id: 'galleryInfoModal',          tier: 7, close: _hideClModalVisible('galleryInfoModal') });
 window.registerOverlay?.({ id: 'importModal',               tier: 7, close: _hideClModalVisible('importModal') });
 window.registerOverlay?.({ id: 'localizeModal',             tier: 7, close: _hideClModalVisible('localizeModal') });
 window.registerOverlay?.({ id: 'bulkLocalizeModal',         tier: 7, close: _hideClModalVisible('bulkLocalizeModal') });

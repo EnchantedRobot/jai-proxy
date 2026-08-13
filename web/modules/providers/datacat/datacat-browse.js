@@ -54,7 +54,6 @@ const {
     getProviderExcludeTags,
     renderLoadingState,
     renderSkeletonGrid,
-    openGalleryInfoModal,
 } = CoreAPI;
 
 // ========================================
@@ -676,7 +675,6 @@ async function loadCharacters(append = false) {
                         <p style="margin-top: 8px;">${bridgeUp
                             ? 'The userscript is connected, but the browser\'s Cloudflare pass for janitorai.com is missing or has expired. Open <a href="https://janitorai.com" target="_blank" rel="noopener" style="color: var(--accent);">janitorai.com</a>, let the page fully load, then retry here. The other JanitorAI sort orders (MeiliSearch) always work.'
                             : 'JanitorAI\'s Hampter sort orders sit behind Cloudflare, which blocked this load. Direct access is unreliable; the companion <strong>userscript</strong> makes it dependable. The other JanitorAI sort orders (MeiliSearch) always work.'}</p>
-                        ${bridgeUp ? '' : '<p style="margin-top: 12px;"><a href="#" id="datacatHampterHelpLink" style="color: var(--accent);">How to set up the userscript &rarr;</a></p>'}
                         <button class="glass-btn" style="margin-top: 12px;" id="datacatRetryBtn">
                             <i class="fa-solid fa-redo"></i> Retry
                         </button>
@@ -694,10 +692,6 @@ async function loadCharacters(append = false) {
             }
             const retryBtn = document.getElementById('datacatRetryBtn');
             if (retryBtn) retryBtn.addEventListener('click', () => loadCharacters(false));
-            document.getElementById('datacatHampterHelpLink')?.addEventListener('click', (e) => {
-                e.preventDefault();
-                openGalleryInfoModal('providers', 'helpDatacatHampter');
-            });
         }
     } finally {
         if (thisToken === datacatLoadToken) {

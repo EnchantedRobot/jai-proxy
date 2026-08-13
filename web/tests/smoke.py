@@ -129,19 +129,6 @@ def drive(page, result):
         page.keyboard.press("Escape")
         page.wait_for_timeout(500)
 
-        # --- help modal, every section ---
-        page.click("#moreOptionsBtn")
-        page.wait_for_timeout(400)
-        page.click("#galleryInfoBtn")
-        page.wait_for_timeout(1000)
-        result["help_sections"] = page.eval_on_selector_all(
-            ".help-nav-item", "els => els.map(e => e.dataset.section)")
-        for sec in result["help_sections"]:
-            page.click(f".help-nav-item[data-section='{sec}']")
-            page.wait_for_timeout(300)
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(500)
-
         # --- toolbar surface ---
         result["toolbar_buttons"] = page.eval_on_selector_all(
             ".filter-area#filterArea > *, .filter-area#filterArea button[id]",

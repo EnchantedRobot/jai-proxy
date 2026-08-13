@@ -144,7 +144,6 @@ body.modal-size-small .browse-expand-modal[data-size="compact"] { width: 440px !
 body.modal-size-small .browse-expand-modal[data-size="normal"] { width: 600px !important; height: 64vh; }
 body.modal-size-small .browse-expand-modal[data-size="wide"] { width: 800px !important; height: 68vh; }
 body.modal-size-small .cl-modal-content.provider-link-modal-content { max-width: 480px; }
-body.modal-size-small .cl-modal-content.gallery-info-modal-content { max-width: 840px; max-height: 68vh; }
 body.modal-size-small .confirm-modal-content { max-width: 480px; max-height: 64vh; }
 body.modal-size-small .cl-modal-content.recommender-modal-content { max-width: 544px; max-height: 76vh; }
 body.modal-size-small #disableGalleryFoldersModal .cl-modal-content { max-width: 400px; }
@@ -186,7 +185,6 @@ body.modal-size-large .browse-expand-modal[data-size="compact"] { width: 687px !
 body.modal-size-large .browse-expand-modal[data-size="normal"] { width: 937px !important; height: 100vh; max-height: 97vh; }
 body.modal-size-large .browse-expand-modal[data-size="wide"] { width: 1250px !important; height: 100vh; max-height: 97vh; }
 body.modal-size-large .cl-modal-content.provider-link-modal-content { max-width: 750px; }
-body.modal-size-large .cl-modal-content.gallery-info-modal-content { max-width: 1312px; max-height: 100vh; }
 body.modal-size-large .confirm-modal-content { max-width: 750px; max-height: 100vh; }
 body.modal-size-large .cl-modal-content.recommender-modal-content { max-width: 850px; max-height: 100vh; }
 body.modal-size-large #disableGalleryFoldersModal .cl-modal-content { max-width: 625px; }
@@ -5871,135 +5869,6 @@ html.cl-mobile .char-portrait-container.editing-unlocked .portrait-edit-overlay 
     flex: 1;
 }
 
-/* ================================================
-   Help & Tips Modal
-   ================================================ */
-
-.cl-modal-content.gallery-info-modal-content {
-    max-width: calc(1050px * var(--modal-scale, 1));
-    max-height: calc(85vh * var(--modal-scale, 1));
-    width: 95vw;
-}
-
-/* Help sidebar layout (mirrors settings) */
-.help-layout {
-    display: flex;
-    flex: 1;
-    overflow: hidden;
-    min-height: 0;
-    height: calc(85vh - 130px);
-}
-
-.help-sidebar {
-    width: 170px;
-    min-width: 170px;
-    background: rgba(0, 0, 0, 0.2);
-    border-right: 1px solid var(--glass-border);
-    padding: 10px 0;
-    overflow-y: auto;
-}
-
-.help-nav {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
-.help-nav-item {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm-md);
-    padding: 11px 14px;
-    cursor: pointer;
-    color: var(--text-secondary);
-    transition: all 0.2s ease;
-    border-left: 3px solid transparent;
-    font-size: var(--font-md);
-}
-
-.help-nav-item:hover {
-    background: rgba(255, 255, 255, 0.05);
-    color: var(--text-primary);
-}
-
-.help-nav-item.active {
-    background: rgba(var(--accent-rgb), 0.1);
-    color: var(--accent);
-    border-left-color: var(--accent);
-}
-
-.help-nav-item i {
-    width: 16px;
-    text-align: center;
-    font-size: var(--font-md-lg);
-}
-
-.help-content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 20px;
-    font-size: var(--font-md);
-}
-
-.help-panel {
-    display: none;
-}
-
-.help-panel.active {
-    display: block;
-}
-
-.info-section {
-    margin-bottom: 20px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid var(--glass-border);
-}
-
-.info-section:last-child {
-    border-bottom: none;
-    margin-bottom: 0;
-}
-
-.info-section h4 {
-    margin: 0 0 12px 0;
-    color: var(--accent);
-    font-size: var(--font-pre-base);
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-}
-
-.info-section p {
-    margin: 0 0 10px 0;
-    color: var(--text-secondary);
-    line-height: 1.5;
-}
-
-.info-section ul {
-    margin: 0;
-    padding-left: 20px;
-    color: var(--text-secondary);
-}
-
-.info-section ul li {
-    margin-bottom: 6px;
-    line-height: 1.5;
-}
-
-/* Cross-reference between help sections. Matches .creator-link so in-app links read the same
-   everywhere; a bare anchor here inherits the browser default and looks like a bug. */
-.info-section .help-jump {
-    color: var(--accent);
-    text-decoration: none;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.info-section .help-jump:hover {
-    color: var(--accent-hover);
-    text-decoration: underline;
-}
-
 .info-code-list {
     display: flex;
     flex-direction: column;
@@ -7723,53 +7592,6 @@ html.cl-mobile .char-duplicates-modal-content {
     font-size: var(--font-sm);
     color: var(--text-secondary);
     margin-bottom: 8px;
-}
-
-/* Help Search Bar */
-.help-search-bar {
-    position: relative;
-    display: flex;
-    align-items: center;
-    margin-left: auto;
-    margin-right: 12px;
-}
-
-.help-search-bar i {
-    position: absolute;
-    left: 8px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--text-faint);
-    font-size: var(--font-sm);
-    pointer-events: none;
-}
-
-.help-search-bar .glass-input {
-    border: 1px solid var(--glass-border);
-    background: rgba(0, 0, 0, 0.2);
-    padding: 5px 10px 5px 28px;
-    font-size: var(--font-sm);
-    border-radius: var(--radius-md);
-    width: 150px;
-    outline: none;
-    transition: width 0.2s ease, border-color 0.2s ease;
-}
-
-.help-search-bar .glass-input:focus {
-    width: 200px;
-    border-color: var(--accent);
-}
-
-.help-search-active .help-sidebar {
-    display: none;
-}
-
-.help-search-active .help-panel {
-    display: block;
-}
-
-.help-search-active .info-section.help-search-hidden {
-    display: none;
 }
 
 /* Settings Modal with Sidebar Layout */
