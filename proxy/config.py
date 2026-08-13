@@ -105,6 +105,16 @@ class Settings(BaseSettings):
     # `proxy=` kwarg, so one URL covers http+https; None disables it.
     http_proxy: str | None = None
 
+    # How many media items a download run fetches at once, and how many of
+    # those may share one host. The per-host cap is the one that matters:
+    # a card's gallery is usually all on a single image host (postimg, catbox),
+    # and fetching a hundred images from it as fast as we can is how you get
+    # rate-limited. Only the network half of an item is gated -- an item that
+    # skips locally never waits behind a fetch. Set either to 1 for the old
+    # strictly serial behaviour.
+    media_concurrency: int = 6
+    media_per_host_concurrency: int = 3
+
     # A datacat.run anonymous session token, so DatacatImageResolver reuses it
     # instead of hitting /api/liberator/identify on every run. Left unset the
     # first time; the resolver fetches one and writes it back here itself --

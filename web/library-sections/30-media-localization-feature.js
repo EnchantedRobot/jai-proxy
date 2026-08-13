@@ -37,6 +37,12 @@ function extractSanitizedUrlName(url) {
 
 const MEDIA_JOB_POLL_MS = 400;
 
+// downloadFn-bearing images (MEGA) fetch the actual file body in the browser,
+// which can stall indefinitely on a slow/stuck storage node (unlike the
+// extraction step, which already bounds itself via EXTRACT_TIMEOUT_MS). Bound
+// it too so one stuck file can't freeze the whole serial download loop.
+const DOWNLOAD_FN_TIMEOUT_MS = 60000;
+
 /**
  * Batch-download URLs through the server's media pipeline -- guard, fetch,
  * sniff, WebP-normalize, dedupe, write, thumbnail, manifest, all server side
@@ -173,6 +179,46 @@ async function downloadBytesViaServerRoute(cardId, item, prefix) {
         return await resp.json();
     } catch (err) {
         return { status: 'error', reason: err.message || String(err) };
+    }
+}
+
+/**
+ * Ask the server which of these items its gallery already satisfies, so a
+ * caller that fetches bytes itself doesn't fetch what it already has.
+ *
+ * The batch route gets this check for free (`download_item` consults the name
+ * index before opening a connection). The browser-fetch door can't: MEGA's
+ * per-file AES-CTR decrypt means the bytes are already downloaded by the time
+ * the server sees them, so an already-complete folder re-downloaded and
+ * re-decrypted every file just to be told "already have this content". One
+ * request replaces all of that.
+ *
+ * Fails open -- a network error or an older server without the route returns
+ * an empty map, and every item goes down the download path as before.
+ *
+ * @param {string} cardId
+ * @param {{url: string, filename?: string}[]} items
+ * @param {string} prefix
+ * @param {AbortSignal} [abortSignal]
+ * @returns {Promise<Map<string, string>>} url -> existing local filename
+ */
+async function checkServerHasMedia(cardId, items, prefix, abortSignal) {
+    if (!items.length) return new Map();
+    try {
+        const resp = await fetch(`/api/v1/characters/${encodeURIComponent(cardId)}/media/have`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                items: items.map(i => ({ url: i.url, filename: i.filename || null })),
+                prefix
+            }),
+            signal: abortSignal
+        });
+        if (!resp.ok) return new Map();
+        const body = await resp.json();
+        return new Map(Object.entries(body.have || {}));
+    } catch {
+        return new Map();
     }
 }
 
@@ -853,21 +899,39 @@ async function downloadExternalGalleryForCharacter(character, cardId, options = 
         if (r.aborted) { result.aborted = true; return result; }
     }
 
+    // One round trip retires every downloadFn item we already have on disk --
+    // without it each one costs a full fetch + decrypt before the server can
+    // say "already have this content".
+    const alreadyHave = downloadFnItems.length
+        ? await checkServerHasMedia(cardId, downloadFnItems, 'extgallery', abortSignal)
+        : new Map();
+
     for (const img of downloadFnItems) {
         if ((shouldAbort && shouldAbort()) || abortSignal?.aborted) {
             result.aborted = true;
             return result;
         }
         const displayUrl = img.url.length > 60 ? img.url.substring(0, 60) + '...' : img.url;
+        const existing = alreadyHave.get(img.url);
+        if (existing) {
+            result.skipped++;
+            if (onLog) onLog(`Skipped (already have it): ${existing}`, 'success');
+            continue;
+        }
         let dl;
         try {
-            dl = await img.downloadFn(abortSignal);
+            const timeoutSignal = AbortSignal.timeout(DOWNLOAD_FN_TIMEOUT_MS);
+            const combined = abortSignal ? AbortSignal.any([abortSignal, timeoutSignal]) : timeoutSignal;
+            dl = await img.downloadFn(combined);
         } catch (err) {
-            if (err.name === 'AbortError' || err.name === 'TimeoutError') {
+            // Only a real user cancel aborts the whole batch. A TimeoutError
+            // here means our own per-file timeout fired (stuck download) --
+            // that's a per-item failure, not a reason to give up on the rest.
+            if (err.name === 'AbortError' && (abortSignal?.aborted || (shouldAbort && shouldAbort()))) {
                 result.aborted = true;
                 return result;
             }
-            dl = { success: false, error: err.message };
+            dl = { success: false, error: err.name === 'TimeoutError' ? 'Download timed out' : err.message };
         }
         if (!dl?.success) {
             result.errors++;

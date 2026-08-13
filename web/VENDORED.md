@@ -135,8 +135,9 @@ built. Those call sites are patched in place; everything reachable through
 | --- | --- |
 | `archive-api.js` | The adapter. Ours entirely. |
 | `manifest.json` | Upstream's lives one directory up, as an ST extension manifest. The version banner reads it. |
-| `tests/` | Node tests for the adapter (`cd web && node --test`, or `make test-js`). |
+| `tests/` | Node tests for the adapter (`cd web && node --test`, or `make test-js`). Also holds the ported upstream `tag-*.test.mjs` suite for `vendor/tag-tools/` (vitest → node:test, no behavioral changes). |
 | `vendor/notosans/`, `vendor/fontawesome/css/`, `vendor/fontawesome/webfonts/` | Fonts upstream pulled from SillyTavern's server root (`/webfonts`, `/css`). Nothing serves that root now. Noto Sans is trimmed from 18 weights woff+woff2 (7.3 MB) to the 5 weights the stylesheets declare, woff2 only (1.6 MB) — see `vendor/notosans/notosans.css`. |
+| `vendor/tag-tools/` | `tag-analysis.js`, `tag-delta.js`, `tag-dictionary.json` vendored **verbatim** from `~/workspaces/SillyTavern-Character-Tools` (not the Character Library repo) for Phase 5's tag-consolidation merge — see `docs/PHASE_5_TAGS_PLAN.md`. Pure ES modules, no DOM/SillyTavern globals; `package.json` (`"type": "module"`) scopes ESM parsing to this one directory so `node --test` elsewhere in `web/` stays CommonJS as before. `fixtures/pattern-vectors.json` is the regression evidence for the dictionary's glob rules, also vendored verbatim. All tag-matching semantics live here; the server only applies a literal `{rename, remove}` plan (`POST /api/v1/tags/apply`) — see §4 of the plan for why this is not ported to Python. |
 
 ### Files renamed
 

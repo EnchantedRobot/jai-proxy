@@ -17,6 +17,8 @@ from fastapi.responses import StreamingResponse
 from proxy.api.schemas import (
     MediaBytesOut,
     MediaDownloadIn,
+    MediaHaveIn,
+    MediaHaveOut,
     MediaJobEventOut,
     MediaJobOut,
     MediaJobStatusOut,
@@ -127,20 +129,19 @@ def download_character_media(card_id: str, body: MediaDownloadIn) -> StreamingRe
         async with httpx.AsyncClient(
             timeout=30.0, proxy=settings.http_proxy or None, headers={"User-Agent": "Mozilla/5.0"}
         ) as client:
-            for i, item in enumerate(body.items):
-                outcome = await media_writer.download_item(
-                    client,
-                    gallery_dir,
-                    folder_name,
-                    url=item.url,
-                    filename_hint=item.filename,
-                    prefix=body.prefix,
-                    index=start_index + i,
-                    index_state=index_state,
-                    manifest=manifest,
-                    ledger=ledger,
-                    thumbnail_store=_shared.thumbnail_store,
-                )
+            batch = media_writer.download_batch(
+                client,
+                gallery_dir,
+                folder_name,
+                items=[{"url": i.url, "filename": i.filename} for i in body.items],
+                prefix=body.prefix,
+                start_index=start_index,
+                index_state=index_state,
+                manifest=manifest,
+                ledger=ledger,
+                thumbnail_store=_shared.thumbnail_store,
+            )
+            async for outcome in batch:
                 if outcome.status == "saved":
                     saved += 1
                 elif outcome.status == "skipped":
@@ -220,6 +221,64 @@ def list_media_jobs(
 ) -> list[MediaJobStatusOut]:
     jobs = _shared.job_store.list_jobs(card_id=card_id, active_only=active)
     return [_job_status_out(job, include_events=False) for job in jobs]
+
+
+@router.post("/characters/{card_id}/media/have", response_model=MediaHaveOut, summary="Which of these URLs the gallery already has")
+def check_character_media_have(card_id: str, body: MediaHaveIn) -> MediaHaveOut:
+    """The local-only skips of `media_writer.download_item` (its manifest hit
+    and name index), split out so a caller that has to fetch bytes *itself*
+    can ask before paying for them.
+
+    The batch download route gets this for free: it runs both checks before it
+    opens a connection. The browser-fetch door (§6) can't -- by the
+    time bytes reach `POST .../media/bytes` they've already been downloaded
+    and, for MEGA, AES-CTR-decrypted client side. A re-run over an already
+    complete MEGA folder therefore re-downloaded and re-decrypted every file
+    only to be told "already have this content" 200 times. This route lets
+    that caller skip on the name index exactly like the server-fetch path
+    does, before a byte moves.
+
+    Recording the match in the manifest mirrors `download_item`'s name-match
+    branch: the URL *is* satisfied by that file, and `/media/status` reads the
+    manifest, so a skip that goes unrecorded leaves the card looking
+    permanently un-downloaded.
+    """
+    idx = _shared.index()
+    record = _shared.require(idx, card_id)
+    _folder_name, gallery_dir = _shared.gallery_dir_for_card(idx, record)
+
+    index_state = media_writer.GalleryIndex.build(gallery_dir)
+    manifest = media_manifest.load_manifest(gallery_dir)
+
+    have: dict[str, str] = {}
+    recorded = False
+    for item in body.items:
+        # Same two-step as `download_item`: the exact-URL manifest hit first
+        # (it catches the URLs whose filenames are too short to index on, e.g.
+        # postimg's `1.webp`), then the name index for everything else. A
+        # manifest hit is already recorded, by definition -- that is what it
+        # is -- so only the name-index branch has anything to write back.
+        existing = media_writer.manifest_hit(manifest, index_state, item.url)
+        if existing:
+            have[item.url] = existing
+            continue
+        existing = index_state.find_by_name(item.url, item.filename, body.prefix)
+        if not existing:
+            continue
+        have[item.url] = existing
+        recorded = True
+        media_manifest.record_saved(
+            manifest,
+            item.url,
+            existing,
+            index_state.digest_for(existing),
+            size=media_writer.size_of(gallery_dir / existing),
+        )
+
+    if recorded:
+        media_manifest.save_manifest(gallery_dir, manifest)
+
+    return MediaHaveOut(have=have)
 
 
 @router.post("/characters/{card_id}/media/bytes", response_model=MediaBytesOut, summary="Save one already-fetched media item")

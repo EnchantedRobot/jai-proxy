@@ -10,8 +10,12 @@ bytes here are exactly what that function checks, not re-derived by hand.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import io
+import os
 import struct
+import time
 from pathlib import Path
 
 import httpx
@@ -19,7 +23,7 @@ import pytest
 from PIL import Image
 
 from proxy.archive import thumbs
-from proxy.media import manifest as media_manifest, writer as media_writer
+from proxy.media import manifest as media_manifest, names as media_names, writer as media_writer
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
@@ -283,6 +287,93 @@ def test_gallery_index_never_downgrades_a_higher_priority_prefix(tmp_path: Path)
     # JS's wouldDowngrade rule.
     match = idx.find_by_name("https://cdn.example.com/x/thing.png", None, "lorebook_media")
     assert match == "localized_media_1_thing.webp"
+
+
+def test_gallery_index_does_not_read_files_until_a_hash_is_needed(tmp_path: Path, monkeypatch):
+    """The name index costs a scandir; the hash index costs a full read of
+    every file in the folder. A run whose items all skip on the name index
+    must never pay the second one."""
+    (tmp_path / "extgallery_1_vF9hgQCD.webp").write_bytes(_png_bytes())
+
+    reads = 0
+    original = Path.read_bytes
+
+    def counting_read(self):
+        nonlocal reads
+        reads += 1
+        return original(self)
+
+    monkeypatch.setattr(Path, "read_bytes", counting_read)
+    media_writer._digest_cache.clear()
+
+    idx = media_writer.GalleryIndex.build(tmp_path)
+    assert idx.find_by_name("mega://folder/vF9hgQCD", None, "extgallery") == "extgallery_1_vF9hgQCD.webp"
+    assert reads == 0
+
+    assert idx.by_hash  # materializing it is what reads
+    assert reads == 1
+
+
+def test_gallery_index_memoizes_digests_across_builds(tmp_path: Path, monkeypatch):
+    payload = _png_bytes()
+    (tmp_path / "extgallery_1_thing.webp").write_bytes(payload)
+    media_writer._digest_cache.clear()
+
+    digest = hashlib.sha256(payload).hexdigest()
+    assert media_writer.GalleryIndex.build(tmp_path).find_by_hash(digest) == "extgallery_1_thing.webp"
+
+    reads = 0
+    original = Path.read_bytes
+
+    def counting_read(self):
+        nonlocal reads
+        reads += 1
+        return original(self)
+
+    monkeypatch.setattr(Path, "read_bytes", counting_read)
+    # A second index over the same unchanged folder -- the browser-fetch door
+    # builds one per item -- reuses the digests instead of re-reading.
+    assert media_writer.GalleryIndex.build(tmp_path).find_by_hash(digest) == "extgallery_1_thing.webp"
+    assert reads == 0
+
+
+def test_gallery_index_digest_for_one_file_does_not_hash_the_folder(tmp_path: Path, monkeypatch):
+    payload = _png_bytes()
+    (tmp_path / "extgallery_1_wanted.webp").write_bytes(payload)
+    for i in range(5):
+        (tmp_path / f"extgallery_{i + 2}_other{i}.webp").write_bytes(_png_bytes() + bytes([i]))
+    media_writer._digest_cache.clear()
+
+    reads = 0
+    original = Path.read_bytes
+
+    def counting_read(self):
+        nonlocal reads
+        reads += 1
+        return original(self)
+
+    monkeypatch.setattr(Path, "read_bytes", counting_read)
+    idx = media_writer.GalleryIndex.build(tmp_path)
+    assert idx.digest_for("extgallery_1_wanted.webp") == hashlib.sha256(payload).hexdigest()
+    assert reads == 1
+
+
+def test_gallery_index_re_hashes_a_file_that_changed(tmp_path: Path):
+    """The digest cache keys on (path, size, mtime), so a rewritten file is
+    not served from a stale digest."""
+    target = tmp_path / "extgallery_1_thing.webp"
+    target.write_bytes(_png_bytes())
+    media_writer._digest_cache.clear()
+    first = media_writer.GalleryIndex.build(tmp_path).digest_for(target.name)
+
+    replacement = _png_bytes() + b"different"
+    target.write_bytes(replacement)
+    os.utime(target, (0, 0))
+
+    assert media_writer.GalleryIndex.build(tmp_path).digest_for(target.name) == hashlib.sha256(
+        replacement
+    ).hexdigest()
+    assert first != hashlib.sha256(replacement).hexdigest()
 
 
 def test_gallery_index_ignores_non_media_files(tmp_path: Path):
@@ -657,3 +748,255 @@ def test_finish_item_content_hash_dedupe_against_existing_file(gallery_dir, thum
     assert outcome.status == "skipped"
     assert outcome.file == "extgallery_0_old.webp"
     assert len(list(gallery_dir.iterdir())) == 1
+
+
+# --------------------------------------------------------------------------
+# The exact-URL manifest hit -- the skip the name index cannot make
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_download_item_skips_a_url_the_manifest_already_recorded(gallery_dir, thumbnail_store, monkeypatch):
+    """postimg's shape: `i.postimg.cc/<id>/1.webp`. `media_key("1")` is one
+    character, under MIN_KEY_LENGTH, so the name index can never hold a key
+    for it -- before the manifest hit these re-fetched every run and were
+    thrown away by the hash dedupe."""
+    monkeypatch.setattr(media_writer, "_preflight_dns", lambda url: None)
+    body = _png_bytes()
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, content=body, headers={"content-type": "image/png"})
+
+    url = "https://i.postimg.cc/6w6R72kC/1.webp"
+    manifest = media_manifest.empty_manifest()
+    ledger: dict = {}
+    index_state = media_writer.GalleryIndex.build(gallery_dir)
+
+    async with _client_for(handler) as client:
+        first = await media_writer.download_item(
+            client, gallery_dir, "gallery",
+            url=url, filename_hint=None,
+            prefix="localized_media", index=1, index_state=index_state,
+            manifest=manifest, ledger=ledger, thumbnail_store=thumbnail_store,
+        )
+        assert first.status == "saved"
+        # Nothing in the name index could match it.
+        assert media_names.keys_for_item(url, None) == []
+
+        # A fresh run: new index, same manifest -- exactly a re-localize.
+        rerun_index = media_writer.GalleryIndex.build(gallery_dir)
+        second = await media_writer.download_item(
+            client, gallery_dir, "gallery",
+            url=url, filename_hint=None,
+            prefix="localized_media", index=2, index_state=rerun_index,
+            manifest=manifest, ledger=ledger, thumbnail_store=thumbnail_store,
+        )
+
+    assert second.status == "skipped"
+    assert second.file == first.file
+    assert second.reason == "already downloaded"
+    assert len(calls) == 1  # the re-run never touched the network
+
+
+@pytest.mark.asyncio
+async def test_download_item_refetches_when_the_recorded_file_is_gone(gallery_dir, thumbnail_store, monkeypatch):
+    """A manifest entry is only trusted while its file is still on disk --
+    deleting the file must bring the download back, not leave a permanent
+    phantom skip."""
+    monkeypatch.setattr(media_writer, "_preflight_dns", lambda url: None)
+    body = _png_bytes()
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, content=body, headers={"content-type": "image/png"})
+
+    url = "https://i.postimg.cc/6w6R72kC/1.webp"
+    manifest = media_manifest.empty_manifest()
+    ledger: dict = {}
+
+    async with _client_for(handler) as client:
+        first = await media_writer.download_item(
+            client, gallery_dir, "gallery",
+            url=url, filename_hint=None,
+            prefix="localized_media", index=1, index_state=media_writer.GalleryIndex.build(gallery_dir),
+            manifest=manifest, ledger=ledger, thumbnail_store=thumbnail_store,
+        )
+        (gallery_dir / first.file).unlink()
+
+        second = await media_writer.download_item(
+            client, gallery_dir, "gallery",
+            url=url, filename_hint=None,
+            prefix="localized_media", index=2, index_state=media_writer.GalleryIndex.build(gallery_dir),
+            manifest=manifest, ledger=ledger, thumbnail_store=thumbnail_store,
+        )
+
+    assert second.status == "saved"
+    assert len(calls) == 2
+
+
+def test_manifest_hit_ignores_a_malformed_entry(gallery_dir, thumbnail_store):
+    (gallery_dir / "localized_media_1_x.webp").write_bytes(b"x")
+    index_state = media_writer.GalleryIndex.build(gallery_dir)
+    manifest = media_manifest.empty_manifest()
+    manifest["files"]["https://a/1.webp"] = "not-a-dict"
+    manifest["files"]["https://b/1.webp"] = {"sha256": "x"}  # no `file`
+    manifest["files"]["https://c/1.webp"] = {"file": "localized_media_1_x.webp"}
+
+    assert media_writer.manifest_hit(manifest, index_state, "https://a/1.webp") is None
+    assert media_writer.manifest_hit(manifest, index_state, "https://b/1.webp") is None
+    assert media_writer.manifest_hit(manifest, index_state, "https://missing/1.webp") is None
+    assert media_writer.manifest_hit(manifest, index_state, "https://c/1.webp") == "localized_media_1_x.webp"
+
+
+# --------------------------------------------------------------------------
+# download_batch -- concurrency, per-host bound, cancellation
+# --------------------------------------------------------------------------
+
+
+async def _drain(batch) -> list:
+    return [outcome async for outcome in batch]
+
+
+@pytest.mark.asyncio
+async def test_download_batch_fetches_concurrently(gallery_dir, thumbnail_store, monkeypatch):
+    """Six distinct hosts, each stalling 50ms. Serially that is 300ms; the
+    batch has to overlap them or this assertion is meaningless."""
+    monkeypatch.setattr(media_writer, "_preflight_dns", lambda url: None)
+    in_flight = 0
+    peak = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        try:
+            await asyncio.sleep(0.05)
+        finally:
+            in_flight -= 1
+        return httpx.Response(200, content=_png_bytes(size=(4, 4 + int(request.url.path[-5]))),
+                              headers={"content-type": "image/png"})
+
+    items = [{"url": f"https://cdn{i}.example.com/photo{i}.png", "filename": None} for i in range(6)]
+    index_state = media_writer.GalleryIndex.build(gallery_dir)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        started = time.monotonic()
+        outcomes = await _drain(media_writer.download_batch(
+            client, gallery_dir, "gallery",
+            items=items, prefix="localized_media", start_index=1,
+            index_state=index_state, manifest=media_manifest.empty_manifest(), ledger={},
+            thumbnail_store=thumbnail_store, concurrency=6, per_host=3,
+        ))
+        elapsed = time.monotonic() - started
+
+    assert len(outcomes) == 6
+    assert peak > 1
+    assert elapsed < 0.25  # six 50ms fetches serially would be 0.3s
+
+
+@pytest.mark.asyncio
+async def test_download_batch_bounds_concurrency_per_host(gallery_dir, thumbnail_store, monkeypatch):
+    monkeypatch.setattr(media_writer, "_preflight_dns", lambda url: None)
+    in_flight = 0
+    peak = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        try:
+            await asyncio.sleep(0.02)
+        finally:
+            in_flight -= 1
+        return httpx.Response(200, content=_png_bytes(size=(4, 4 + int(request.url.path[-5]))),
+                              headers={"content-type": "image/png"})
+
+    items = [{"url": f"https://i.postimg.cc/abc/{i}.png", "filename": None} for i in range(8)]
+    index_state = media_writer.GalleryIndex.build(gallery_dir)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        outcomes = await _drain(media_writer.download_batch(
+            client, gallery_dir, "gallery",
+            items=items, prefix="localized_media", start_index=1,
+            index_state=index_state, manifest=media_manifest.empty_manifest(), ledger={},
+            thumbnail_store=thumbnail_store, concurrency=8, per_host=2,
+        ))
+
+    assert len(outcomes) == 8
+    assert peak <= 2  # one host, so the per-host cap is the binding one
+
+
+@pytest.mark.asyncio
+async def test_download_batch_local_skips_never_wait_on_a_busy_host(gallery_dir, thumbnail_store, monkeypatch):
+    """The gate wraps only the network half. A gallery that already has every
+    file must drain instantly even with a per-host width of one."""
+    monkeypatch.setattr(media_writer, "_preflight_dns", lambda url: None)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"no item should have been fetched: {request.url}")
+
+    manifest = media_manifest.empty_manifest()
+    items = []
+    for i in range(20):
+        name = f"localized_media_{i}_{i}.webp"
+        (gallery_dir / name).write_bytes(b"x")
+        url = f"https://i.postimg.cc/abc{i}/{i}.webp"
+        manifest["files"][url] = {"file": name, "sha256": "x"}
+        items.append({"url": url, "filename": None})
+    index_state = media_writer.GalleryIndex.build(gallery_dir)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        outcomes = await _drain(media_writer.download_batch(
+            client, gallery_dir, "gallery",
+            items=items, prefix="localized_media", start_index=1,
+            index_state=index_state, manifest=manifest, ledger={},
+            thumbnail_store=thumbnail_store, concurrency=2, per_host=1,
+        ))
+
+    assert len(outcomes) == 20
+    assert all(o.status == "skipped" and o.reason == "already downloaded" for o in outcomes)
+
+
+@pytest.mark.asyncio
+async def test_download_batch_stops_handing_out_work_once_cancelled(gallery_dir, thumbnail_store, monkeypatch):
+    monkeypatch.setattr(media_writer, "_preflight_dns", lambda url: None)
+    cancelled = False
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.01)
+        return httpx.Response(200, content=_png_bytes(size=(4, 4 + int(request.url.path[-5]))),
+                              headers={"content-type": "image/png"})
+
+    items = [{"url": f"https://cdn.example.com/photo{i}.png", "filename": None} for i in range(20)]
+    index_state = media_writer.GalleryIndex.build(gallery_dir)
+
+    seen = []
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        async for outcome in media_writer.download_batch(
+            client, gallery_dir, "gallery",
+            items=items, prefix="localized_media", start_index=1,
+            index_state=index_state, manifest=media_manifest.empty_manifest(), ledger={},
+            thumbnail_store=thumbnail_store, concurrency=2, per_host=2,
+            should_cancel=lambda: cancelled,
+        ):
+            seen.append(outcome)
+            if len(seen) == 4:
+                cancelled = True
+
+    assert 4 <= len(seen) < 20
+
+
+@pytest.mark.asyncio
+async def test_download_batch_empty_item_list_yields_nothing(gallery_dir, thumbnail_store):
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500))) as client:
+        outcomes = await _drain(media_writer.download_batch(
+            client, gallery_dir, "gallery",
+            items=[], prefix="localized_media", start_index=1,
+            index_state=media_writer.GalleryIndex.build(gallery_dir),
+            manifest=media_manifest.empty_manifest(), ledger={},
+            thumbnail_store=thumbnail_store,
+        ))
+    assert outcomes == []

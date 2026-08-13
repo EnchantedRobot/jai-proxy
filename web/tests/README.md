@@ -2,6 +2,11 @@
 
 - **`archive-api.test.js`** — unit tests for the fetch adapter. Run with
   `cd web && node --test`, or `make test-js`. These do **not** cover vendored code.
+- **`tag-analysis.test.mjs`**, **`tag-delta.test.mjs`**, **`tag-dictionary.test.mjs`**
+  — ported verbatim (vitest → node:test) from `SillyTavern-Character-Tools`'s own
+  test suite, covering `vendor/tag-tools/`. `.mjs` because that vendor directory
+  is real ES modules (`vendor/tag-tools/package.json` sets `"type": "module"`
+  just for that subtree) — everything else here stays CommonJS.
 - **`smoke.py`** — Playwright boot-and-browse check against a running server.
   Loads the app, opens a card, its gallery, **every settings section** and
   **every Help section**, and fails on any console error/warning or failed request.

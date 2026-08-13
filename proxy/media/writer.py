@@ -22,17 +22,28 @@ plan for why animated formats are deliberately out of scope here.
 **Dedupe is a local `scandir` and some SHA-256 reads, not an HTTP round
 trip** -- the entire point of moving the fetch server-side (§3 "Dedup is a
 scandir"). `GalleryIndex.build` scans the folder once per request and is
-reused across every item in the batch.
+reused across every item in the batch; the SHA-256 half of it is built only
+if some item actually gets far enough to need it. Ahead of both sits
+`manifest_hit`, an exact URL lookup in the manifest this gallery already
+wrote -- the only skip that works for URLs whose filename is too short to
+derive a dedup key from.
+
+**`download_batch` runs the items concurrently**, bounded per host, and is
+what both entry points loop over. Its docstring has the reason that needs no
+lock.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import io
 import logging
 import re
 import socket
 import time
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -43,6 +54,7 @@ from PIL import Image, ImageSequence
 
 from proxy.cards import edit
 from proxy.archive import thumbs
+from proxy.config import settings
 from proxy.media import guard as media_guard, manifest as media_manifest, names as media_names
 
 logger = logging.getLogger("jai_proxy.media.writer")
@@ -251,18 +263,61 @@ def classify_failure(*, blocked: bool, status: int | None, message: str) -> bool
 # --------------------------------------------------------------------------
 
 
+# Content digests, keyed by (path, size, mtime_ns) so a file that hasn't
+# changed is never re-read. Media files here are write-once (`write_atomic`
+# renames a fresh name into place), so the identity triple is enough -- an
+# edit in place changes size or mtime and re-hashes. Bounded because the
+# archive holds ~18k media files across ~3.9k galleries and a long-lived
+# server would otherwise pin every one it ever touched.
+_MAX_DIGEST_CACHE = 50_000
+_digest_cache: dict[tuple[str, int, int], str] = {}
+
+
+def _cached_digest(path: Path) -> str | None:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    key = (str(path), st.st_size, st.st_mtime_ns)
+    hit = _digest_cache.get(key)
+    if hit is not None:
+        return hit
+    try:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+    if len(_digest_cache) >= _MAX_DIGEST_CACHE:
+        _digest_cache.clear()
+    _digest_cache[key] = digest
+    return digest
+
+
 @dataclass
 class GalleryIndex:
     """One gallery folder's existing files, indexed two ways so an item can
-    be skipped before a byte is fetched (name) or after (content hash)."""
+    be skipped before a byte is fetched (name) or after (content hash).
+
+    The name index is built eagerly -- it's a `scandir` and some string work.
+    The hash index is **lazy**: it costs a full read of every file in the
+    folder, and a run whose items all skip on the name index never needs it.
+    That is the common case by far (a re-run over a card whose media is
+    already downloaded), and for the browser-fetch door it used to be paid
+    once *per item*: a 200-file / 59MB gallery re-read and re-hashed itself
+    200 times over. Digests are memoized across builds by
+    (path, size, mtime), so even a run that does save new files only hashes
+    what actually changed.
+    """
 
     by_key: dict[str, str] = field(default_factory=dict)  # media_key -> filename
-    by_hash: dict[str, str] = field(default_factory=dict)  # sha256 -> filename
     digest_of: dict[str, str] = field(default_factory=dict)  # filename -> sha256
+    _dir: Path | None = None
+    _names: list[str] = field(default_factory=list)  # media files, in scan order
+    _name_set: set[str] = field(default_factory=set)  # same, for membership
+    _by_hash: dict[str, str] | None = None  # sha256 -> filename, built on demand
 
     @classmethod
     def build(cls, gallery_dir: Path) -> "GalleryIndex":
-        idx = cls()
+        idx = cls(_dir=gallery_dir)
         try:
             entries = sorted(p for p in gallery_dir.iterdir() if p.is_file() and not p.name.startswith("."))
         except OSError:
@@ -272,6 +327,8 @@ class GalleryIndex:
             name = path.name
             if not MEDIA_EXT_RE.search(name):
                 continue
+            idx._names.append(name)
+            idx._name_set.add(name)
             stripped = media_names.PREFIXED_NAME_RE.match(Path(name).stem)
             if stripped:
                 key = media_names.media_key(stripped.group(1))
@@ -282,13 +339,27 @@ class GalleryIndex:
                 key = media_names.media_key(Path(name).stem)
                 if len(key) >= media_names.MIN_KEY_LENGTH and key not in strong_keys:
                     idx.by_key[key] = name
-            try:
-                digest = hashlib.sha256(path.read_bytes()).hexdigest()
-            except OSError:
-                continue
-            idx.by_hash.setdefault(digest, name)
-            idx.digest_of[name] = digest
         return idx
+
+    def _hashes(self) -> dict[str, str]:
+        if self._by_hash is None:
+            by_hash: dict[str, str] = {}
+            base = self._dir
+            for name in self._names:
+                digest = self.digest_of.get(name)
+                if digest is None and base is not None:
+                    digest = _cached_digest(base / name)
+                if digest is None:
+                    continue
+                by_hash.setdefault(digest, name)
+                self.digest_of[name] = digest
+            self._by_hash = by_hash
+        return self._by_hash
+
+    @property
+    def by_hash(self) -> dict[str, str]:
+        """The content-hash index, materialized on first access."""
+        return self._hashes()
 
     def find_by_name(self, url: str, filename_hint: str | None, prefix: str) -> str | None:
         """A filename already on disk that this item's name keys would match,
@@ -306,12 +377,36 @@ class GalleryIndex:
         return None
 
     def find_by_hash(self, digest: str) -> str | None:
-        return self.by_hash.get(digest)
+        return self._hashes().get(digest)
+
+    def has_file(self, file_name: str) -> bool:
+        """Whether the folder still holds this exact filename -- what makes a
+        manifest entry trustworthy without a `stat` per item."""
+        return file_name in self._name_set
+
+    def digest_for(self, file_name: str) -> str:
+        """One file's digest, without materializing the whole hash index --
+        for the name-match branch, which needs the digest of the single file
+        it matched and nothing else."""
+        known = self.digest_of.get(file_name)
+        if known is not None:
+            return known
+        if self._dir is None:
+            return ""
+        digest = _cached_digest(self._dir / file_name)
+        if digest is None:
+            return ""
+        self.digest_of[file_name] = digest
+        return digest
 
     def note_saved(self, url: str, filename_hint: str | None, prefix: str, file_name: str, digest: str) -> None:
         for key in media_names.keys_for_item(url, filename_hint):
             self.by_key[key] = file_name
-        self.by_hash.setdefault(digest, file_name)
+        if file_name not in self._name_set:
+            self._names.append(file_name)
+            self._name_set.add(file_name)
+        if self._by_hash is not None:
+            self._by_hash.setdefault(digest, file_name)
         self.digest_of[file_name] = digest
 
 
@@ -330,7 +425,37 @@ class DownloadOutcome:
     permanent: bool | None = None
 
 
-def _size_of(path: Path) -> int | None:
+def manifest_hit(manifest: dict[str, Any], index_state: GalleryIndex, url: str) -> str | None:
+    """The local file this exact URL already became in this gallery, if it is
+    still on disk -- else None.
+
+    The name index (step 2) can only skip a URL whose *filename* survives
+    `media_names.media_key` with at least `MIN_KEY_LENGTH` characters. Whole
+    hosts fail that: postimg serves galleries as `i.postimg.cc/<id>/1.webp`,
+    `.../2.webp`, and a key of `"1"` is too short to index on, so every one of
+    those URLs fell through to a real fetch on every re-run and was only then
+    thrown away by the content-hash dedupe in `finish_item`. A 25-image
+    postimg card therefore re-downloaded 25 images to save none of them, every
+    single time -- minutes of wall clock for a no-op.
+
+    The manifest already records exactly what we need to avoid that: `files`
+    is keyed by source URL and names the file it became. Checking it costs a
+    dict lookup against an index that is already built, and it is exact rather
+    than heuristic -- no name derivation involved, so it works for any URL
+    shape at all. It is deliberately narrower than the name index, though: it
+    only fires for a URL *this* gallery has itself downloaded before, which is
+    what makes "the file is still there" the only extra thing to verify.
+    """
+    entry = manifest.get("files", {}).get(url)
+    if not isinstance(entry, dict):
+        return None
+    file_name = entry.get("file")
+    if not isinstance(file_name, str) or not file_name:
+        return None
+    return file_name if index_state.has_file(file_name) else None
+
+
+def size_of(path: Path) -> int | None:
     try:
         return path.stat().st_size
     except OSError:
@@ -352,6 +477,17 @@ def _preflight_dns(url: str) -> str | None:
     except socket.gaierror as exc:
         return f"DNS resolution failed: {exc}"
     return None
+
+
+@contextlib.asynccontextmanager
+async def _gate(semaphore: asyncio.Semaphore | None):
+    """`async with` over an optional semaphore -- a plain no-op when a single
+    item is downloaded outside any batch."""
+    if semaphore is None:
+        yield
+        return
+    async with semaphore:
+        yield
 
 
 async def _fetch(client: httpx.AsyncClient, url: str) -> tuple[bytes | None, str | None, str | None]:
@@ -447,8 +583,16 @@ async def download_item(
     manifest: dict[str, Any],
     ledger: dict[str, Any],
     thumbnail_store: thumbs.ThumbnailStore,
+    fetch_gate: "asyncio.Semaphore | None" = None,
 ) -> DownloadOutcome:
     """Everything the plan's §3 numbered list says for one URL, end to end."""
+
+    # 0. Manifest hit -- this gallery already downloaded this exact URL and
+    # still has the file. Nothing left to decide, so this runs ahead of even
+    # the guard: no fetch happens either way.
+    already = manifest_hit(manifest, index_state, url)
+    if already:
+        return DownloadOutcome("skipped", url, file=already, reason="already downloaded")
 
     # 3. Per-gallery dead ledger -- already known gone for this character.
     dead_here = manifest.get("dead", {}).get(url)
@@ -476,24 +620,31 @@ async def download_item(
         # already records its equivalent. Without this a card whose media was
         # all downloaded under SillyTavern reports `files: 0` from
         # `/media/status` forever -- 18k inherited files invisible to it.
-        # `build()` already hashed the folder, so this costs one stat.
+        # Costs one file's digest (memoized), not the folder's.
         media_manifest.record_saved(
             manifest,
             url,
             existing_name,
-            index_state.digest_of.get(existing_name, ""),
-            size=_size_of(gallery_dir / existing_name),
+            index_state.digest_for(existing_name),
+            size=size_of(gallery_dir / existing_name),
         )
         return DownloadOutcome("skipped", url, file=existing_name, reason="filename match")
 
-    dns_reason = _preflight_dns(url)
-    if dns_reason:
-        media_manifest.record_failure(ledger, url, permanent=True, status=None, message=dns_reason)
-        media_manifest.record_dead(manifest, url, dns_reason)
-        return DownloadOutcome("skipped", url, reason=dns_reason, permanent=True)
+    # Everything above this line is local and instant; everything below talks
+    # to the network, so only this half is gated when a batch runs items
+    # concurrently. A skip must never queue behind someone else's slow fetch.
+    async with _gate(fetch_gate):
+        # `getaddrinfo` is a blocking call -- on the event loop it would stall
+        # every other item in the batch, so it goes to a thread.
+        dns_reason = await asyncio.to_thread(_preflight_dns, url)
+        if dns_reason:
+            media_manifest.record_failure(ledger, url, permanent=True, status=None, message=dns_reason)
+            media_manifest.record_dead(manifest, url, dns_reason)
+            return DownloadOutcome("skipped", url, reason=dns_reason, permanent=True)
 
-    # 4. Fetch.
-    body, content_type, error = await _fetch(client, url)
+        # 4. Fetch.
+        body, content_type, error = await _fetch(client, url)
+
     if body is None:
         status = int(error.split(" ", 1)[1]) if error and error.startswith("HTTP ") else None
         permanent = classify_failure(blocked=False, status=status, message=error or "")
@@ -519,3 +670,122 @@ async def download_item(
         content_type=content_type,
         thumbnail_store=thumbnail_store,
     )
+
+
+# --------------------------------------------------------------------------
+# The batch -- both entry points' per-item loop, once
+# --------------------------------------------------------------------------
+
+
+_BATCH_DONE = object()
+
+
+async def download_batch(
+    client: httpx.AsyncClient,
+    gallery_dir: Path,
+    folder_name: str,
+    *,
+    items: Sequence[dict[str, Any]],
+    prefix: str,
+    start_index: int,
+    index_state: GalleryIndex,
+    manifest: dict[str, Any],
+    ledger: dict[str, Any],
+    thumbnail_store: thumbs.ThumbnailStore,
+    should_cancel: Callable[[], bool] | None = None,
+    concurrency: int | None = None,
+    per_host: int | None = None,
+) -> AsyncIterator[DownloadOutcome]:
+    """`download_item` over a whole list, yielding each outcome as it finishes
+    -- the loop `POST /characters/{id}/media` and the background job runner
+    both used to keep their own copy of.
+
+    Items run `concurrency` at a time, with no more than `per_host` of them
+    against any one hostname (see `settings.media_concurrency`). Yield order is
+    completion order, not input order; both callers only accumulate counters
+    and append log lines, so nothing depends on the original sequence. The
+    file index each item is named from still comes from its *input* position,
+    so filenames are unaffected by how the run interleaves.
+
+    Concurrency is safe here without a lock precisely because only the fetch
+    awaits: `finish_item` -- hash dedupe, write, thumbnail, manifest record --
+    is synchronous from start to finish, so it cannot interleave with another
+    item on the single-threaded event loop. Two items carrying identical bytes
+    can both be fetched, but the second still finds the first's digest and
+    skips rather than writing a duplicate.
+    """
+    if not items:
+        return
+
+    limit = max(1, concurrency if concurrency is not None else settings.media_concurrency)
+    host_limit = max(1, per_host if per_host is not None else settings.media_per_host_concurrency)
+
+    queue: asyncio.Queue = asyncio.Queue()
+    host_gates: dict[str, asyncio.Semaphore] = {}
+    next_pos = 0
+    stop = False
+    failure: BaseException | None = None
+
+    async def worker() -> None:
+        nonlocal next_pos, stop
+        while not stop:
+            if should_cancel is not None and should_cancel():
+                stop = True
+                return
+            if next_pos >= len(items):
+                return
+            position = next_pos
+            next_pos += 1
+            item = items[position]
+            url = item["url"]
+            host = (urlsplit(url).hostname or "").lower()
+            gate = host_gates.get(host)
+            if gate is None:
+                gate = asyncio.Semaphore(host_limit)
+                host_gates[host] = gate
+            outcome = await download_item(
+                client,
+                gallery_dir,
+                folder_name,
+                url=url,
+                filename_hint=item.get("filename"),
+                prefix=prefix,
+                index=start_index + position,
+                index_state=index_state,
+                manifest=manifest,
+                ledger=ledger,
+                thumbnail_store=thumbnail_store,
+                fetch_gate=gate,
+            )
+            await queue.put(outcome)
+
+    workers = [asyncio.create_task(worker()) for _ in range(min(limit, len(items)))]
+
+    async def supervise() -> None:
+        nonlocal failure, stop
+        try:
+            await asyncio.gather(*workers)
+        except BaseException as exc:  # one item's crash must stop the rest
+            failure = exc
+            stop = True
+        finally:
+            await queue.put(_BATCH_DONE)
+
+    supervisor = asyncio.create_task(supervise())
+    try:
+        while True:
+            outcome = await queue.get()
+            if outcome is _BATCH_DONE:
+                break
+            yield outcome
+    finally:
+        # A caller that stops iterating early (the NDJSON client hung up)
+        # must not leave downloads running against a manifest nobody saves.
+        stop = True
+        for task in workers:
+            task.cancel()
+        supervisor.cancel()
+        await asyncio.gather(*workers, supervisor, return_exceptions=True)
+
+    if failure is not None:
+        raise failure

@@ -10,13 +10,16 @@ asyncio task instead: the request that submits a job returns immediately with
 a job id, and the download keeps going on the server regardless of what the
 browser does next.
 
-One worker, not a pool. `GalleryIndex` and the manifest dict are built once
-per run and mutated in place across every item in it (docs/PHASE_3C_PLAN.md
-§3's "Dedup is a scandir") -- exactly the reason
+One job at a time, not a pool of jobs. `GalleryIndex` and the manifest dict
+are built once per run and mutated in place across every item in it
+(docs/PHASE_3C_PLAN.md §3's "Dedup is a scandir") -- exactly the reason
 `web/modules/media-download-queue.js` already runs its own jobs strictly
 serially. A single background coroutine draining one queue preserves that
 invariant without a lock: two jobs against the same gallery folder can never
-overlap.
+overlap. Within one job the items themselves do run concurrently
+(`media_writer.download_batch`), which is safe for the same reason a lock
+would be: only the fetch awaits, so no two items can be mid-`finish_item` at
+once on this loop.
 
 Job state (this module) is a live-progress cache, not a record of what
 actually happened -- that's the manifest and dead ledger, written by `_run`
@@ -182,23 +185,20 @@ class JobStore:
         async with httpx.AsyncClient(
             timeout=30.0, proxy=settings.http_proxy or None, headers={"User-Agent": "Mozilla/5.0"}
         ) as client:
-            for i, item in enumerate(items):
-                if job.cancel_requested:
-                    job.state = "cancelled"
-                    break
-                outcome = await media_writer.download_item(
-                    client,
-                    gallery_dir,
-                    folder_name,
-                    url=item["url"],
-                    filename_hint=item.get("filename"),
-                    prefix=job.prefix,
-                    index=start_index + i,
-                    index_state=index_state,
-                    manifest=manifest,
-                    ledger=ledger,
-                    thumbnail_store=self._thumbnail_store,
-                )
+            batch = media_writer.download_batch(
+                client,
+                gallery_dir,
+                folder_name,
+                items=items,
+                prefix=job.prefix,
+                start_index=start_index,
+                index_state=index_state,
+                manifest=manifest,
+                ledger=ledger,
+                thumbnail_store=self._thumbnail_store,
+                should_cancel=lambda: job.cancel_requested,
+            )
+            async for outcome in batch:
                 if outcome.status == "saved":
                     job.saved += 1
                 elif outcome.status == "skipped":
@@ -215,6 +215,11 @@ class JobStore:
                         "bytes": outcome.bytes,
                     }
                 )
+
+        # `download_batch` stops handing out work as soon as `should_cancel`
+        # fires; the state flip is this loop's to make, after it drains.
+        if job.cancel_requested:
+            job.state = "cancelled"
 
         media_manifest.append_run(
             manifest,

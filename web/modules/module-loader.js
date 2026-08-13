@@ -230,6 +230,7 @@ async function initModuleSystem() {
 
     setupLazyBatchTagging();
     setupLazyBatchTransfer();
+    setupLazyTagManager();
 
     // Initialize all Tier 1 modules
     await ModuleLoader.initAll(dependencies);
@@ -271,6 +272,26 @@ function setupLazyBatchTransfer() {
     // library.js's import modal routes dropped .zip bundles here
     window.openBatchImportReview = (...args) =>
         ModuleLoader.ensureLoaded('batch-transfer').then(mod => mod?.openImportReview?.(...args));
+}
+
+
+// ========================================
+// LAZY: TAG MANAGER (Phase 5 tag consolidation)
+// ========================================
+
+function setupLazyTagManager() {
+    ModuleLoader._registerLazy('tag-manager', async () => {
+        const mod = await import('./tag-manager.js');
+        loadModuleCSS('./tag-manager.css');
+        ModuleLoader.register('tag-manager', mod.default);
+        await mod.default.init({});
+        mod.default._mlInitDone = true;
+        window.debugLog?.('[ModuleLoader] Lazy-loaded tag-manager');
+    });
+
+    document.getElementById('tagManagerBtn')?.addEventListener('click', () => {
+        ModuleLoader.ensureLoaded('tag-manager').then(mod => mod?.openModal());
+    });
 }
 
 

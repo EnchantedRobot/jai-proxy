@@ -364,6 +364,26 @@ class MediaBytesOut(BaseModel):
     file: str | None = None
 
 
+class MediaHaveIn(BaseModel):
+    """`POST /characters/{id}/media/have` body -- the name-index half of
+    `download_item`, asked ahead of time. Same items/prefix shape as the
+    download routes so a caller can pass the identical list."""
+
+    items: list[MediaItemIn]
+    prefix: str = Field(
+        default="extgallery",
+        description="Filename prefix and dedupe-priority class the caller would save under.",
+    )
+
+
+class MediaHaveOut(BaseModel):
+    """Which of the submitted URLs the gallery already satisfies: `have` maps
+    those URLs to the local filename that covers them. URLs absent from the
+    map still need fetching."""
+
+    have: dict[str, str]
+
+
 class MediaJobSubmitIn(BaseModel):
     """`POST /media/jobs` body -- the same items/prefix/phase shape as the
     synchronous `POST /characters/{id}/media`, but queued and run in the

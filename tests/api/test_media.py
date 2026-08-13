@@ -9,10 +9,12 @@ and ledger a run produces.
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
 
+from proxy.config import settings
 from proxy.media import manifest as media_manifest, writer as media_writer
 from proxy.api.v1 import _shared as v1_shared, media as v1_media
 
@@ -30,7 +32,7 @@ def stub_download_item(monkeypatch):
 
     calls: list[dict] = []
 
-    async def fake(client, gallery_dir, folder_name, *, url, filename_hint, prefix, index, index_state, manifest, ledger, thumbnail_store):
+    async def fake(client, gallery_dir, folder_name, *, url, filename_hint, prefix, index, index_state, manifest, ledger, thumbnail_store, fetch_gate=None):
         calls.append({"gallery_dir": gallery_dir, "folder_name": folder_name, "url": url})
         outcome = media_writer.DownloadOutcome("saved", url, file=f"localized_media_{index}_x.webp", bytes=123)
         media_manifest.record_saved(manifest, url, outcome.file, "deadbeef")
@@ -121,7 +123,7 @@ def test_get_media_manifest_reflects_a_completed_run(client, populated_archive, 
 
 
 def test_download_totals_count_mixed_outcomes(client, populated_archive, monkeypatch):
-    async def fake(client, gallery_dir, folder_name, *, url, filename_hint, prefix, index, index_state, manifest, ledger, thumbnail_store):
+    async def fake(client, gallery_dir, folder_name, *, url, filename_hint, prefix, index, index_state, manifest, ledger, thumbnail_store, fetch_gate=None):
         if "ok" in url:
             outcome = media_writer.DownloadOutcome("saved", url, file="localized_media_0_ok.webp", bytes=1)
             media_manifest.record_saved(manifest, url, outcome.file, "abc")
@@ -221,6 +223,79 @@ def test_media_bytes_unknown_card_is_404(client):
 
 
 # --------------------------------------------------------------------------
+# POST /characters/{id}/media/have -- the name-index check the browser-fetch
+# door asks *before* fetching, so a re-run over a complete MEGA folder doesn't
+# download and decrypt every file only to be told we already had it.
+# --------------------------------------------------------------------------
+
+
+def test_media_have_reports_a_file_the_gallery_already_has(client, populated_archive):
+    folder = populated_archive["galleries"] / "Abbie_kzbYR2QbpncC"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "extgallery_1782213642053_vF9hgQCD.webp").write_bytes(_png_bytes())
+
+    resp = client.post(
+        "/api/v1/characters/Abbie_0d162f5f.png/media/have",
+        json={
+            "items": [
+                {"url": "mega://Ab0CdEfG/vF9hgQCD", "filename": "01.png"},
+                {"url": "mega://Ab0CdEfG/notHereYet", "filename": "02.png"},
+            ],
+            "prefix": "extgallery",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["have"] == {"mega://Ab0CdEfG/vF9hgQCD": "extgallery_1782213642053_vF9hgQCD.webp"}
+
+
+def test_media_have_records_the_match_in_the_manifest(client, populated_archive):
+    """A skip that goes unrecorded leaves /media/status reporting the card as
+    never downloaded -- same reason download_item records its name matches."""
+    folder = populated_archive["galleries"] / "Abbie_kzbYR2QbpncC"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "extgallery_1_vF9hgQCD.webp").write_bytes(_png_bytes())
+
+    client.post(
+        "/api/v1/characters/Abbie_0d162f5f.png/media/have",
+        json={"items": [{"url": "mega://Ab0CdEfG/vF9hgQCD"}], "prefix": "extgallery"},
+    )
+
+    manifest = client.get("/api/v1/characters/Abbie_0d162f5f.png/media").json()
+    entry = manifest["files"]["mega://Ab0CdEfG/vF9hgQCD"]
+    assert entry["file"] == "extgallery_1_vF9hgQCD.webp"
+    assert entry["sha256"] == hashlib.sha256(_png_bytes()).hexdigest()
+
+
+def test_media_have_is_empty_for_a_gallery_with_nothing_in_it(client, populated_archive):
+    resp = client.post(
+        "/api/v1/characters/Abbie_0d162f5f.png/media/have",
+        json={"items": [{"url": "mega://Ab0CdEfG/vF9hgQCD"}]},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["have"] == {}
+
+
+def test_media_have_never_downgrades_a_higher_priority_prefix(client, populated_archive):
+    folder = populated_archive["galleries"] / "Abbie_kzbYR2QbpncC"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "localized_media_1_vF9hgQCD.webp").write_bytes(_png_bytes())
+
+    resp = client.post(
+        "/api/v1/characters/Abbie_0d162f5f.png/media/have",
+        json={"items": [{"url": "mega://Ab0CdEfG/vF9hgQCD"}], "prefix": "extgallery"},
+    )
+    assert resp.json()["have"] == {"mega://Ab0CdEfG/vF9hgQCD": "localized_media_1_vF9hgQCD.webp"}
+
+
+def test_media_have_unknown_card_is_404(client):
+    resp = client.post(
+        "/api/v1/characters/DoesNotExist_00000000.png/media/have",
+        json={"items": [{"url": "mega://folder/handle"}]},
+    )
+    assert resp.status_code == 404
+
+
+# --------------------------------------------------------------------------
 # GET /media/status -- the archive-wide summary Bulk Localize reads instead
 # of one request per card (docs/PHASE_3C_PLAN.md §3).
 # --------------------------------------------------------------------------
@@ -254,7 +329,7 @@ def test_media_status_reflects_a_completed_run(client, populated_archive, stub_d
 
 
 def test_media_status_incomplete_when_last_run_had_errors(client, populated_archive, monkeypatch):
-    async def fake(client, gallery_dir, folder_name, *, url, filename_hint, prefix, index, index_state, manifest, ledger, thumbnail_store):
+    async def fake(client, gallery_dir, folder_name, *, url, filename_hint, prefix, index, index_state, manifest, ledger, thumbnail_store, fetch_gate=None):
         return media_writer.DownloadOutcome("error", url, reason="boom", permanent=False)
 
     monkeypatch.setattr(v1_media.media_writer, "download_item", fake)
@@ -383,12 +458,19 @@ def test_cancel_unknown_job_404s(client, populated_archive):
 
 
 def test_cancel_stops_a_job_before_it_finishes_every_item(client, populated_archive, monkeypatch):
-    """A slow-item stub gives the test a window to cancel mid-run."""
+    """A slow-item stub gives the test a window to cancel mid-run.
+
+    Concurrency is pinned low here on purpose: a cancel can only stop items
+    the batch hasn't dispatched yet, so with the default width every item of a
+    five-item job is already in flight before the cancel arrives.
+    """
     import asyncio
+
+    monkeypatch.setattr(settings, "media_concurrency", 2)
 
     calls: list[str] = []
 
-    async def slow_fake(client, gallery_dir, folder_name, *, url, filename_hint, prefix, index, index_state, manifest, ledger, thumbnail_store):
+    async def slow_fake(client, gallery_dir, folder_name, *, url, filename_hint, prefix, index, index_state, manifest, ledger, thumbnail_store, fetch_gate=None):
         calls.append(url)
         await asyncio.sleep(0.05)
         outcome = media_writer.DownloadOutcome("saved", url, file=f"localized_media_{index}_x.webp", bytes=1)

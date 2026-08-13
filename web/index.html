@@ -208,6 +208,9 @@
                         <button id="bulkAutoLinkBtn" class="dropdown-item">
                             <i class="fa-solid fa-link"></i> Auto-Link Characters
                         </button>
+                        <button id="tagManagerBtn" class="dropdown-item">
+                            <i class="fa-solid fa-tags"></i> Tag Consolidation
+                        </button>
                         <div class="dropdown-divider"></div>
                         <button id="menuRefreshBtn" class="dropdown-item">
                             <i class="fa-solid fa-sync"></i> Refresh
@@ -1550,6 +1553,16 @@ https://jannyai.com/characters/uuid_slug
                                 <li>After import, characters are automatically checked for duplicates and can be auto-linked to their source</li>
                             </ul>
                         </div>
+                        <div class="info-section">
+                            <h4><i class="fa-solid fa-tags"></i> Tag Consolidation</h4>
+                            <p>Merges casing/spelling variants of the same tag (e.g. <code>femdom</code> / <code>Femdom</code>) onto one canonical spelling, using a curated dictionary:</p>
+                            <ul>
+                                <li>Open from <strong>More Options (⋮) → Tag Consolidation</strong></li>
+                                <li>Shows a read-only preview: which tags would be renamed onto a canonical, which are unassigned (not in the dictionary), and which are flagged for removal</li>
+                                <li>Nothing on disk changes from opening this preview</li>
+                            </ul>
+                            <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> New imports are never auto-merged — every card's tags are only lightly cleaned (stray <code>#</code>/emoji/whitespace stripped) on the way in. Casing/spelling merges are always a deliberate, previewed action here.</p>
+                        </div>
                     </div>
 
                     <!-- Shortcuts -->
@@ -1590,6 +1603,7 @@ https://jannyai.com/characters/uuid_slug
                                 <li><strong>Import Characters</strong>: Import from URL or local PNG file</li>
                                 <li><strong>Find Duplicates</strong>: Scan your library for potential duplicate characters</li>
                                 <li><strong>Auto-Link Characters</strong>: Bulk-link unlinked characters to providers</li>
+                                <li><strong>Tag Consolidation</strong>: Preview a dictionary-driven merge of casing/spelling tag variants</li>
                                 <li><strong>Gallery Sync Status</strong>: Check whether all characters have a gallery_id assigned</li>
                                 <li><strong>Help & Tips</strong>: This modal</li>
                                 <li><strong>Settings</strong>: Configure gallery folders, media localization, and provider settings</li>
