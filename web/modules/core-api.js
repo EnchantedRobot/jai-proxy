@@ -1028,17 +1028,6 @@ export function getEndpoints() {
 }
 
 // ========================================
-// PROVIDER LINK UI
-// ========================================
-
-/**
- * Open the bulk auto-link modal
- */
-export function openBulkAutoLinkModal() {
-    window.openBulkAutoLinkModal?.();
-}
-
-// ========================================
 // CARD DATA
 // ========================================
 
@@ -1399,8 +1388,7 @@ export default {
     
     // Provider Link UI
     openProviderLinkModal,
-    openBulkAutoLinkModal,
-    
+
     // Logging
     debugLog,
     

@@ -213,11 +213,11 @@ function renderGroups(groups) {
 
     const observed = groups
         .map((g) => ({ canonical: g.canonical, variants: g.variants.filter((v) => v.count > 0) }))
-        .filter((g) => g.variants.length > 0)
+        .filter((g) => g.variants.some((v) => v.tag !== g.canonical))
         .sort((a, b) => a.canonical.localeCompare(b.canonical));
 
     if (observed.length === 0) {
-        container.innerHTML = '<div class="tm-empty">No observed tags match a dictionary canonical.</div>';
+        container.innerHTML = '<div class="tm-empty">Nothing to merge.</div>';
         return;
     }
 

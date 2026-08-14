@@ -590,10 +590,6 @@ class ChubProvider extends ProviderBase {
 
     get supportsBulkLink() { return true; }
 
-    openBulkLinkUI() {
-        CoreAPI.openBulkAutoLinkModal?.();
-    }
-
     /**
      * Search ChubAI for characters matching name/creator.
      * Uses multiple strategies: author filter, combined term, name-only fallback.

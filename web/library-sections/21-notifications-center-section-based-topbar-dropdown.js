@@ -300,35 +300,12 @@ function setupEventListeners() {
             });
         });
 
-        // Overflow proxy items - relay clicks to the real topbar buttons
-        const menuMultiSelectBtn = document.getElementById('menuMultiSelectBtn');
-        if (menuMultiSelectBtn) {
-            menuMultiSelectBtn.addEventListener('click', () => {
-                document.getElementById('multiSelectToggleBtn')?.click();
-            });
-        }
-        const menuSortBtn = document.getElementById('menuSortBtn');
-        if (menuSortBtn) {
-            menuSortBtn.addEventListener('click', () => {
-                const sortSelect = document.getElementById('sortSelect');
-                if (sortSelect?._customSelect) {
-                    sortSelect._customSelect.toggle();
-                }
-            });
-        }
-        const menuFavoritesBtn = document.getElementById('menuFavoritesBtn');
-        if (menuFavoritesBtn) {
-            menuFavoritesBtn.addEventListener('click', () => {
-                toggleFavoritesFilter(!showFavoritesOnly);
-            });
-        }
-        const menuTagsBtn = document.getElementById('menuTagsBtn');
-        if (menuTagsBtn) {
-            menuTagsBtn.addEventListener('click', () => {
-                document.getElementById('tagFilterBtn')?.click();
-            });
-        }
     }
+
+    // Favorites Filter Toggle (row-2 topbar button)
+    on('favoritesFilterBtn', 'click', () => {
+        toggleFavoritesFilter(!showFavoritesOnly);
+    });
     
     // Clear Search Button
     const clearSearchBtn = document.getElementById('clearSearchBtn');
@@ -372,20 +349,41 @@ function setupEventListeners() {
         });
     }
 
-    // Refresh - preserves current filters and search
-    on('menuRefreshBtn', 'click', async () => {
-        document.getElementById('characterGrid').innerHTML = '';
-        document.getElementById('loading').style.display = '';
-        
+    // Download Character Button in Modal
+    on('downloadCharBtn', 'click', async () => {
+        if (!activeChar) return;
         try {
-            const ctx = getSTContext();
-            if (typeof ctx?.getCharacters === 'function') {
-                ctx.getCharacters().catch(e => console.warn('[Refresh] Host refresh failed:', e));
-            }
-        } catch (e) { /* host unavailable */ }
-        
-        await fetchCharacters(true);
-        performSearch();
+            await window.ModuleLoader?.get('context-menu')?.downloadCharacterPng(activeChar);
+        } catch (err) {
+            showToast('Download failed: ' + err.message, 'error');
+        }
+    });
+
+    // Refresh - forces a rescan so disk changes made outside the app are picked
+    // up, then preserves current filters and search.
+    on('refreshLibraryBtn', 'click', async () => {
+        const btn = document.getElementById('refreshLibraryBtn');
+        const icon = btn?.querySelector('i');
+        icon?.classList.add('fa-spin');
+
+        try {
+            await fetch('/api/v1/refresh', { method: 'POST' }).catch(e => console.warn('[Refresh] Rescan failed:', e));
+
+            document.getElementById('characterGrid').innerHTML = '';
+            document.getElementById('loading').style.display = '';
+
+            try {
+                const ctx = getSTContext();
+                if (typeof ctx?.getCharacters === 'function') {
+                    ctx.getCharacters().catch(e => console.warn('[Refresh] Host refresh failed:', e));
+                }
+            } catch (e) { /* host unavailable */ }
+
+            await fetchCharacters(true);
+            performSearch();
+        } finally {
+            icon?.classList.remove('fa-spin');
+        }
     });
     
     // Delete Character Button
@@ -460,20 +458,32 @@ function setupEventListeners() {
     });
     
     setupCharacterGridDelegates();
-    
-    // Save Button
-    document.getElementById('saveEditBtn').onclick = saveCharacter;
-    
-    // Cancel Edit Button
-    const cancelEditBtn = document.getElementById('cancelEditBtn');
-    if (cancelEditBtn) {
-        cancelEditBtn.onclick = cancelEditing;
-    }
-    
-    // Edit Lock Toggle Button
-    const toggleEditLockBtn = document.getElementById('toggleEditLockBtn');
-    if (toggleEditLockBtn) {
-        toggleEditLockBtn.onclick = () => setEditLock(!isEditLocked);
+
+    // Apply / Revert (Card tab is always editable; no lock). The header buttons are
+    // shared across tabs: Apply acts on whichever of Card/Raw is currently active.
+    on('applyCardBtn', 'click', () => {
+        const rawActive = document.getElementById('pane-raw')?.classList.contains('active');
+        if (rawActive) {
+            if (document.getElementById('applyCardBtn')?.dataset.rawInvalid) {
+                showToast('Fix the JSON error before applying', 'error');
+                return;
+            }
+            applyRawTab();
+        } else {
+            applyCardTab();
+        }
+    });
+    on('revertCardBtn', 'click', revertCardTab);
+
+    // Dirty tracking: any field edit or add/remove-row click inside the Card
+    // pane recomputes isCardDirty and shows/hides Apply/Revert.
+    const cardPane = document.getElementById('pane-card');
+    if (cardPane) {
+        cardPane.addEventListener('input', () => refreshApplyState());
+        cardPane.addEventListener('change', () => refreshApplyState());
+        cardPane.addEventListener('click', (e) => {
+            if (e.target.closest('button')) refreshApplyState();
+        });
     }
 
     // Card Image change controls (in-place hero overlay)
@@ -482,7 +492,6 @@ function setupEventListeners() {
     const editAvatarFileInput = document.getElementById('editAvatarFileInput');
     if (portraitEditOverlay && editAvatarFileInput) {
         portraitEditOverlay.onclick = () => {
-            if (isEditLocked) return;
             editAvatarFileInput.click();
         };
         editAvatarFileInput.addEventListener('change', (e) => {
@@ -494,31 +503,39 @@ function setupEventListeners() {
         portraitPendingRevertBtn.onclick = (e) => {
             e.stopPropagation();
             clearPendingAvatar();
+            refreshApplyState();
         };
     }
-    
+
     // Edit Fields Expand/Collapse Toggle
     const editFieldsToggleBtn = document.getElementById('editFieldsToggleBtn');
     if (editFieldsToggleBtn) {
         editFieldsToggleBtn.onclick = toggleEditFieldsExpand;
     }
-    
-    // Confirmation Modal Buttons
-    const confirmSaveBtn = document.getElementById('confirmSaveBtn');
-    const cancelSaveBtn = document.getElementById('cancelSaveBtn');
-    const closeConfirmModal = document.getElementById('closeConfirmModal');
-    const confirmModal = document.getElementById('confirmSaveModal');
-    
-    if (confirmSaveBtn) {
-        confirmSaveBtn.onclick = performSave;
+
+    // Creator's Notes: toggle between the rendered (sandboxed) view and the raw textarea.
+    const creatorNotesEditToggleBtn = document.getElementById('creatorNotesEditToggleBtn');
+    if (creatorNotesEditToggleBtn) {
+        creatorNotesEditToggleBtn.onclick = () => toggleCreatorNotesEditMode();
     }
-    if (cancelSaveBtn) {
-        cancelSaveBtn.onclick = () => confirmModal?.classList.add('hidden');
+
+    // Raw tab
+    on('copyRawJsonBtn', 'click', async () => {
+        const ta = document.getElementById('rawCardJson');
+        if (!ta) return;
+        const success = await copyTextToClipboard(ta.value);
+        showToast(success ? 'Copied to clipboard' : 'Failed to copy to clipboard', success ? 'success' : 'error');
+    });
+    const rawJsonTextarea = document.getElementById('rawCardJson');
+    if (rawJsonTextarea) {
+        let rawValidateTimer = null;
+        rawJsonTextarea.addEventListener('input', () => {
+            isRawDirty = true;
+            clearTimeout(rawValidateTimer);
+            rawValidateTimer = setTimeout(validateRawJsonTab, 250);
+        });
     }
-    if (closeConfirmModal) {
-        closeConfirmModal.onclick = () => confirmModal?.classList.add('hidden');
-    }
-    
+
     // Gallery Settings Modal
     setupSettingsModal();
     
@@ -583,14 +600,23 @@ function setupEventListeners() {
 function populateAltGreetingsEditor(greetings) {
     const container = document.getElementById('altGreetingsEditContainer');
     if (!container) return;
-    
+
     container.innerHTML = '';
-    
+
     if (greetings && greetings.length > 0) {
         greetings.forEach((greeting, index) => {
             addAltGreetingField(container, (greeting || '').trim(), index);
         });
     }
+    updateAltGreetingsCount();
+}
+
+function updateAltGreetingsCount() {
+    const countEl = document.getElementById('altGreetingsCount');
+    const container = document.getElementById('altGreetingsEditContainer');
+    if (!countEl || !container) return;
+    const count = container.querySelectorAll('.alt-greeting-item').length;
+    countEl.textContent = count > 0 ? `(${count})` : '';
 }
 
 function addAltGreetingField(container, value = '', index = null) {
@@ -628,7 +654,9 @@ function addAltGreetingField(container, value = '', index = null) {
     removeBtn.addEventListener('click', () => {
         wrapper.remove();
         renumberAltGreetings();
+        updateAltGreetingsCount();
     });
+    updateAltGreetingsCount();
 }
 
 function renumberAltGreetings() {

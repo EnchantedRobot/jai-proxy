@@ -444,10 +444,6 @@ export class ProviderBase {
     get supportsBulkLink() { return false; }
 
     /**
-     * Open the bulk link UI for this provider.
-     */
-    openBulkLinkUI() { /* optional */ }
-    /**
      * Search the provider for characters matching a local character's name/creator.
      * Used by the bulk auto-link scan to find remote matches.
      *

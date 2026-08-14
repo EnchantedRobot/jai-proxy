@@ -267,21 +267,20 @@ function injectMultiSelectToolbar() {
 
 function injectMultiSelectToggle() {
     const filterArea = document.getElementById('filterArea');
-    const notificationsContainer = filterArea?.querySelector('.notifications-container');
 
-    if (!filterArea || !notificationsContainer) {
-        console.warn('[MultiSelect] Could not find filter area or notifications container');
+    if (!filterArea) {
+        console.warn('[MultiSelect] Could not find filter area');
         return;
     }
 
     if (document.getElementById('multiSelectToggleBtn')) return;
 
     const toggleHtml = `
-    <button id="multiSelectToggleBtn" class="glass-btn icon-only" title="Multi-select mode (Space to toggle, Esc to exit)">
-        <i class="fa-solid fa-object-group"></i>
+    <button id="multiSelectToggleBtn" class="glass-btn" title="Multi-select mode (Space to toggle, Esc to exit)">
+        <i class="fa-solid fa-object-group"></i> <span>Select</span>
     </button>`;
 
-    notificationsContainer.insertAdjacentHTML('afterend', toggleHtml);
+    filterArea.insertAdjacentHTML('beforeend', toggleHtml);
 
     document.getElementById('multiSelectToggleBtn')?.addEventListener('click', () => {
         const btn = document.getElementById('multiSelectToggleBtn');

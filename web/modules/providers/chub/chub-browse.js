@@ -1,6 +1,6 @@
 // ChubBrowseView - ChubAI browse/search UI for the Online tab
 
-import { BrowseView } from '../browse-view.js';
+import { BrowseView, renderBrowseFilterBar } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
 import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG, skeletonLines, deferRender, deferCall, isMobileMode, finishBrowseImport, proxyEncode, readJsonClassified, renderBrowseError } from '../provider-utils.js';
 import {
@@ -58,7 +58,8 @@ let chubHasMore = true;
 let chubIsLoading = false;
 let chubLoadToken = 0;
 let chubDiscoveryPreset = 'popular_week'; // Combined sort + time preset
-let chubNsfwEnabled = false; // Default to SFW only
+// NSFW filtering is gone as a UI toggle; both providers' APIs still require the param, so it's always sent true.
+const NSFW_ALLOWED = true;
 let chubCurrentSearch = '';
 let chubSelectedChar = null;
 let chubToken = null; // URQL_TOKEN from chub.ai localStorage for Authorization Bearer
@@ -79,25 +80,12 @@ const CHUB_DISCOVERY_PRESETS = {
 };
 
 // Additional ChubAI filters
-let chubFilterImages = false;
-let chubFilterLore = false;
-let chubFilterGreetings = false;
-let chubFilterCustomPrompt = false;
-let chubFilterExampleDialogues = false;
-let chubExcludeForks = false;
-let chubFilterFavorites = false;
 let chubFilterHideOwned = false;
 let chubFilterHidePossible = false;
-// Server-param-only toggles: timeline/favorites nodes carry no matching field to client-filter
-const CHUB_BROWSE_ONLY_FILTER_IDS = ['chubFilterCustomPrompt', 'chubFilterExampleDialogues', 'chubExcludeForks'];
 
 // Advanced ChubAI filters (Tags dropdown)
 let chubTagFilters = new Map(); // Map<tagName, 'include' | 'exclude'>
 let chubSortAscending = false; // false = descending (default), true = ascending
-let chubMinTokens = 50; // Minimum tokens (API default)
-let chubMaxTokens = 100000; // Maximum tokens
-let chubMinAiRating = 0; // Minimum AI quality score 0-100 (chub's AI judge, not user stars; 0 = off)
-let chubAiRatingSortWarned = false; // once-per-session toast for the trending/newcomer incompatibility
 
 // ChubAI View mode and author filter
 let chubViewMode = 'browse'; // 'browse' or 'timeline'
@@ -312,9 +300,7 @@ class ChubBrowseView extends BrowseView {
         return {
             sort: 'chubDiscoveryPreset',
             tags: 'chubTagsBtn',
-            filters: 'chubFiltersBtn',
-            nsfw: 'chubNsfwToggle',
-            refresh: 'refreshChubBtn',
+            refresh: 'chubRefreshBtn',
             timelineSort: 'chubTimelineSortHeader',
             modeBrowseSelector: '.chub-view-btn[data-chub-view="browse"]',
             modeFollowSelector: '.chub-view-btn[data-chub-view="timeline"]',
@@ -387,19 +373,7 @@ class ChubBrowseView extends BrowseView {
     // ── Filter Bar ──────────────────────────────────────────
 
     renderFilterBar() {
-        return `
-            <!-- Discovery Mode Toggle -->
-            <div class="chub-view-toggle">
-                <button class="chub-view-btn active" data-chub-view="browse" title="Browse all characters">
-                    <i class="fa-solid fa-compass"></i> <span>Browse</span>
-                </button>
-                <button class="chub-view-btn" data-chub-view="timeline" title="New from followed authors (requires token)">
-                    <i class="fa-solid fa-users"></i> <span>Following</span>
-                </button>
-            </div>
-
-            <!-- Sort dropdown container -->
-            <div class="browse-sort-container">
+        const sortSelectsHtml = `
                 <!-- Discovery Preset (Browse mode) -->
                 <select id="chubDiscoveryPreset" class="glass-select" title="Discovery mode">
                     <optgroup label="Popular">
@@ -432,83 +406,21 @@ class ChubBrowseView extends BrowseView {
                     <option value="favorites">❤️ Most Favorites</option>
                     <option value="rating">⭐ Top Rated</option>
                 </select>
-            </div>
 
-            <!-- Tags & Advanced Filters -->
-            <div class="browse-tags-dropdown-container" style="position: relative;">
-                <button id="chubTagsBtn" class="glass-btn" title="Tag filters and advanced options">
-                    <i class="fa-solid fa-tags"></i> <span id="chubTagsBtnLabel">Tags</span>
-                </button>
-                <div id="chubTagsDropdown" class="dropdown-menu browse-tags-dropdown hidden">
-                    <div class="browse-tags-search-row">
-                        <input type="search" id="chubTagsSearchInput" placeholder="Search tags..." autocomplete="one-time-code">
-                        <button id="chubTagsClearBtn" class="glass-btn icon-only" title="Clear all tag filters">
-                            <i class="fa-solid fa-rotate-left"></i>
-                        </button>
-                    </div>
-                    <div class="browse-tags-list" id="chubTagsList">
-                        <div class="browse-tags-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading tags...</div>
-                    </div>
-                    <hr id="chubAdvancedDivider" style="margin: 10px 0; border-color: var(--glass-border);">
-                    <div id="chubAdvancedOptions">
-                    <div class="dropdown-section-title"><i class="fa-solid fa-gear"></i> Advanced Options</div>
-                    <div class="browse-advanced-option">
-                        <label><i class="fa-solid fa-arrow-down-wide-short"></i> Sort Direction</label>
-                        <select id="chubSortDirection" class="glass-select-small">
-                            <option value="desc" selected data-icon="fa-solid fa-arrow-down-wide-short">Descending</option>
-                            <option value="asc" data-icon="fa-solid fa-arrow-up-short-wide">Ascending</option>
-                        </select>
-                    </div>
-                    <div class="browse-advanced-option">
-                        <label><i class="fa-solid fa-text-width"></i> Min Tokens</label>
-                        <input type="number" id="chubMinTokens" class="glass-input-small" value="50" min="0" max="100000" step="100">
-                    </div>
-                    <div class="browse-advanced-option">
-                        <label><i class="fa-solid fa-text-width"></i> Max Tokens</label>
-                        <input type="number" id="chubMaxTokens" class="glass-input-small" value="100000" min="0" max="500000" step="1000">
-                    </div>
-                    <div class="browse-advanced-option" title="ChubAI's automated quality score from 0 to 100, not the user star rating. 0 disables the filter. ChubAI scores cards roughly two weeks after upload, so newer cards are always excluded while this is set, and the Trending, Hot This Week, Top Rated (Week), and Recent Hits sorts don't support it at all.">
-                        <label><i class="fa-solid fa-ranking-star"></i> Min AI Score</label>
-                        <input type="number" id="chubMinAiRating" class="glass-input-small" value="0" min="0" max="100" step="5">
-                    </div>
-                    </div>
-                </div>
-            </div>
+                <!-- Sort Direction (Browse mode only) -->
+                <select id="chubSortDirection" class="glass-select-small" title="Sort direction">
+                    <option value="desc" selected data-icon="fa-solid fa-arrow-down-wide-short">Descending</option>
+                    <option value="asc" data-icon="fa-solid fa-arrow-up-short-wide">Ascending</option>
+                </select>`;
 
-            <!-- Feature Filters -->
-            <div class="browse-more-filters" style="position: relative;">
-                <button id="chubFiltersBtn" class="glass-btn" title="Filter by character features">
-                    <i class="fa-solid fa-sliders"></i> <span>Features</span>
-                </button>
-                <div id="chubFiltersDropdown" class="dropdown-menu browse-features-dropdown hidden" style="width: 240px;">
-                    <div class="dropdown-section-title">Character must have:</div>
-                    <label class="filter-checkbox"><input type="checkbox" id="chubFilterImages"> <i class="fa-solid fa-images"></i> Image Gallery</label>
-                    <label class="filter-checkbox"><input type="checkbox" id="chubFilterLore"> <i class="fa-solid fa-book"></i> Lorebook</label>
-                    <label class="filter-checkbox"><input type="checkbox" id="chubFilterGreetings"> <i class="fa-solid fa-comments"></i> Alt Greetings</label>
-                    <label class="filter-checkbox"><input type="checkbox" id="chubFilterCustomPrompt"> <i class="fa-solid fa-terminal"></i> Custom System Prompt</label>
-                    <label class="filter-checkbox"><input type="checkbox" id="chubFilterExampleDialogues"> <i class="fa-solid fa-comment-dots"></i> Example Dialogues</label>
-                    <hr style="margin: 8px 0; border-color: var(--glass-border);">
-                    <label class="filter-checkbox"><input type="checkbox" id="chubExcludeForks"> <i class="fa-solid fa-code-branch"></i> Exclude Forks</label>
-                    <hr style="margin: 8px 0; border-color: var(--glass-border);">
-                    <div class="dropdown-section-title">Personal <span style="font-size: 0.8em; opacity: 0.6;">(requires login)</span>:</div>
-                    <label class="filter-checkbox"><input type="checkbox" id="chubFilterFavorites"> <i class="fa-solid fa-heart" style="color: #e74c3c;"></i> My Favorites</label>
-                    <hr style="margin: 8px 0; border-color: var(--glass-border);">
-                    <div class="dropdown-section-title">Library:</div>
-                    <label class="filter-checkbox"><input type="checkbox" id="chubFilterHideOwned"> <i class="fa-solid fa-check"></i> Hide Owned Characters</label>
-                    <label class="filter-checkbox"><input type="checkbox" id="chubFilterHidePossible"> <i class="fa-solid fa-check" style="color: #f0a500;"></i> Hide Possible Matches</label>
-                </div>
-            </div>
-
-            <!-- Content Toggles -->
-            <button id="chubNsfwToggle" class="glass-btn nsfw-toggle" title="Toggle NSFW content">
-                <i class="fa-solid fa-shield-halved"></i> <span>SFW Only</span>
-            </button>
-
-            <!-- Refresh -->
-            <button id="refreshChubBtn" class="glass-btn icon-only" title="Refresh">
-                <i class="fa-solid fa-sync"></i>
-            </button>
-        `;
+        return renderBrowseFilterBar({
+            prefix: 'chub',
+            viewBtnAttr: 'chub-view',
+            sortSelectsHtml,
+            hasFollowing: true,
+            followingValue: 'timeline',
+            followingTitle: 'New from followed authors (requires token)',
+        });
     }
 
     // ── Main View ───────────────────────────────────────────
@@ -807,7 +719,6 @@ class ChubBrowseView extends BrowseView {
         super.init();
         initChubView();
         this._registerDropdownDismiss([
-            { dropdownId: 'chubFiltersDropdown', buttonId: 'chubFiltersBtn' },
             { dropdownId: 'chubTagsDropdown', buttonId: 'chubTagsBtn' },
         ]);
     }
@@ -835,7 +746,6 @@ class ChubBrowseView extends BrowseView {
             if (tsTarget) tsTarget.classList.remove('browse-filter-hidden');
             const tagsContainer = document.querySelector('.browse-tags-dropdown-container');
             if (tagsContainer) tagsContainer.classList.add('browse-filter-hidden');
-            updateChubFeatureFilterAvailability();
         }
         if (defaults.sort) {
             if (chubViewMode === 'browse') {
@@ -850,15 +760,11 @@ class ChubBrowseView extends BrowseView {
         }
         if (defaults.hideOwned) {
             chubFilterHideOwned = true;
-            const el = document.getElementById('chubFilterHideOwned');
-            if (el) el.checked = true;
         }
         if (defaults.hidePossible) {
             chubFilterHidePossible = true;
-            const el = document.getElementById('chubFilterHidePossible');
-            if (el) el.checked = true;
         }
-        if (defaults.hideOwned || defaults.hidePossible) updateChubFiltersButtonState();
+        if (defaults.hideOwned || defaults.hidePossible) updateChubHideTogglesState();
     }
 
     activate(container, options = {}) {
@@ -932,7 +838,6 @@ class ChubBrowseView extends BrowseView {
 
     closeDropdowns() {
         document.getElementById('chubTagsDropdown')?.classList.add('hidden');
-        document.getElementById('chubFiltersDropdown')?.classList.add('hidden');
     }
 }
 
@@ -943,8 +848,6 @@ class ChubBrowseView extends BrowseView {
 
 
 function initChubView() {
-    chubNsfwEnabled = getSetting('chubNsfw') === true;
-
     // Sync dropdown values with JS state (browser may cache old form values)
     const discoveryPresetEl = document.getElementById('chubDiscoveryPreset');
     const timelineSortEl = document.getElementById('chubTimelineSortHeader');
@@ -965,9 +868,6 @@ function initChubView() {
         }
     }
     
-    // Also sync NSFW toggle state
-    updateNsfwToggleState();
-
     setupChubGridDelegates();
     
     // View mode toggle (Browse/Timeline)
@@ -1085,89 +985,43 @@ function initChubView() {
         loadChubCharacters();
     });
     
-    // More filters dropdown toggle
-    on('chubFiltersBtn', 'click', (e) => {
-        e.stopPropagation();
-        CoreAPI.closeAllTopbarDropdowns();
-        document.getElementById('chubTagsDropdown')?.classList.add('hidden');
-        document.getElementById('chubFiltersDropdown')?.classList.toggle('hidden');
-    });
-    
-    // Filter checkboxes - with getter for syncing
-    const filterCheckboxes = [
-        { id: 'chubFilterImages', setter: (v) => chubFilterImages = v, getter: () => chubFilterImages },
-        { id: 'chubFilterLore', setter: (v) => chubFilterLore = v, getter: () => chubFilterLore },
-        { id: 'chubFilterGreetings', setter: (v) => chubFilterGreetings = v, getter: () => chubFilterGreetings },
-        { id: 'chubFilterCustomPrompt', setter: (v) => chubFilterCustomPrompt = v, getter: () => chubFilterCustomPrompt },
-        { id: 'chubFilterExampleDialogues', setter: (v) => chubFilterExampleDialogues = v, getter: () => chubFilterExampleDialogues },
-        { id: 'chubExcludeForks', setter: (v) => chubExcludeForks = v, getter: () => chubExcludeForks },
-        { id: 'chubFilterFavorites', setter: (v) => chubFilterFavorites = v, getter: () => chubFilterFavorites },
-        { id: 'chubFilterHideOwned', setter: (v) => chubFilterHideOwned = v, getter: () => chubFilterHideOwned },
-        { id: 'chubFilterHidePossible', setter: (v) => chubFilterHidePossible = v, getter: () => chubFilterHidePossible }
+    // Hide Owned / Hide Possible - topbar toggle buttons
+    const hideToggles = [
+        { id: 'chubHideOwnedBtn', setter: (v) => chubFilterHideOwned = v, getter: () => chubFilterHideOwned },
+        { id: 'chubHidePossibleBtn', setter: (v) => chubFilterHidePossible = v, getter: () => chubFilterHidePossible },
     ];
-    
-    // Sync checkbox states with JS variables (browser may cache old form values)
-    filterCheckboxes.forEach(({ id, getter }) => {
-        const checkbox = document.getElementById(id);
-        if (checkbox) checkbox.checked = getter();
+
+    hideToggles.forEach(({ id, getter }) => {
+        const btn = document.getElementById(id);
+        if (btn) {
+            btn.classList.toggle('is-active', getter());
+            btn.setAttribute('aria-pressed', String(getter()));
+        }
     });
-    updateChubFeatureFilterAvailability();
-    
-    filterCheckboxes.forEach(({ id, setter }) => {
-        document.getElementById(id)?.addEventListener('change', async (e) => {
-            // Special handling for favorites - requires token
-            if (id === 'chubFilterFavorites' && e.target.checked && !chubToken) {
-                e.target.checked = false;
-                showToast('URQL token required for favorites. Click the key icon to add your ChubAI token.', 'warning');
-                show('chubLoginModal');
-                return;
-            }
-            setter(e.target.checked);
-            debugLog(`Filter ${id} set to:`, e.target.checked);
-            updateChubFiltersButtonState();
-            
-            // For timeline mode with favorites filter, fetch favorite IDs first
+
+    hideToggles.forEach(({ id, setter, getter }) => {
+        document.getElementById(id)?.addEventListener('click', (e) => {
+            setter(!getter());
+            const btn = e.currentTarget;
+            btn.classList.toggle('is-active', getter());
+            btn.setAttribute('aria-pressed', String(getter()));
+            debugLog(`Filter ${id} set to:`, getter());
+
             if (chubViewMode === 'timeline') {
-                if (id === 'chubFilterFavorites' && e.target.checked) {
-                    await fetchChubUserFavoriteIds();
-                }
                 renderChubTimeline();
             } else {
-                // For browse mode, always reload from API when changing filters
-                // This ensures we get fresh data and don't mix old results
                 chubCharacters = [];
                 chubCurrentPage = 1;
                 loadChubCharacters();
             }
         });
     });
-    
+
     // === Tags Dropdown Handlers ===
     initChubTagsDropdown();
-    
-    // NSFW toggle - single button toggle
-    on('chubNsfwToggle', 'click', () => {
-        chubNsfwEnabled = !chubNsfwEnabled;
-        setSetting('chubNsfw', chubNsfwEnabled);
-        updateNsfwToggleState();
-        
-        // Refresh the appropriate view based on current mode
-        if (chubViewMode === 'timeline') {
-            chubTimelineCharacters = [];
-            chubTimelinePage = 1;
-            chubTimelineCursor = null;
-            chubTimelineAuthorPage = 1;
-            chubTimelineAuthorHasMore = false;
-            loadChubTimeline(true);
-        } else {
-            chubCharacters = [];
-            chubCurrentPage = 1;
-            loadChubCharacters();
-        }
-    });
-    
+
     // Refresh button - works for both Browse and Timeline modes
-    on('refreshChubBtn', 'click', () => {
+    on('chubRefreshBtn', 'click', () => {
         if (chubViewMode === 'timeline') {
             chubTimelineCharacters = [];
             chubTimelinePage = 1;
@@ -1262,10 +1116,7 @@ function initChubView() {
 
     // Load saved token on init
     loadChubToken();
-    
-    // Initialize NSFW toggle state from persisted preference
-    updateNsfwToggleState();
-    
+
     // Start fetching popular tags in the background
     if (!chubTagsLoaded && !chubTagsLoading) {
         fetchChubPopularTags();
@@ -1341,11 +1192,6 @@ function saveChubToken() {
     if (modal) modal.classList.add('hidden');
     
     showToast('Token saved! Your token is now stored persistently.', 'success');
-    
-    // Refresh if we have filters that need the token
-    if (chubFilterFavorites) {
-        loadChubCharacters();
-    }
 }
 
 function clearChubToken() {
@@ -1369,13 +1215,6 @@ function clearChubToken() {
 
     const rememberCheckbox = document.getElementById('chubRememberKey');
     if (rememberCheckbox) rememberCheckbox.checked = false;
-
-    if (chubFilterFavorites) {
-        chubFilterFavorites = false;
-        const favCheckbox = document.getElementById('chubFilterFavorites');
-        if (favCheckbox) favCheckbox.checked = false;
-        updateChubFiltersButtonState();
-    }
 
     // Drop timeline / follows state so logged-out users dont see stale data.
     // Token-bump cancels any in-flight chunked render.
@@ -1545,53 +1384,16 @@ function extractChubTagsFromResults(characters) {
     }
 }
 
-function updateChubFiltersButtonState() {
-    const btn = document.getElementById('chubFiltersBtn');
-    if (!btn) return;
-    
-    // Browse-only toggles don't count in the Following tab, where they can't filter anything
-    const browseOnly = chubViewMode === 'timeline' ? []
-        : [chubFilterCustomPrompt, chubFilterExampleDialogues, chubExcludeForks];
-    const count = [chubFilterImages, chubFilterLore, chubFilterGreetings,
-                   ...browseOnly,
-                   chubFilterFavorites, chubFilterHideOwned, chubFilterHidePossible].filter(Boolean).length;
-
-    btn.classList.toggle('has-filters', count > 0);
-
-    if (count > 0) {
-        btn.innerHTML = `<i class="fa-solid fa-sliders"></i> Features (${count})`;
-    } else {
-        btn.innerHTML = `<i class="fa-solid fa-sliders"></i> Features`;
+function updateChubHideTogglesState() {
+    const owned = document.getElementById('chubHideOwnedBtn');
+    if (owned) {
+        owned.classList.toggle('is-active', chubFilterHideOwned);
+        owned.setAttribute('aria-pressed', String(chubFilterHideOwned));
     }
-}
-
-function updateChubFeatureFilterAvailability() {
-    const inTimeline = chubViewMode === 'timeline';
-    for (const id of CHUB_BROWSE_ONLY_FILTER_IDS) {
-        const input = document.getElementById(id);
-        if (!input) continue;
-        input.disabled = inTimeline;
-        const row = input.closest('label.filter-checkbox');
-        if (!row) continue;
-        row.classList.toggle('browse-option-disabled', inTimeline);
-        if (inTimeline) row.title = 'Not available in the Following tab';
-        else row.removeAttribute('title');
-    }
-    updateChubFiltersButtonState();
-}
-
-function updateNsfwToggleState() {
-    const btn = document.getElementById('chubNsfwToggle');
-    if (!btn) return;
-    
-    if (chubNsfwEnabled) {
-        btn.classList.add('active');
-        btn.innerHTML = '<i class="fa-solid fa-fire"></i> <span>NSFW On</span>';
-        btn.title = 'NSFW content enabled - click to show SFW only';
-    } else {
-        btn.classList.remove('active');
-        btn.innerHTML = '<i class="fa-solid fa-shield-halved"></i> <span>SFW Only</span>';
-        btn.title = 'Showing SFW only - click to include NSFW';
+    const possible = document.getElementById('chubHidePossibleBtn');
+    if (possible) {
+        possible.classList.toggle('is-active', chubFilterHidePossible);
+        possible.setAttribute('aria-pressed', String(chubFilterHidePossible));
     }
 }
 
@@ -1633,7 +1435,6 @@ function initChubTagsDropdown() {
         e.stopPropagation();
         CoreAPI.closeAllTopbarDropdowns();
         const wasHidden = dropdown.classList.contains('hidden');
-        document.getElementById('chubFiltersDropdown')?.classList.add('hidden');
         dropdown.classList.toggle('hidden');
         
         // Populate tags when opening
@@ -1674,28 +1475,9 @@ function initChubTagsDropdown() {
         triggerChubReload();
     });
     
-    // Advanced options handlers
-    const sortDir = document.getElementById('chubSortDirection');
-    const minTokens = document.getElementById('chubMinTokens');
-    const maxTokens = document.getElementById('chubMaxTokens');
-    
-    sortDir?.addEventListener('change', (e) => {
+    // Sort direction
+    document.getElementById('chubSortDirection')?.addEventListener('change', (e) => {
         chubSortAscending = e.target.value === 'asc';
-        triggerChubReload();
-    });
-    
-    minTokens?.addEventListener('change', (e) => {
-        chubMinTokens = parseInt(e.target.value) || 50;
-        triggerChubReload();
-    });
-    
-    maxTokens?.addEventListener('change', (e) => {
-        chubMaxTokens = parseInt(e.target.value) || 100000;
-        triggerChubReload();
-    });
-
-    document.getElementById('chubMinAiRating')?.addEventListener('change', (e) => {
-        chubMinAiRating = parseInt(e.target.value) || 0;
         triggerChubReload();
     });
 }
@@ -1877,7 +1659,7 @@ function updateChubTagsButtonState() {
     const includeCount = Array.from(chubTagFilters.values()).filter(v => v === 'include').length;
     const excludeCount = Array.from(chubTagFilters.values()).filter(v => v === 'exclude').length;
     
-    const hasAdvanced = chubSortAscending || chubMinTokens !== 50 || chubMaxTokens !== 100000 || chubMinAiRating > 0;
+    const hasAdvanced = chubSortAscending;
     
     let text = 'Tags';
     const parts = [];
@@ -1905,8 +1687,6 @@ async function switchChubViewMode(mode) {
         btn.classList.toggle('active', btn.dataset.chubView === mode);
     });
 
-    updateChubFeatureFilterAvailability();
-    
     // Show/hide sections
     const browseSection = document.getElementById('chubBrowseSection');
     const timelineSection = document.getElementById('chubTimelineSection');
@@ -1923,12 +1703,7 @@ async function switchChubViewMode(mode) {
         if (dpTarget) dpTarget.classList.remove('browse-filter-hidden');
         if (tsTarget) tsTarget.classList.add('browse-filter-hidden');
         if (tagsDropdownContainer) tagsDropdownContainer.classList.remove('browse-filter-hidden');
-        // Show advanced options (API-only params) in browse mode
-        const advancedOpts = document.getElementById('chubAdvancedOptions');
-        const advancedDivider = document.getElementById('chubAdvancedDivider');
-        if (advancedOpts) advancedOpts.style.display = '';
-        if (advancedDivider) advancedDivider.style.display = '';
-        
+
         const grid = document.getElementById('chubGrid');
         if (grid) {
             renderSkeletonGrid(grid);
@@ -1949,17 +1724,7 @@ async function switchChubViewMode(mode) {
         const tsTarget = timelineSortHeader?._customSelect?.container || timelineSortHeader;
         if (dpTarget) dpTarget.classList.add('browse-filter-hidden');
         if (tsTarget) tsTarget.classList.remove('browse-filter-hidden');
-        // Hide advanced options (sort direction, token limits) - not applicable to timeline
-        const advancedOpts = document.getElementById('chubAdvancedOptions');
-        const advancedDivider = document.getElementById('chubAdvancedDivider');
-        if (advancedOpts) advancedOpts.style.display = 'none';
-        if (advancedDivider) advancedDivider.style.display = 'none';
-        
-        // If favorites filter is enabled, fetch the favorite IDs first
-        if (chubFilterFavorites && chubToken) {
-            await fetchChubUserFavoriteIds();
-        }
-        
+
         // Load timeline if not loaded, otherwise just re-render with current filters
         if (chubTimelineCharacters.length === 0) {
             loadChubTimeline();
@@ -2005,8 +1770,8 @@ async function loadChubTimeline(forceRefresh = false, _isAutoPage = false, _appe
         // This API uses cursor-based pagination, not page-based
         const params = new URLSearchParams();
         params.set('first', '50');
-        params.set('nsfw', chubNsfwEnabled.toString());
-        params.set('nsfl', chubNsfwEnabled.toString()); // NSFL follows NSFW setting
+        params.set('nsfw', NSFW_ALLOWED.toString());
+        params.set('nsfl', NSFW_ALLOWED.toString()); // NSFL follows NSFW setting
         params.set('count', 'true'); // Request total count for better pagination info
         
         // Use cursor for pagination if we have one (for loading more)
@@ -2018,7 +1783,7 @@ async function loadChubTimeline(forceRefresh = false, _isAutoPage = false, _appe
         
         const headers = getChubHeaders(true);
         
-        debugLog('[ChubTimeline] Loading timeline, nsfw:', chubNsfwEnabled);
+        debugLog('[ChubTimeline] Loading timeline, nsfw:', NSFW_ALLOWED);
         
         const response = await fetch(`${CHUB_API_BASE}/api/timeline/v1?${params.toString()}`, {
             method: 'GET',
@@ -2211,8 +1976,8 @@ async function supplementTimelineWithAuthorFetches(page = 1) {
                     params.set('first', PAGE_SIZE.toString());
                     params.set('page', page.toString());
                     params.set('sort', 'id');
-                    params.set('nsfw', chubNsfwEnabled.toString());
-                    params.set('nsfl', chubNsfwEnabled.toString());
+                    params.set('nsfw', NSFW_ALLOWED.toString());
+                    params.set('nsfl', NSFW_ALLOWED.toString());
                     params.set('include_forks', 'true');
                     
                     const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
@@ -2406,19 +2171,14 @@ function renderChubTimeline(appendOnly = false) {
 
     let sourceChars = chubTimelineCharacters;
 
-    const anyFilterActive = chubFilterImages || chubFilterLore ||
-        chubFilterGreetings || chubFilterHideOwned || chubFilterHidePossible || (chubFilterFavorites && chubUserFavoriteIds.size > 0) ||
+    const anyFilterActive = chubFilterHideOwned || chubFilterHidePossible ||
         includeTags.length > 0 || excludeTags.length > 0;
-    
+
     let filteredCharacters;
     if (anyFilterActive) {
         filteredCharacters = sourceChars.filter(c => {
-            if (chubFilterImages && !(c.hasGallery || c.has_gallery)) return false;
-            if (chubFilterLore && !(c.has_lore || c.related_lorebooks?.length > 0)) return false;
-            if (chubFilterGreetings && !(c.alternate_greetings?.length > 0 || c.n_greetings > 1)) return false;
             if (chubFilterHideOwned && isCharInLocalLibrary(c)) return false;
             if (chubFilterHidePossible && isCharPossibleMatchObj(c)) return false;
-            if (chubFilterFavorites && chubUserFavoriteIds.size > 0 && !chubUserFavoriteIds.has(c.id || c.project_id)) return false;
             // Tag filters (client-side - timeline data already has topics)
             if (includeTags.length > 0 || excludeTags.length > 0) {
                 const charTopics = (c.topics || []).map(t => t.toLowerCase());
@@ -2789,40 +2549,11 @@ function performChubSearch() {
     loadChubCharacters();
 }
 
-// Chub assigns AI scores roughly two weeks after upload and min_ai_rating excludes unscored cards,
-// so any all-fresh result set returns 0 rows: trending, newcomer, and windows up to 14 days
-// (boundary verified live: max_days_ago=14 breaks, 15 works). Author views filter correctly but
-// lose the creator's sub-two-week cards. Mirrors the sort-branch selection in the param builder.
-function chubAiRatingSupported() {
-    if (chubAuthorFilter) return true;
-    const preset = CHUB_DISCOVERY_PRESETS[chubDiscoveryPreset] || CHUB_DISCOVERY_PRESETS['popular_week'];
-    if (preset.sort === 'trending' || preset.sort === 'trending_downloads') return false;
-    // Search mode drops special_mode and max_days_ago from the query, so those only block general browsing
-    if (chubCurrentSearch) return true;
-    return !preset.special_mode && !(preset.days > 0 && preset.days <= 14);
-}
-
-function updateChubAiRatingFieldState() {
-    const input = document.getElementById('chubMinAiRating');
-    if (!input) return;
-    const supported = chubAiRatingSupported();
-    input.disabled = !supported;
-    input.closest('.browse-advanced-option')?.classList.toggle('browse-option-disabled', !supported);
-}
-
 async function loadChubCharacters(forceRefresh = false) {
     const thisToken = ++chubLoadToken;
 
-    updateChubAiRatingFieldState();
-
     const grid = document.getElementById('chubGrid');
 
-    // Special handling for favorites filter - use gateway API directly
-    if (chubFilterFavorites && chubToken) {
-        await loadChubFavorites(forceRefresh, thisToken);
-        return;
-    }
-    
     const loadMoreBtn = document.getElementById('chubLoadMoreBtn');
 
     if (chubCurrentPage === 1) {
@@ -2844,9 +2575,9 @@ async function loadChubCharacters(forceRefresh = false) {
         const preset = CHUB_DISCOVERY_PRESETS[chubDiscoveryPreset] || CHUB_DISCOVERY_PRESETS['popular_week'];
         
         params.set('page', chubCurrentPage.toString());
-        params.set('nsfw', chubNsfwEnabled.toString());
-        params.set('nsfl', chubNsfwEnabled.toString()); // NSFL follows NSFW setting
-        params.set('include_forks', chubExcludeForks ? 'false' : 'true'); // Exclude Forks toggle
+        params.set('nsfw', NSFW_ALLOWED.toString());
+        params.set('nsfl', NSFW_ALLOWED.toString()); // NSFL follows NSFW setting
+        params.set('include_forks', 'true');
         params.set('venus', 'false');
         
         if (chubCurrentSearch) {
@@ -2882,23 +2613,6 @@ async function loadChubCharacters(forceRefresh = false) {
             }
         }
         
-        // Add additional filters
-        if (chubFilterImages) {
-            params.set('require_images', 'true');
-        }
-        if (chubFilterLore) {
-            params.set('require_lore', 'true');
-        }
-        if (chubFilterGreetings) {
-            params.set('require_alternate_greetings', 'true');
-        }
-        if (chubFilterCustomPrompt) {
-            params.set('require_custom_prompt', 'true');
-        }
-        if (chubFilterExampleDialogues) {
-            params.set('require_example_dialogues', 'true');
-        }
-
         // === Advanced Tag Filters ===
         // Include tags (topics)
         const includeTags = [];
@@ -2922,24 +2636,7 @@ async function loadChubCharacters(forceRefresh = false) {
         if (chubSortAscending) {
             params.set('asc', 'true');
         }
-        
-        // Token limits (only set if different from defaults)
-        if (chubMinTokens !== 50) {
-            params.set('min_tokens', chubMinTokens.toString());
-        } else {
-            params.set('min_tokens', '50');
-        }
-        if (chubMaxTokens !== 100000) {
-            params.set('max_tokens', chubMaxTokens.toString());
-        }
-        if (chubMinAiRating > 0) {
-            if (chubAiRatingSupported()) {
-                params.set('min_ai_rating', chubMinAiRating.toString());
-            } else if (!chubAiRatingSortWarned) {
-                chubAiRatingSortWarned = true;
-                showToast('Min AI Score is ignored for the Trending, Hot This Week, Top Rated (Week), and Recent Hits sorts (ChubAI limitation)', 'info');
-            }
-        }
+        params.set('min_tokens', '50');
 
         debugLog('[ChubAI] Search params:', params.toString());
         
@@ -3050,7 +2747,7 @@ async function loadChubCharacters(forceRefresh = false) {
                 provider: 'chub',
                 error: e,
                 title: 'Failed to load ChubAI',
-                flags: { token: !!chubToken, nsfw: chubNsfwEnabled },
+                flags: { token: !!chubToken, nsfw: NSFW_ALLOWED },
                 retry: () => loadChubCharacters(true),
             });
         } else {
@@ -3101,140 +2798,6 @@ async function fetchChubUserFavoriteIds({ maxAgeMs = 0 } = {}) {
         }
     } catch (e) {
         debugLog('[ChubAI] Failed to fetch favorite IDs:', e.message);
-    }
-}
-
-/**
- * Load user's favorites from ChubAI gateway API
- * This uses a different endpoint than the search API
- */
-async function loadChubFavorites(forceRefresh = false, loadToken = 0) {
-    const grid = document.getElementById('chubGrid');
-
-    if (chubCurrentPage === 1) {
-        renderSkeletonGrid(grid);
-    }
-    
-    chubIsLoading = true;
-    
-    try {
-        // Use gateway API to fetch favorites directly
-        const params = new URLSearchParams();
-        params.set('first', '100'); // Get more items per page from favorites
-        
-        if (chubCurrentPage > 1) {
-            params.set('page', chubCurrentPage.toString());
-        }
-        
-        const url = `${CHUB_GATEWAY_BASE}/api/favorites?${params.toString()}`;
-        debugLog('[ChubAI] Loading favorites from:', url);
-        
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Accept': 'application/json',
-                'samwise': chubToken,
-                'CH-API-KEY': chubToken
-            }
-        });
-        
-        const data = await readJsonClassified(response);
-        debugLog('[ChubAI] Favorites response:', data);
-        
-        if (loadToken && loadToken !== chubLoadToken) return;
-        
-        // Extract nodes from response
-        let nodes = data.nodes || data.data || [];
-        
-        // Apply additional filters client-side
-        if (chubFilterImages) {
-            nodes = nodes.filter(c => c.hasGallery || c.has_gallery);
-        }
-        if (chubFilterLore) {
-            nodes = nodes.filter(c => c.has_lore || c.related_lorebooks?.length > 0);
-        }
-        if (chubFilterGreetings) {
-            nodes = nodes.filter(c => c.alternate_greetings?.length > 0 || c.n_greetings > 1);
-        }
-        if (chubFilterHideOwned) {
-            nodes = nodes.filter(c => !isCharInLocalLibrary(c));
-        }
-        if (chubFilterHidePossible) {
-            nodes = nodes.filter(c => !isCharPossibleMatchObj(c));
-        }
-        
-        // Apply NSFW filter
-        if (!chubNsfwEnabled) {
-            nodes = nodes.filter(c => !c.nsfw);
-        }
-        
-        // Apply tag filters + persistent excludes client-side (favorites API doesn't support topics param)
-        const includeTags = [];
-        const excludeTags = [];
-        for (const [tag, state] of chubTagFilters) {
-            if (state === 'include') includeTags.push(tag.toLowerCase());
-            else if (state === 'exclude') excludeTags.push(tag.toLowerCase());
-        }
-        for (const t of getProviderExcludeTags('chub')) {
-            const lt = t.toLowerCase();
-            if (!excludeTags.includes(lt)) excludeTags.push(lt);
-        }
-        if (includeTags.length > 0 || excludeTags.length > 0) {
-            nodes = nodes.filter(c => {
-                const charTopics = (c.topics || []).map(t => t.toLowerCase());
-                if (includeTags.length > 0 && !includeTags.every(t => charTopics.includes(t))) return false;
-                if (excludeTags.length > 0 && excludeTags.some(t => charTopics.includes(t))) return false;
-                return true;
-            });
-        }
-        
-        // Apply search filter if any
-        if (chubCurrentSearch) {
-            const search = chubCurrentSearch.toLowerCase();
-            nodes = nodes.filter(c => {
-                const name = (c.name || '').toLowerCase();
-                const creator = (c.fullPath?.split('/')[0] || '').toLowerCase();
-                const tagline = (c.tagline || '').toLowerCase();
-                return name.includes(search) || creator.includes(search) || tagline.includes(search);
-            });
-        }
-        
-        if (chubCurrentPage === 1) {
-            chubCharacters = nodes;
-        } else {
-            const existingPaths = new Set(chubCharacters.map(c => (c.fullPath || c.full_path || '').toLowerCase()));
-            for (const node of nodes) {
-                const fp = (node.fullPath || node.full_path || '').toLowerCase();
-                if (!fp || !existingPaths.has(fp)) chubCharacters.push(node);
-            }
-        }
-        
-        chubHasMore = data.cursor !== null && nodes.length > 0;
-        
-        renderChubGrid(chubCurrentPage > 1);
-        
-        // Show/hide load more button
-        chubBrowseView.updateLoadMoreVisibility('chubLoadMore', chubHasMore, chubCharacters.length > 0);
-        
-    } catch (e) {
-        if (loadToken && loadToken !== chubLoadToken) return;
-        console.error('[ChubAI] Favorites load error:', e);
-        if (chubCurrentPage === 1) {
-            renderBrowseError(grid, {
-                provider: 'chub',
-                error: e,
-                title: 'Failed to load favorites',
-                view: 'favorites',
-                flags: { token: !!chubToken },
-                retry: () => loadChubCharacters(true),
-            });
-        } else {
-            showToast('Failed to load more: ' + e.message, 'error');
-        }
-    } finally {
-        if (!loadToken || loadToken === chubLoadToken) {
-            chubIsLoading = false;
-        }
     }
 }
 

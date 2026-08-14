@@ -1296,14 +1296,7 @@ function prefetchModalNeighbors(currentChar) {
 }
 
 function isCharModalDirty() {
-    if (!activeChar || isEditLocked) return false;
-    if (pendingAvatarFile) return true;
-    try {
-        const current = collectEditValues();
-        return generateChangesDiff(originalValues, current).length > 0;
-    } catch (_) {
-        return false;
-    }
+    return !!activeChar && (isCardDirty || isRawDirty);
 }
 
 function confirmDiscardCharModalEdits() {
@@ -1351,7 +1344,6 @@ async function openModal(char, { navList } = {}) {
         if (!ok) return;
     }
     if (isSwap) {
-        setEditLock(true);
         clearPendingAvatar();
     }
 
@@ -1392,29 +1384,6 @@ async function openModal(char, { navList } = {}) {
     // Update favorite button state
     updateFavoriteButtonUI(isCharacterFavorite(char));
     
-    // Update per-character media localization toggle with override indicator
-    const charLocalizeToggle = document.getElementById('charLocalizeToggle');
-    const localizeToggleLabel = document.querySelector('.localize-toggle');
-    if (charLocalizeToggle && char.avatar) {
-        const status = getMediaLocalizationStatus(char.avatar);
-        charLocalizeToggle.checked = status.isEnabled;
-        
-        // Update visual indicator for override status
-        if (localizeToggleLabel) {
-            localizeToggleLabel.classList.toggle('has-override', status.hasOverride);
-            
-            // Update tooltip to explain the status
-            if (status.hasOverride) {
-                const overrideType = status.isEnabled ? 'ENABLED' : 'DISABLED';
-                const globalStatus = status.globalEnabled ? 'enabled' : 'disabled';
-                localizeToggleLabel.title = `Override: ${overrideType} for this character (global is ${globalStatus})`;
-            } else {
-                const globalStatus = status.globalEnabled ? 'enabled' : 'disabled';
-                localizeToggleLabel.title = `Using global setting (${globalStatus})`;
-            }
-        }
-    }
-
     // Dates/Tokens
     let dateDisplay = 'Unknown';
     if (char.date_added) {
@@ -1466,39 +1435,36 @@ async function openModal(char, { navList } = {}) {
     // A slim card has none yet; the post-hydrate call below is what fills the panel.
     let creatorNotes = renderModalCreatorNotes(char);
 
-    if (char._slim) {
-        const sk = '<div class="cl-skeleton-line"></div><div class="cl-skeleton-line"></div><div class="cl-skeleton-line short"></div>';
-        document.getElementById('modalDescription').innerHTML = sk;
-        document.getElementById('modalFirstMes').innerHTML = sk;
-        const skAlt = document.getElementById('modalAltGreetingsBox');
-        if (skAlt) skAlt.style.display = 'none';
-        const skLb = document.getElementById('modalLorebookBox');
-        if (skLb) skLb.style.display = 'none';
-    }
-
-    // Edit pane is populated lazily on first Edit tab click (see populateEditPane)
+    // Card pane is populated (fields + tags + originals) on every open; the
+    // loading cover inside populateEditPane handles the slim-hydrate wait.
     _editPanePopulated = false;
-    
-    // Render tags in sidebar (will be made editable when edit is unlocked)
-    renderSidebarTags(getTags(char));
+    _rawTabPopulated = false;
+
+    // Render tags in sidebar (always editable now)
+    renderSidebarTags(getTags(char), true);
 
 
     deactivateAllTabs();
-    document.querySelector('.tab-btn[data-tab="details"]').classList.add('active');
-    document.getElementById('pane-details').classList.add('active');
+    document.querySelector('.tab-btn[data-tab="card"]').classList.add('active');
+    document.getElementById('pane-card').classList.add('active');
 
-    
+
     // Reset scroll positions to top
     resetTabScrollPositions();
 
-    // Edit tab logic (deferred population)
-    const editTabBtn = document.querySelector('.tab-btn[data-tab="edit"]');
-    if (editTabBtn) {
-        editTabBtn.onclick = () => {
+    // Card tab is the default/active tab; populate immediately (async - the
+    // loading cover shows while a slim card hydrates).
+    populateEditPane();
+
+    // Raw tab logic (deferred population, re-serialized on every activation
+    // so it always reflects the current Card-tab / applied state)
+    const rawTabBtn = document.querySelector('.tab-btn[data-tab="raw"]');
+    if (rawTabBtn) {
+        rawTabBtn.onclick = () => {
             deactivateAllTabs();
-            editTabBtn.classList.add('active');
-            document.getElementById('pane-edit').classList.add('active');
-            populateEditPane();
+            rawTabBtn.classList.add('active');
+            document.getElementById('pane-raw').classList.add('active');
+            populateRawTab();
         };
     }
 
@@ -1538,14 +1504,6 @@ async function openModal(char, { navList } = {}) {
     // Info tab logic (developer/debugging feature)
     const infoTabBtn = document.getElementById('infoTabBtn');
     if (infoTabBtn) {
-        // Show/hide based on setting - explicitly check for true (default is false/hidden)
-        const showInfoTab = getSetting('showInfoTab') === true;
-        if (showInfoTab) {
-            infoTabBtn.classList.remove('hidden');
-        } else {
-            infoTabBtn.classList.add('hidden');
-        }
-        
         infoTabBtn.onclick = async () => {
             // Switch tabs
             deactivateAllTabs();
@@ -1607,21 +1565,14 @@ async function openModal(char, { navList } = {}) {
             renderProviderTaglineRow(char);
         }
 
-        // Hydrate failed: an honest error beats painting undefined as an empty card.
-        if (char._slim) {
-            const err = modalLoadErrorHtml('Failed to load character details. Check your connection to SillyTavern and reopen.');
-            document.getElementById('modalDescription').innerHTML = err;
-            document.getElementById('modalFirstMes').innerHTML = err;
-            return;
-        }
+        // Hydrate failed: populateEditPane's own loading cover already shows
+        // the error state on the Card pane; nothing further to paint here.
+        if (char._slim) return;
 
         // Notes only arrive with the detail fetch, so this is the call that
-        // actually paints the panel -- and the value paintModalHeavyContent
-        // must forward to the media scanner.
+        // actually paints the panel.
         creatorNotes = renderModalCreatorNotes(char);
     }
-
-    paintModalHeavyContent(char, creatorNotes, gen);
 
     // Warm the prev/next neighbors so the next navigation lands on a hydrated card (no skeleton flash).
     if (gen === _modalOpenGen) prefetchModalNeighbors(char);
@@ -1649,9 +1600,9 @@ function setPaneLoadingState(paneId, state, errorMsg) {
         : '<i class="fa-solid fa-spinner fa-spin"></i><span>Loading card data...</span>';
 }
 
-/** Edit-tab cover: while shown the form is hidden so a slim card cant be saved empty. */
+/** Card-tab cover: while shown the form is hidden so a slim card cant be saved empty. */
 function setEditPaneLoadingState(state) {
-    setPaneLoadingState('pane-edit', state, 'Couldn\'t load this card. Check your connection, then reopen the Edit tab.');
+    setPaneLoadingState('pane-card', state, 'Couldn\'t load this card. Check your connection, then reopen the Card tab.');
 }
 
 /** Inline load-failure notice for detail-modal content slots (spans the full row in grid containers). */
@@ -1754,7 +1705,11 @@ async function populateEditPane() {
         character_book: getCharacterBookFromEditor()
     };
 
-    // Lock edit fields by default (must come after editor population so dynamic elements are locked)
-    setEditLock(true);
+    // Sidebar tags are keyed off _editTagsArray, just reset above -- repaint so a
+    // Revert (or the post-Apply repopulate) doesn't leave stale pills on screen.
+    renderSidebarTags(getCurrentTagsArray(), true);
+
+    // Clear the dirty flag now that the form reflects activeChar's saved state.
+    setCardDirty(false);
 }
 

@@ -21,6 +21,8 @@ import zlib
 from pathlib import Path
 from typing import Any
 
+from proxy.cards import dates
+
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # Every flavour of textual chunk. We strip all of them before re-injecting so a
 # quantized-then-injected file never carries stale duplicates.
@@ -141,6 +143,15 @@ def embed_card(png: bytes, envelope: dict[str, Any], data: dict[str, Any]) -> by
         "data": data,
     }
     new_envelope.update(data)  # V2-compat top-level mirror
+    # After the mirror, because `create_date` is a root-only field: it lives
+    # outside `data`, so rebuilding the envelope from the spec header plus data
+    # drops it unless it is carried across explicitly. Resolved against the
+    # *incoming* envelope, not the one being built -- the value being preserved
+    # is the old card's, and reading the new dict would find nothing and
+    # silently re-derive a different date on every patch.
+    create_date = dates.resolve_create_date(envelope, data)
+    if create_date:
+        new_envelope[dates.CREATE_DATE_KEY] = create_date
     payload = base64.b64encode(json.dumps(new_envelope).encode("utf-8")).decode("ascii")
     return inject_text_chunks(png, {"chara": payload, "ccv3": payload})
 

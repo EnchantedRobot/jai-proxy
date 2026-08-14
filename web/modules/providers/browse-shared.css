@@ -23,12 +23,17 @@
     min-width: 140px;
 }
 
+/* Wraps rather than overflowing: the topbar clips on the x-axis, so a nowrap
+   row here pushed Tags / hide-toggles / refresh off the right edge and out of
+   reach at anything under ~1400px. Wrapped rows stay right-aligned. */
 #onlineFilterContent {
     display: flex;
     align-items: center;
     gap: var(--space-sm-md);
+    row-gap: var(--space-sm);
     margin-left: auto;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 
 #onlineFilterContent > * {
@@ -185,8 +190,7 @@
 [data-select-id="chubTimelineSortHeader"],
 [data-select-id="pygFollowingSortSelect"],
 [data-select-id="botbooruSortPreset"],
-[data-select-id="botbooruTimelineSortHeader"],
-.browse-more-filters {
+[data-select-id="botbooruTimelineSortHeader"] {
     transition: opacity 0.15s ease, visibility 0.15s ease;
 }
 
@@ -217,18 +221,6 @@
     left: 0;
     width: 100%;
     max-width: 100%;
-}
-
-.dropdown-menu .filter-checkbox {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-}
-
-.dropdown-menu .filter-checkbox i {
-    width: 16px;
-    text-align: center;
-    opacity: 0.7;
 }
 
 /* Timeline Header */
@@ -728,27 +720,6 @@
 /* Online Filter Area */
 .online-filters {
     gap: var(--space-sm-md);
-}
-
-/* NSFW Toggle Button */
-.nsfw-toggle {
-    min-width: 100px;
-    transition: all 0.2s ease;
-}
-
-.nsfw-toggle.active {
-    background: rgba(var(--cl-error-bright-rgb), 0.2);
-    border-color: var(--cl-error-bright);
-    color: var(--cl-error-bright);
-}
-
-.nsfw-toggle.active:hover {
-    background: rgba(var(--cl-error-bright-rgb), 0.3);
-}
-
-.nsfw-toggle:not(.active) {
-    background: rgba(var(--accent-rgb), 0.1);
-    border-color: var(--accent);
 }
 
 /* Pygmalion Login - plugin status & auth status */
@@ -1473,40 +1444,6 @@ body.collapse-all-browse-sections
     font-size: var(--font-base);
 }
 
-/* Browse Filter Styles */
-.browse-more-filters {
-    position: relative;
-}
-
-.browse-more-filters .dropdown-menu {
-    position: absolute;
-    top: 100%;
-    right: 0;
-    margin-top: 8px;
-    padding: 12px;
-    z-index: 1000;
-}
-
-.browse-more-filters .filter-checkbox {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    padding: 8px 6px;
-    cursor: pointer;
-    border-radius: var(--radius-sm);
-    transition: background 0.2s;
-    font-size: var(--font-md);
-}
-
-.browse-more-filters .filter-checkbox:hover {
-    background: rgba(255, 255, 255, 0.05);
-}
-
-.browse-more-filters .filter-checkbox input[type="checkbox"] {
-    width: 16px;
-    height: 16px;
-}
-
 /* ========================================
    Browse Tags Dropdown (Tri-state filters)
    ======================================== */
@@ -1639,51 +1576,7 @@ body.collapse-all-browse-sections
     color: #f87171;
 }
 
-/* Advanced options section */
-.browse-advanced-option {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 6px 4px;
-    gap: var(--space-md);
-}
-
-.browse-advanced-option label {
-    font-size: var(--font-md);
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    gap: var(--space-xs-sm);
-    white-space: nowrap;
-}
-
-.browse-advanced-option label i {
-    color: var(--text-secondary);
-    font-size: var(--font-sm);
-    width: 14px;
-}
-
-/* Filter rows whose option doesn't apply to the current view or sort */
-.browse-option-disabled {
-    opacity: 0.45;
-}
-
-.browse-option-disabled input,
-.browse-option-disabled select {
-    cursor: not-allowed;
-}
-
-/* Outrank the base row's pointer cursor + hover highlight so greyed rows don't signal clickability */
-.browse-more-filters .filter-checkbox.browse-option-disabled {
-    cursor: not-allowed;
-}
-
-.browse-more-filters .filter-checkbox.browse-option-disabled:hover {
-    background: none;
-}
-
-.glass-select-small,
-.glass-input-small {
+.glass-select-small {
     padding: 5px 8px;
     background: rgba(0, 0, 0, 0.3);
     border: 1px solid var(--glass-border);
@@ -1693,25 +1586,9 @@ body.collapse-all-browse-sections
     min-width: 100px;
 }
 
-.glass-select-small:focus,
-.glass-input-small:focus {
+.glass-select-small:focus {
     outline: none;
     border-color: var(--accent);
-}
-
-.glass-input-small {
-    text-align: right;
-}
-
-/* Hide number input spinners */
-.glass-input-small[type="number"]::-webkit-outer-spin-button,
-.glass-input-small[type="number"]::-webkit-inner-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
-}
-
-.glass-input-small[type="number"] {
-    -moz-appearance: textfield;
 }
 
 /* Tags button with active filters indicator */
@@ -1728,16 +1605,6 @@ body.collapse-all-browse-sections
 .browse-tags-dropdown-container .tag-count {
     font-size: var(--font-xs);
     opacity: 0.8;
-}
-
-/* Filters active indicator */
-.browse-more-filters > .glass-btn.has-filters {
-    background: rgba(var(--cl-error-bright-rgb), 0.2);
-    border-color: rgba(var(--cl-error-bright-rgb), 0.4);
-}
-
-.browse-more-filters > .glass-btn.has-filters i {
-    color: var(--cl-error-bright);
 }
 
 /* Favorite filter - only visible when logged in */
@@ -1836,6 +1703,32 @@ body.collapse-all-browse-sections
 
 .browse-card.possible-library:hover {
     box-shadow: inset 0 0 0 2px rgba(var(--cl-possible-match-rgb), 0.3);
+}
+
+/* ── Filter bar Hide Owned / Hide Possible toggles ────────
+   Icon-only glass-btn that flips to filled when active; colours mirror the
+   per-card badges above (in-library / possible-match) so the toggle reads as
+   the same signal as the badge it's suppressing. */
+.browse-hide-toggle {
+    padding: 8px 12px;
+}
+
+.browse-hide-toggle i {
+    color: var(--cl-in-library);
+}
+
+.browse-hide-toggle.possible i {
+    color: rgba(var(--cl-possible-match-rgb), 0.85);
+}
+
+.browse-hide-toggle.is-active {
+    background: rgba(var(--cl-in-library-rgb), 0.18);
+    border-color: var(--cl-in-library);
+}
+
+.browse-hide-toggle.possible.is-active {
+    background: rgba(var(--cl-possible-match-rgb), 0.18);
+    border-color: rgba(var(--cl-possible-match-rgb), 1);
 }
 
 /* ── Following Manager ─────────────────────────────────── */
@@ -2292,13 +2185,6 @@ html.cl-mobile .filter-area.online-filters .datacat-view-btn {
     font-size: var(--font-2xs);
     padding: 4px 7px;
 }
-html.cl-mobile .filter-area.online-filters .nsfw-toggle {
-    min-width: auto;
-}
-html.cl-mobile .filter-area.online-filters .nsfw-toggle span {
-    display: none; /* icon only on mobile */
-}
-
 
 /* ---------------------------------------------------
    CHUB VIEW  (main view)
@@ -2321,20 +2207,6 @@ html.cl-mobile .browse-tags-search-row input { font-size: var(--mobile-input-siz
 html.cl-mobile .browse-tags-search-row input::placeholder { font-size: var(--font-sm); }
 html.cl-mobile .browse-tag-filter-item { padding: 8px 6px; } /* bigger tap targets */
 html.cl-mobile .browse-tag-state-btn { width: 28px; height: 28px; min-width: 28px; }
-
-html.cl-mobile .browse-features-dropdown {
-    position: fixed !important;
-    left: 0 !important;
-    right: 0 !important;
-    top: auto !important;
-    bottom: 0 !important;
-    width: 100% !important;
-    border-radius: var(--radius-2xl) var(--radius-2xl) 0 0 !important;
-    border-bottom: none !important;
-    z-index: 1100 !important;
-    padding-bottom: var(--safe-bottom) !important;
-}
-html.cl-mobile .filter-checkbox { padding: 8px 12px; font-size: var(--font-md); }
 
 /* Online/Chub view container */
 html.cl-mobile .online-view { padding: 0; padding-bottom: max(12px, var(--safe-bottom)); gap: var(--space-md); }

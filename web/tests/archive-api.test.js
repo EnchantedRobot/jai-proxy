@@ -605,6 +605,31 @@ test("date_added prefers acquisition time over the file's mtime", async () => {
   assert.equal(char.date_added, Date.parse("2026-07-21T17:31:47.257Z"));
 });
 
+test("create_date is passed through for the Date Created sort", async () => {
+  // The grid's "Date Created (Newest/Oldest)" options and the Info panel's
+  // Dates section both read this. It was absent from the adapter entirely, so
+  // every card scored 0 and the sort silently did nothing.
+  const { fetch } = loadAdapter({
+    [LIST]: {
+      total: 1,
+      items: [card({ create_date: "2026-05-15T15:41:58.048Z", linked_at: "2026-07-30T00:00:00Z" })],
+    },
+  });
+  const [char] = await (await post(fetch, "/api/characters/all", {})).json();
+  assert.equal(char.create_date, "2026-05-15T15:41:58.048Z");
+  // Distinct from date_added on purpose: acquisition is restamped by rewrites,
+  // creation is not.
+  assert.equal(char.date_added, Date.parse("2026-07-30T00:00:00Z"));
+});
+
+test("an undated card gets an empty create_date, not undefined", async () => {
+  // getCharacterCreateDateValue filters falsy candidates, so '' sorts last;
+  // undefined would reach `new Date(undefined)` in the Info panel instead.
+  const { fetch } = loadAdapter({ [LIST]: { total: 1, items: [card({ create_date: "" })] } });
+  const [char] = await (await post(fetch, "/api/characters/all", {})).json();
+  assert.equal(char.create_date, "");
+});
+
 test("a card with no acquisition stamp falls back to its mtime", async () => {
   // Every card this tool wrote carries linkedAt; one dropped in by hand does not.
   const { fetch } = loadAdapter({

@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-from proxy.cards import pngtools
+from proxy.cards import dates, pngtools
 from proxy.cards.naming import id_fragment
 from proxy.config import settings
 
@@ -105,6 +105,12 @@ class CardSummary:
     source_kind: str = ""
     source_url: str = ""
     linked_at: str = ""
+    # When the card was created, as the card itself records it: SillyTavern's
+    # root-level `create_date`, or -- for a card written before this archive
+    # stamped one -- the earliest provider `linkedAt` that field is derived
+    # from. See proxy/cards/dates.py for why that is the right source and why
+    # `linked_at` above (which is `jai`'s, rewritten by the bulk passes) is not.
+    create_date: str = ""
     character_version: str = ""
     greeting_count: int = 0
     lore_entry_count: int = 0
@@ -182,7 +188,7 @@ def summarize(path: Path, stat_result: Any | None = None) -> CardSummary:
         # which is why healthy cards are not charged for a second parse.
         return CardSummary(**base, error=_diagnose(raw))
 
-    _, data = envelope
+    outer, data = envelope
     if not isinstance(data, dict):
         return CardSummary(**base, error="card `data` is not an object")
 
@@ -212,6 +218,11 @@ def summarize(path: Path, stat_result: Any | None = None) -> CardSummary:
         source_kind=_text(jai.get("sourceKind")),
         source_url=_text(jai.get("source_url")),
         linked_at=_text(jai.get("linkedAt")),
+        # Read from the envelope root, not from `data`: `create_date` is one of
+        # the few fields SillyTavern keeps outside the card body. Resolved
+        # rather than read straight so a card that predates the stamp still
+        # sorts and displays -- the derivation is the same one the writers use.
+        create_date=dates.resolve_create_date(outer if isinstance(outer, dict) else {}, data),
         character_version=_text(data.get("character_version")),
         # The primary greeting counts: a card always has one, and "3 greetings"
         # should mean what a reader would expect it to mean.

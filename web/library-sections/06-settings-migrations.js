@@ -314,7 +314,6 @@ function setupSettingsModal() {
     const showNameToggleCheckbox = document.getElementById('settingsShowNameToggle');
     
     // Media Localization
-    const mediaLocalizationCheckbox = document.getElementById('settingsMediaLocalization');
     const includeProviderGalleryCheckbox = document.getElementById('settingsIncludeProviderGallery');
     const includeLorebookCheckbox = document.getElementById('settingsIncludeLorebook');
     const importMediaActionSelect = document.getElementById('settingsImportMediaAction');
@@ -325,7 +324,6 @@ function setupSettingsModal() {
     
     // Developer
     const debugModeCheckbox = document.getElementById('settingsDebugMode');
-    const showInfoTabCheckbox = document.getElementById('settingsShowInfoTab');
     const exportAsLinksCheckbox = document.getElementById('settingsExportAsLinks');
     const showProviderTaglineCheckbox = document.getElementById('settingsShowProviderTagline');
     const allowRichTaglineCheckbox = document.getElementById('settingsAllowRichTagline');
@@ -878,9 +876,6 @@ function setupSettingsModal() {
         if (showNameToggleCheckbox) showNameToggleCheckbox.checked = getSetting('showNameToggle') !== false;
         
         // Media Localization
-        if (mediaLocalizationCheckbox) {
-            mediaLocalizationCheckbox.checked = getSetting('mediaLocalizationEnabled') !== false; // Default true
-        }
         if (includeProviderGalleryCheckbox) {
             includeProviderGalleryCheckbox.checked = getSetting('includeProviderGallery') !== false;
         }
@@ -902,9 +897,6 @@ function setupSettingsModal() {
         // Developer
         if (debugModeCheckbox) {
             debugModeCheckbox.checked = getSetting('debugMode') || false;
-        }
-        if (showInfoTabCheckbox) {
-            showInfoTabCheckbox.checked = getSetting('showInfoTab') || false;
         }
         if (exportAsLinksCheckbox) {
             exportAsLinksCheckbox.checked = getSetting('exportAsLinks') || false;
@@ -1260,7 +1252,6 @@ function setupSettingsModal() {
             displayNameOverrideEnabled: displayNameOverrideCheckbox ? displayNameOverrideCheckbox.checked : true,
             showNameToggle: showNameToggleCheckbox ? showNameToggleCheckbox.checked : true,
             highlightColor: newHighlightColor,
-            mediaLocalizationEnabled: mediaLocalizationCheckbox ? mediaLocalizationCheckbox.checked : false,
             includeProviderGallery: includeProviderGalleryCheckbox ? includeProviderGalleryCheckbox.checked : false,
             includeLorebook: includeLorebookCheckbox ? includeLorebookCheckbox.checked : false,
             importMediaAction: importMediaActionSelect ? (importMediaActionSelect.value || 'ask') : 'ask',
@@ -1268,7 +1259,6 @@ function setupSettingsModal() {
             replaceUserPlaceholder: replaceUserPlaceholderCheckbox ? replaceUserPlaceholderCheckbox.checked : true,
             debugMode: debugModeCheckbox ? debugModeCheckbox.checked : false,
             themeCustomizer: themeCustomizerCheckbox ? themeCustomizerCheckbox.checked : false,
-            showInfoTab: showInfoTabCheckbox ? showInfoTabCheckbox.checked : false,
             exportAsLinks: exportAsLinksCheckbox ? exportAsLinksCheckbox.checked : false,
             showProviderTagline: showProviderTaglineCheckbox ? showProviderTaglineCheckbox.checked : true,
             allowRichTagline: allowRichTaglineCheckbox ? allowRichTaglineCheckbox.checked : false,
@@ -1431,9 +1421,6 @@ function setupSettingsModal() {
         if (highlightColorInput) {
             highlightColorInput.value = DEFAULT_SETTINGS.highlightColor;
         }
-        if (mediaLocalizationCheckbox) {
-            mediaLocalizationCheckbox.checked = DEFAULT_SETTINGS.mediaLocalizationEnabled;
-        }
         if (includeLorebookCheckbox) {
             includeLorebookCheckbox.checked = DEFAULT_SETTINGS.includeLorebook;
         }
@@ -1445,9 +1432,6 @@ function setupSettingsModal() {
         }
         if (uniqueGalleryFoldersCheckbox) {
             uniqueGalleryFoldersCheckbox.checked = DEFAULT_SETTINGS.uniqueGalleryFolders;
-        }
-        if (showInfoTabCheckbox) {
-            showInfoTabCheckbox.checked = DEFAULT_SETTINGS.showInfoTab;
         }
         if (showProviderTaglineCheckbox) {
             showProviderTaglineCheckbox.checked = DEFAULT_SETTINGS.showProviderTagline;

@@ -48,6 +48,10 @@ def test_card_shape_is_the_contract(client):
         "size": item["size"],
         "modified": item["modified"],
         "linked_at": "2026-07-21T17:31:47.257Z",
+        # Derived, not stored: this fixture carries no root `create_date`, so it
+        # falls back to the earliest provider `linkedAt` -- here `jai`'s, since
+        # it is the only provenance block the fixture has.
+        "create_date": "2026-07-21T17:31:47.257Z",
         "thumb_url": "/api/v1/characters/Abbie_0d162f5f.png/thumb",
         "png_url": "/api/v1/characters/Abbie_0d162f5f.png/png",
         # Off unless asked for: see test_extensions_are_opt_in.

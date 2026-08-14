@@ -738,8 +738,7 @@ function syncImportAutoDownloadGallery() {
 
 function syncImportAutoDownloadMedia() {
     if (!importAutoDownloadMedia) return;
-    const mediaLocalizationEnabled = getSetting('mediaLocalizationEnabled');
-    importAutoDownloadMedia.checked = mediaLocalizationEnabled !== false;
+    importAutoDownloadMedia.checked = true;
 }
 
 closeImportModal?.addEventListener('click', async () => {

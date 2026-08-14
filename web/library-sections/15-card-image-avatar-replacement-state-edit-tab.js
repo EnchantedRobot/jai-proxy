@@ -25,10 +25,44 @@ function clearPendingAvatar() {
     populateEditAvatarPreview();
 }
 
-function refreshSaveButtonState() {
-    const saveBtn = document.getElementById('saveEditBtn');
-    if (!saveBtn || isEditLocked) return;
-    saveBtn.disabled = false;
+/** Recompute isCardDirty from the pending avatar plus a delegated input/change
+ * listener's state, and show/hide the Apply/Revert header buttons. */
+function refreshApplyState(dirty) {
+    if (dirty !== undefined) isCardDirty = dirty;
+    else isCardDirty = !!pendingAvatarFile || collectEditValuesDiffer();
+    updateApplyRevertVisibility();
+}
+
+/** Apply/Revert are shared header buttons: visible when EITHER tab is dirty. */
+function updateApplyRevertVisibility() {
+    const dirty = isCardDirty || isRawDirty;
+    const applyBtn = document.getElementById('applyCardBtn');
+    const revertBtn = document.getElementById('revertCardBtn');
+    if (applyBtn) applyBtn.classList.toggle('hidden', !dirty);
+    if (revertBtn) revertBtn.classList.toggle('hidden', !dirty);
+}
+
+/** Cheap dirty check: only used by refreshApplyState's no-arg path (avatar-only changes
+ * call refreshApplyState(true) directly and skip this). */
+function collectEditValuesDiffer() {
+    if (!activeChar || _saveInProgress) return isCardDirty;
+    try {
+        const current = collectEditValues();
+        for (const key of Object.keys(current)) {
+            if (key === 'tagsArray' || key === 'alternate_greetings' || key === 'character_book') {
+                if (JSON.stringify(current[key]) !== JSON.stringify(originalValues[key])) return true;
+                continue;
+            }
+            if (String(current[key] ?? '') !== String(originalValues[key] ?? '')) return true;
+        }
+        return false;
+    } catch (_) {
+        return isCardDirty;
+    }
+}
+
+function setCardDirty(dirty) {
+    refreshApplyState(dirty);
 }
 
 function handlePendingAvatarSelected(file) {
@@ -54,7 +88,7 @@ function handlePendingAvatarSelected(file) {
     if (headerAvatar) headerAvatar.src = pendingAvatarPreviewUrl;
     const badge = document.getElementById('portraitPendingBadge');
     if (badge) badge.classList.remove('hidden');
-    refreshSaveButtonState();
+    refreshApplyState(true);
 }
 
 function closeModal() {
@@ -67,8 +101,9 @@ function closeModal() {
     modalImg.removeAttribute('src');
     modalImg.classList.remove('loading');
 
-    // Reset all edit-mode DOM state (tag input, lock header, buttons, etc.)
-    setEditLock(true);
+    // Reset all edit-mode DOM state
+    isRawDirty = false;
+    refreshApplyState(false);
     originalValues = {};
     originalRawData = {};
     _editTagsArray = [];
@@ -121,7 +156,6 @@ function populateInfoTab(char) {
     const providerResult = window.ProviderRegistry?.getCharacterProvider(char) || null;
     const galleryId = getCharacterGalleryId(char);
     const uniqueFoldersEnabled = getSetting('uniqueGalleryFolders');
-    const mediaLocStatus = char.avatar ? getMediaLocalizationStatus(char.avatar) : null;
     const isFavorite = isCharacterFavorite(char);
     
     // Get token estimate
@@ -248,18 +282,6 @@ function populateInfoTab(char) {
     html += `<div class="info-section">
         <div class="info-section-title"><i class="fa-solid fa-images"></i> Media Localization</div>
         <div class="info-row">
-            <span class="info-label">Global Setting</span>
-            <span class="info-value">${mediaLocStatus?.globalEnabled ? '<i class="fa-solid fa-check" style="color: var(--cl-success-bright);"></i> Enabled' : '<i class="fa-solid fa-times" style="color: var(--text-faint);"></i> Disabled'}</span>
-        </div>
-        <div class="info-row">
-            <span class="info-label">Per-Character Override</span>
-            <span class="info-value">${mediaLocStatus?.hasOverride ? (mediaLocStatus.isEnabled ? 'Force ON' : 'Force OFF') : '(none)'}</span>
-        </div>
-        <div class="info-row">
-            <span class="info-label">Effective State</span>
-            <span class="info-value">${mediaLocStatus?.isEnabled ? '<i class="fa-solid fa-check" style="color: var(--cl-success-bright);"></i> Active' : '<i class="fa-solid fa-times" style="color: var(--text-faint);"></i> Inactive'}</span>
-        </div>
-        <div class="info-row">
             <span class="info-label">Embedded Media URLs</span>
             <span class="info-value">${sidebarEmbeddedUrls.length} URL(s) found</span>
         </div>
@@ -341,78 +363,42 @@ function populateInfoTab(char) {
         html += `</div>`;
     }
     
-    // Section: Actions
-    html += `<div class="info-section info-actions-section">
-        <div class="info-section-title"><i class="fa-solid fa-wrench"></i> Actions</div>
-        <div class="info-actions">
-            <button type="button" class="action-btn secondary small" id="copyRawCardDataBtn">
-                <i class="fa-solid fa-copy"></i> Copy Raw Card Data
-            </button>
-        </div>
-    </div>`;
-    
     container.innerHTML = html;
-    
-    // Attach event handler for copy button (use activeChar for most up-to-date reference)
-    const copyBtn = document.getElementById('copyRawCardDataBtn');
-    if (copyBtn) {
-        copyBtn.onclick = () => copyRawCardData(activeChar);
-    }
 }
 
 /**
- * Copy the raw character card data to clipboard as JSON
- * @param {Object} char - Character object (optional, falls back to activeChar)
+ * Build the same wrapped shape the deleted Copy Raw Card Data button used to
+ * produce: the outer spec envelope plus the ST-side metadata. Shared by the
+ * Raw tab so its JSON is what a user editing a "raw card" expects to see.
+ * @param {Object} character
  */
-function copyRawCardData(char) {
-    // Use activeChar as fallback
-    const character = char || activeChar;
-    
-    if (!character) {
-        showToast('No character data available', 'error');
-        return;
-    }
-    
-    try {
-        const cardData = {
-            // Include spec info
-            spec: character.spec || character.data?.spec || 'chara_card_v2',
-            spec_version: character.spec_version || character.data?.spec_version || '2.0',
-            // Include the data object (main character definition)
-            data: character.data || {
-                name: character.name,
-                description: character.description,
-                personality: character.personality,
-                scenario: character.scenario,
-                first_mes: character.first_mes,
-                mes_example: character.mes_example,
-                creator_notes: character.creator_notes,
-                system_prompt: character.system_prompt,
-                post_history_instructions: character.post_history_instructions,
-                alternate_greetings: character.alternate_greetings || [],
-                tags: character.tags || [],
-                creator: character.creator,
-                character_version: character.character_version,
-                extensions: character.extensions || {},
-                character_book: character.character_book || null,
-            },
-            // Include ST-specific metadata
-            _meta: {
-                avatar: character.avatar,
-                date_added: character.date_added,
-                create_date: character.create_date,
-            }
-        };
-        
-        const jsonString = JSON.stringify(cardData, null, 2);
-        
-        copyTextToClipboard(jsonString).then((success) => {
-            showToast(success ? 'Card data copied to clipboard' : 'Failed to copy to clipboard', success ? 'success' : 'error');
-        });
-    } catch (error) {
-        console.error('Error preparing card data:', error);
-        showToast('Error preparing card data', 'error');
-    }
+function buildRawCardPayload(character) {
+    return {
+        spec: character.spec || character.data?.spec || 'chara_card_v2',
+        spec_version: character.spec_version || character.data?.spec_version || '2.0',
+        data: character.data || {
+            name: character.name,
+            description: character.description,
+            personality: character.personality,
+            scenario: character.scenario,
+            first_mes: character.first_mes,
+            mes_example: character.mes_example,
+            creator_notes: character.creator_notes,
+            system_prompt: character.system_prompt,
+            post_history_instructions: character.post_history_instructions,
+            alternate_greetings: character.alternate_greetings || [],
+            tags: character.tags || [],
+            creator: character.creator,
+            character_version: character.character_version,
+            extensions: character.extensions || {},
+            character_book: character.character_book || null,
+        },
+        _meta: {
+            avatar: character.avatar,
+            date_added: character.date_added,
+            create_date: character.create_date,
+        }
+    };
 }
 
 /**
@@ -1338,142 +1324,10 @@ function collectEditValues() {
     };
 }
 
-// Generate diff between original and new values
-function generateChangesDiff(original, current) {
-    const changes = [];
-    const fieldLabels = {
-        name: 'Character Name',
-        description: 'Description',
-        first_mes: 'First Message',
-        creator: 'Creator',
-        character_version: 'Version',
-        tagline: 'Tagline',
-        listingName: 'Listing Name',
-        tagsArray: 'Tags',
-        personality: 'Personality',
-        scenario: 'Scenario',
-        mes_example: 'Example Dialogue',
-        system_prompt: 'System Prompt',
-        post_history_instructions: 'Post-History Instructions',
-        creator_notes: "Creator's Notes",
-        alternate_greetings: 'Alternate Greetings',
-        character_book: 'Embedded Lorebook'
-    };
-    
-    // Helper to normalize string values for comparison
-    // Handles line ending differences (\r\n vs \n) and trims whitespace
-    const normalizeString = (val) => String(val || '').replace(/\r\n/g, '\n').trim();
-    
-    // Helper to normalize arrays of strings for comparison
-    const normalizeStringArray = (arr) => {
-        if (!Array.isArray(arr)) return [];
-        return arr.map(s => String(s || '').replace(/\r\n/g, '\n').trim()).filter(s => s.length > 0);
-    };
-    
-    for (const key of Object.keys(fieldLabels)) {
-        let oldVal = original[key];
-        let newVal = current[key];
-        
-        // Handle tags array comparison
-        if (key === 'tagsArray') {
-            const oldNorm = normalizeStringArray(oldVal || []);
-            const newNorm = normalizeStringArray(newVal || []);
-            // Sort for order-insensitive comparison
-            const oldSorted = [...oldNorm].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-            const newSorted = [...newNorm].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-            if (JSON.stringify(oldSorted) !== JSON.stringify(newSorted)) {
-                const added = newNorm.filter(t => !oldNorm.some(o => o.localeCompare(t, undefined, { sensitivity: 'base' }) === 0));
-                const removed = oldNorm.filter(t => !newNorm.some(n => n.localeCompare(t, undefined, { sensitivity: 'base' }) === 0));
-                const parts = [];
-                if (added.length) parts.push(`Added: ${added.join(', ')}`);
-                if (removed.length) parts.push(`Removed: ${removed.join(', ')}`);
-                changes.push({
-                    field: fieldLabels[key],
-                    old: oldNorm.join(', ') || '(none)',
-                    new: newNorm.join(', ') || '(none)',
-                    detail: parts.join(' | ')
-                });
-            }
-            continue;
-        }
-        
-        // Handle alternate greetings array comparison
-        if (key === 'alternate_greetings') {
-            const oldNorm = normalizeStringArray(oldVal);
-            const newNorm = normalizeStringArray(newVal);
-            const oldStr = JSON.stringify(oldNorm);
-            const newStr = JSON.stringify(newNorm);
-            if (oldStr !== newStr) {
-                changes.push({
-                    field: fieldLabels[key],
-                    old: oldNorm.map((g, i) => `#${i+1}: ${g}`).join('\n') || '(none)',
-                    new: newNorm.map((g, i) => `#${i+1}: ${g}`).join('\n') || '(none)'
-                });
-            }
-            continue;
-        }
-        
-        // Handle character_book comparison - compare only the meaningful fields
-        if (key === 'character_book') {
-            const normalizeBook = (book) => {
-                if (!book || !book.entries || book.entries.length === 0) return null;
-                // Only compare the fields that matter for equality
-                return book.entries.map(e => ({
-                    keys: (e.keys || []).map(k => String(k).replace(/\r\n/g, '\n').trim()).filter(k => k),
-                    secondary_keys: (e.secondary_keys || []).map(k => String(k).replace(/\r\n/g, '\n').trim()).filter(k => k),
-                    content: String(e.content || '').replace(/\r\n/g, '\n').trim(),
-                    comment: String(e.comment || e.name || '').replace(/\r\n/g, '\n').trim(),
-                    enabled: e.enabled !== false,
-                    selective: e.selective || false,
-                    constant: e.constant || false,
-                    order: e.order ?? e.insertion_order ?? 0,
-                    priority: e.priority ?? 10
-                }));
-            };
-            
-            const oldNorm = normalizeBook(oldVal);
-            const newNorm = normalizeBook(newVal);
-            const oldStr = JSON.stringify(oldNorm);
-            const newStr = JSON.stringify(newNorm);
-            
-            if (oldStr !== newStr) {
-                const oldCount = oldNorm?.length || 0;
-                const newCount = newNorm?.length || 0;
-                const oldSummary = oldCount > 0 
-                    ? `${oldCount} entries: ${oldNorm.slice(0, 3).map(e => e.comment || e.keys?.[0] || 'unnamed').join(', ')}${oldCount > 3 ? '...' : ''}`
-                    : '(none)';
-                const newSummary = newCount > 0 
-                    ? `${newCount} entries: ${newNorm.slice(0, 3).map(e => e.comment || e.keys?.[0] || 'unnamed').join(', ')}${newCount > 3 ? '...' : ''}`
-                    : '(none)';
-                changes.push({
-                    field: fieldLabels[key],
-                    old: oldSummary,
-                    new: newSummary
-                });
-            }
-            continue;
-        }
-        
-        // String field comparison - normalize both values
-        const oldNorm = normalizeString(oldVal);
-        const newNorm = normalizeString(newVal);
-        
-        if (oldNorm !== newNorm) {
-            // Get smart excerpts showing context around the changes with highlighting
-            const excerpts = getChangeExcerpts(oldNorm, newNorm, 150);
-            changes.push({
-                field: fieldLabels[key],
-                old: excerpts.old || '(empty)',
-                new: excerpts.new || '(empty)',
-                oldHtml: excerpts.oldHtml,
-                newHtml: excerpts.newHtml
-            });
-        }
-    }
-    
-    return changes;
-}
-
+// findFirstDifference / findLastDifference / buildHighlightedString / truncateText
+// are shared with the duplicate-detection diff view (35-character-duplicate-detection-system.js)
+// and stay even though the Card-tab confirmation dialog that used to be their other
+// caller (generateChangesDiff / getChangeExcerpts / showSaveConfirmation) is gone.
 function findFirstDifference(str1, str2) {
     const minLen = Math.min(str1.length, str2.length);
     for (let i = 0; i < minLen; i++) {
@@ -1503,89 +1357,6 @@ function findLastDifference(str1, str2) {
 }
 
 /**
- * Get excerpts from old and new strings with highlighted changes
- * @param {string} oldStr - Original string
- * @param {string} newStr - New string  
- * @param {number} contextLength - How many characters to show around changes
- * @returns {{old: string, new: string, oldHtml: string, newHtml: string}} Excerpts with highlighting
- */
-function getChangeExcerpts(oldStr, newStr, contextLength = 150) {
-    if (!oldStr && !newStr) return { old: '(empty)', new: '(empty)', oldHtml: '(empty)', newHtml: '(empty)' };
-    if (!oldStr) {
-        const truncated = truncateText(newStr, contextLength);
-        return { 
-            old: '(empty)', 
-            new: truncated,
-            oldHtml: '<span class="diff-empty">(empty)</span>',
-            newHtml: `<span class="diff-added">${escapeHtml(truncated)}</span>`
-        };
-    }
-    if (!newStr) {
-        const truncated = truncateText(oldStr, contextLength);
-        return { 
-            old: truncated, 
-            new: '(empty)',
-            oldHtml: `<span class="diff-removed">${escapeHtml(truncated)}</span>`,
-            newHtml: '<span class="diff-empty">(empty)</span>'
-        };
-    }
-    
-    // Find where differences start and end
-    const diffStart = findFirstDifference(oldStr, newStr);
-    if (diffStart === -1) {
-        // Identical - shouldn't happen but handle gracefully
-        return { old: oldStr, new: newStr, oldHtml: escapeHtml(oldStr), newHtml: escapeHtml(newStr) };
-    }
-    
-    const diffEnd = findLastDifference(oldStr, newStr);
-    
-    // Calculate the changed regions
-    const oldChangeEnd = diffEnd.pos1 + 1;
-    const newChangeEnd = diffEnd.pos2 + 1;
-    
-    // For short strings, show them entirely with highlighting
-    if (oldStr.length <= contextLength && newStr.length <= contextLength) {
-        const oldHtml = buildHighlightedString(oldStr, diffStart, oldChangeEnd, 'diff-removed');
-        const newHtml = buildHighlightedString(newStr, diffStart, newChangeEnd, 'diff-added');
-        return { old: oldStr, new: newStr, oldHtml, newHtml };
-    }
-    
-    // For longer strings, extract context around the change
-    const contextBefore = 30;
-    const contextAfter = contextLength - contextBefore;
-    
-    const startPos = Math.max(0, diffStart - contextBefore);
-    
-    const oldEndPos = Math.min(oldStr.length, Math.max(oldChangeEnd, diffStart) + contextAfter);
-    const newEndPos = Math.min(newStr.length, Math.max(newChangeEnd, diffStart) + contextAfter);
-    
-    // Extract and highlight
-    const oldExcerpt = oldStr.substring(startPos, oldEndPos);
-    const newExcerpt = newStr.substring(startPos, newEndPos);
-    
-    // Adjust highlight positions for the excerpt
-    const highlightStart = diffStart - startPos;
-    const oldHighlightEnd = oldChangeEnd - startPos;
-    const newHighlightEnd = newChangeEnd - startPos;
-    
-    let oldHtml = buildHighlightedString(oldExcerpt, highlightStart, oldHighlightEnd, 'diff-removed');
-    let newHtml = buildHighlightedString(newExcerpt, highlightStart, newHighlightEnd, 'diff-added');
-    
-    // Add ellipsis markers
-    const oldPrefix = startPos > 0 ? '<span class="diff-ellipsis">...</span>' : '';
-    const oldSuffix = oldEndPos < oldStr.length ? '<span class="diff-ellipsis">...</span>' : '';
-    const newPrefix = startPos > 0 ? '<span class="diff-ellipsis">...</span>' : '';
-    const newSuffix = newEndPos < newStr.length ? '<span class="diff-ellipsis">...</span>' : '';
-    
-    return {
-        old: (startPos > 0 ? '...' : '') + oldExcerpt + (oldEndPos < oldStr.length ? '...' : ''),
-        new: (startPos > 0 ? '...' : '') + newExcerpt + (newEndPos < newStr.length ? '...' : ''),
-        oldHtml: oldPrefix + oldHtml + oldSuffix,
-        newHtml: newPrefix + newHtml + newSuffix
-    };
-}
-
-/**
  * Build a string with a highlighted section
  */
 function buildHighlightedString(str, highlightStart, highlightEnd, className) {
@@ -1608,22 +1379,15 @@ function truncateText(text, maxLength) {
     return text.substring(0, maxLength) + '...';
 }
 
-// Show confirmation modal with diff
-function showSaveConfirmation() {
-    if (!activeChar) return;
-    
+/**
+ * Build the field-update payload writeCardFields expects from the Card tab's
+ * current form state. Tagline and listing name are leaf writes so the
+ * namespace's sibling fields (id, full_path, linkedAt) survive the spread.
+ */
+function buildPendingUpdatesFromCardTab() {
     const currentValues = collectEditValues();
-    const changes = generateChangesDiff(originalValues, currentValues);
-    const hasAvatarChange = !!pendingAvatarFile;
-    
-    if (changes.length === 0 && !hasAvatarChange) {
-        showToast("No changes detected", "info");
-        return;
-    }
-
-    // Tagline and listing name as leaf writes so the namespace's sibling fields (id, full_path, linkedAt) survive the spread.
     const activeNs = window.ProviderRegistry?.getActiveTaglineNamespace?.(activeChar) ?? 'cl';
-    pendingUpdates = {
+    return {
         name: currentValues.name,
         description: currentValues.description,
         first_mes: currentValues.first_mes,
@@ -1641,32 +1405,17 @@ function showSaveConfirmation() {
         [`extensions.${activeNs}.tagline`]: currentValues.tagline ?? '',
         [`extensions.${activeNs}.pageName`]: currentValues.listingName ?? '',
     };
-    
-    // Build diff HTML
-    const diffContainer = document.getElementById('changesDiff');
-    const diffEntries = [...changes];
-    if (hasAvatarChange) {
-        diffEntries.unshift({
-            field: 'Card Image',
-            oldHtml: `<img src="${escapeHtml(getCharacterAvatarUrl(activeChar.avatar))}" alt="Current image" style="max-width: 100px; max-height: 150px; border-radius: var(--radius-md);">`,
-            newHtml: `<img src="${escapeHtml(pendingAvatarPreviewUrl || '')}" alt="New image" style="max-width: 100px; max-height: 150px; border-radius: var(--radius-md);">`,
-        });
-    }
-    diffContainer.innerHTML = diffEntries.map(change => `
-        <div class="diff-item">
-            <div class="diff-item-label">${escapeHtml(change.field)}</div>
-            <div class="diff-old">${change.oldHtml || escapeHtml(change.old)}</div>
-            <div class="diff-arrow">↓</div>
-            <div class="diff-new">${change.newHtml || escapeHtml(change.new)}</div>
-        </div>
-    `).join('');
-    
-    // Show modal
-    document.getElementById('confirmSaveModal').classList.remove('hidden');
+}
+
+// Apply button: no confirmation dialog, no diff -- writes directly.
+async function applyCardTab() {
+    if (!activeChar) return;
+    const pendingUpdates = buildPendingUpdatesFromCardTab();
+    await performSave(pendingUpdates);
 }
 
 // Actually perform the save
-async function performSave() {
+async function performSave(pendingUpdates) {
     if (!activeChar || !pendingUpdates) return;
 
     if (activeChar._slim) {
@@ -1724,9 +1473,6 @@ async function performSave() {
 
             showToast("Character saved successfully!", "success");
 
-            // Close confirmation immediately so it doesn't wait on folder rename / grid refresh
-            document.getElementById('confirmSaveModal').classList.add('hidden');
-
             // Handle gallery folder rename if name changed and character has unique gallery folder
             if (nameChanged && galleryId && getSetting('uniqueGalleryFolders')) {
                 await handleGalleryFolderRename(activeChar, oldName, newName, galleryId);
@@ -1778,10 +1524,16 @@ async function performSave() {
 
             // Force re-render the grid to show updated data immediately
             performSearch();
-            
-            // Lock editing and clean up
-            setEditLock(true);
-            pendingUpdates = null;
+
+            // Repopulate both tabs from the saved state -- whichever tab this Apply
+            // came from wins the write, and the other one is refreshed from the response.
+            isRawDirty = false;
+            _editPanePopulated = false;
+            await populateEditPane(); // also clears isCardDirty
+            if (_rawTabPopulated) {
+                _rawTabPopulated = false;
+                populateRawTab();
+            }
 
             // Tell ST to re-read the character so open chats pick up the edits
             // without requiring a tab refresh. Best-effort, non-blocking.
@@ -1801,75 +1553,21 @@ async function performSave() {
     }
 }
 
-// Heavy Details-tab fields: description, first message, alt greetings, embedded lorebook,
-// plus the async media-localization repaint (gen-guarded so a stale pass from a previous
-// open never lands). Shared by openModal's post-hydrate paint and the post-save refresh.
-function paintModalHeavyContent(char, creatorNotes, gen) {
-    // Description/First Message
-    const desc = char.description || (char.data ? char.data.description : "") || "";
-    const firstMes = char.first_mes || (char.data ? char.data.first_mes : "") || "";
-
-    // Store raw content for fullscreen expand feature
-    window.currentFirstMesContent = firstMes || null;
-
-    // Details tab uses rich HTML rendering (initially without localization for instant display)
-    document.getElementById('modalDescription').innerHTML = formatRichText(desc, char.name);
-    document.getElementById('modalFirstMes').innerHTML = formatRichText(firstMes, char.name);
-
-    // Alternate Greetings
-    const altGreetings = char.alternate_greetings || (char.data ? char.data.alternate_greetings : []) || [];
-    const altBox = document.getElementById('modalAltGreetingsBox');
-
-    // Store raw content for fullscreen expand feature
-    window.currentAltGreetingsContent = (altGreetings && altGreetings.length > 0) ? altGreetings : null;
-
-    if (altBox) {
-        if (altGreetings && altGreetings.length > 0) {
-            document.getElementById('altGreetingsCount').innerText = altGreetings.length;
-            const listHTML = altGreetings.map((g, i) =>
-                `<div style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px dashed rgba(255,255,255,0.1);"><strong style="color:var(--accent);">#${i+1}:</strong> <span>${formatRichText((g || '').trim(), char.name)}</span></div>`
-            ).join('');
-            document.getElementById('modalAltGreetings').innerHTML = listHTML;
-            altBox.style.display = 'block';
-        } else {
-            altBox.style.display = 'none';
-        }
-    }
-
-    initContentExpandHandlers();
-
-    // Apply media localization asynchronously (if enabled)
-    // This updates the already-rendered content with localized URLs
-    applyMediaLocalizationToModal(char, desc, firstMes, altGreetings, creatorNotes, gen);
-
-    // Embedded Lorebook
-    const characterBook = char.character_book || (char.data ? char.data.character_book : null);
-    const lorebookBox = document.getElementById('modalLorebookBox');
-
-    if (lorebookBox) {
-        if (characterBook && characterBook.entries && characterBook.entries.length > 0) {
-            document.getElementById('lorebookEntryCount').innerText = characterBook.entries.length;
-            const lorebookHTML = renderLorebookEntriesHtml(characterBook.entries)
-            document.getElementById('modalLorebookContent').innerHTML = lorebookHTML;
-            lorebookBox.style.display = 'block';
-        } else {
-            lorebookBox.style.display = 'none';
-        }
-    }
-}
-
 /**
- * Refresh the modal display with current activeChar data
- * Called after save to update the Details tab without re-opening the modal
+ * Refresh the modal display with current activeChar data.
+ * Called after save to update the meta line / Creator's Notes / tags without
+ * re-opening the modal. (Description, First Message, greetings, and the
+ * lorebook live only as edit fields now, repopulated separately by
+ * populateEditPane -- this only covers the display-only bits above the form.)
  */
 function refreshModalDisplay() {
     if (!activeChar) return;
-    
+
     const char = activeChar;
-    
+
     // Update modal title
     document.getElementById('modalTitle').innerText = getCharacterName(char);
-    
+
     // Update author
     const author = char.creator || (char.data ? char.data.creator : "") || "";
     const authContainer = document.getElementById('modalAuthorContainer');
@@ -1880,26 +1578,176 @@ function refreshModalDisplay() {
     } else if (authContainer) {
         authContainer.style.display = 'none';
     }
-    
+
     // Update Creator Notes
-    const creatorNotes = renderModalCreatorNotes(char);
+    renderModalCreatorNotes(char);
 
     // Tagline (from active namespace: provider id when linked, 'cl' when unlinked).
     wireProviderTaglineExpand();
     renderProviderTaglineRow(char);
-    
-    paintModalHeavyContent(char, creatorNotes, _modalOpenGen);
 
     // Update tags in sidebar
-    renderSidebarTags(getTags(char), !isEditLocked);
+    renderSidebarTags(getTags(char), true);
 }
 
-// Legacy saveCharacter now shows confirmation
-async function saveCharacter() {
-    showSaveConfirmation();
+// Header Apply/Revert buttons call these directly (see 21-...js wiring).
+
+/**
+ * Toggle Creator's Notes between the rendered (sandboxed) view and the raw
+ * textarea in place -- never both visible at once.
+ */
+function toggleCreatorNotesEditMode() {
+    const box = document.getElementById('modalCreatorNotesBox');
+    const rendered = document.getElementById('modalCreatorNotes');
+    const textarea = document.getElementById('editCreatorNotes');
+    const toggleBtn = document.getElementById('creatorNotesEditToggleBtn');
+    const viewExpandBtn = document.getElementById('creatorNotesExpandBtn');
+    const editExpandBtn = document.getElementById('editCreatorNotesExpandBtn');
+    if (!box || !rendered || !textarea || !toggleBtn) return;
+
+    const enteringEdit = textarea.classList.contains('hidden');
+    if (enteringEdit) {
+        rendered.style.display = 'none';
+        textarea.classList.remove('hidden');
+        if (viewExpandBtn) viewExpandBtn.style.display = 'none';
+        if (editExpandBtn) editExpandBtn.style.display = '';
+        toggleBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+        toggleBtn.title = 'Done editing';
+        textarea.focus();
+    } else {
+        textarea.classList.add('hidden');
+        rendered.style.display = '';
+        if (editExpandBtn) editExpandBtn.style.display = 'none';
+        renderCreatorNotesSecure(textarea.value, activeChar?.name, rendered);
+        initCreatorNotesHandlers();
+        if (viewExpandBtn) {
+            const showExpand = textarea.value.length > 0;
+            viewExpandBtn.style.display = showExpand ? 'flex' : 'none';
+        }
+        toggleBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
+        toggleBtn.title = "Edit Creator's Notes";
+        window.currentCreatorNotesContent = textarea.value || null;
+    }
 }
 
-// Edit Lock Functions
+// ==================== RAW TAB ====================
+
+/** Populate the Raw tab textarea from activeChar, hydrating first if slim. */
+async function populateRawTab() {
+    if (_rawTabPopulated) return;
+    _rawTabPopulated = true;
+
+    let char = activeChar;
+    if (!char) { _rawTabPopulated = false; return; }
+
+    setPaneLoadingState('pane-raw', 'hidden');
+    if (char._slim) {
+        const avatar = char.avatar;
+        setPaneLoadingState('pane-raw', 'loading');
+        await hydrateCharacter(char);
+        char = activeChar;
+        if (!char || char.avatar !== avatar) { setPaneLoadingState('pane-raw', 'hidden'); _rawTabPopulated = false; return; }
+        if (char._slim) { setPaneLoadingState('pane-raw', 'error'); _rawTabPopulated = false; return; }
+        setPaneLoadingState('pane-raw', 'hidden');
+    }
+
+    const ta = document.getElementById('rawCardJson');
+    if (ta) ta.value = JSON.stringify(buildRawCardPayload(char), null, 2);
+    isRawDirty = false;
+    setRawJsonError('');
+}
+
+function setRawJsonError(message) {
+    const errEl = document.getElementById('rawJsonError');
+    const ta = document.getElementById('rawCardJson');
+    if (errEl) {
+        errEl.textContent = message || '';
+        errEl.classList.toggle('hidden', !message);
+    }
+    if (ta) ta.classList.toggle('invalid', !!message);
+    const applyBtn = document.getElementById('applyCardBtn');
+    if (applyBtn) applyBtn.dataset.rawInvalid = message ? '1' : '';
+}
+
+/** Debounced JSON.parse validation for the Raw tab; invalid JSON disables Apply. */
+function validateRawJsonTab() {
+    const ta = document.getElementById('rawCardJson');
+    if (!ta) return null;
+    try {
+        const parsed = JSON.parse(ta.value);
+        setRawJsonError('');
+        updateApplyRevertVisibility();
+        return parsed;
+    } catch (e) {
+        setRawJsonError('Invalid JSON: ' + e.message);
+        updateApplyRevertVisibility();
+        return undefined;
+    }
+}
+
+/** Apply the Raw tab: PUT the parsed card straight to the archive's native API. */
+async function applyRawTab() {
+    if (!activeChar) return;
+    const parsed = validateRawJsonTab();
+    if (parsed === undefined) {
+        showToast('Fix the JSON error before applying', 'error');
+        return;
+    }
+    const cardBody = parsed && typeof parsed === 'object' && 'data' in parsed ? parsed.data : parsed;
+    if (!cardBody || typeof cardBody.name !== 'string' || !cardBody.name.trim()) {
+        showToast('The card must have a non-empty "name"', 'error');
+        return;
+    }
+    if (_saveInProgress) return;
+    _saveInProgress = true;
+    try {
+        const resp = await fetch(`/api/v1/characters/${encodeURIComponent(activeChar.avatar)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ card: cardBody }),
+        });
+        if (!resp.ok) {
+            const err = await resp.text().catch(() => '');
+            showToast('Error saving: ' + (err || resp.status), 'error');
+            return;
+        }
+        const detail = await resp.json();
+        showToast('Character saved successfully!', 'success');
+
+        // Merge the server's response onto activeChar (and the array-linked entry)
+        // so Card tab / grid / everything downstream sees the applied state.
+        const charIndex = allCharacters.findIndex(c => c.avatar === activeChar.avatar);
+        const target = charIndex !== -1 ? allCharacters[charIndex] : activeChar;
+        target.data = detail.card;
+        target.name = detail.card?.name ?? target.name;
+        target.creator = detail.card?.creator ?? target.creator;
+        target.tags = detail.card?.tags ?? target.tags;
+        target.character_version = detail.card?.character_version ?? target.character_version;
+        target.creator_notes = detail.card?.creator_notes ?? target.creator_notes;
+        target.spec = detail.spec ?? target.spec;
+        target.spec_version = detail.spec_version ?? target.spec_version;
+        target._slim = false;
+        target.date_added = Date.now();
+        activeChar = target;
+
+        _editTagsArray = Array.isArray(target.tags) ? [...target.tags] : [];
+
+        performSearch();
+
+        isRawDirty = false;
+        _editPanePopulated = false;
+        await populateEditPane(); // also clears isCardDirty
+        _rawTabPopulated = false;
+        await populateRawTab();
+
+        notifySTCharacterEdited(activeChar.avatar);
+        fetchCharacters(true);
+    } catch (e) {
+        showToast('Network error saving character: ' + e.message, 'error');
+    } finally {
+        _saveInProgress = false;
+    }
+}
 
 // Reset to 'auto' first so scrollHeight reflects current content; without it the field grows but never shrinks.
 function autoGrowEditField(ta) {
@@ -1909,7 +1757,7 @@ function autoGrowEditField(ta) {
 
 function detachEditFieldsAutoGrow() {
     if (!editFieldsAutoGrowHandler) return;
-    document.getElementById('pane-edit')?.removeEventListener('input', editFieldsAutoGrowHandler);
+    document.getElementById('pane-card')?.removeEventListener('input', editFieldsAutoGrowHandler);
     editFieldsAutoGrowHandler = null;
 }
 
@@ -1917,8 +1765,8 @@ function toggleEditFieldsExpand() {
     const btn = document.getElementById('editFieldsToggleBtn');
     const icon = btn?.querySelector('i');
     if (!btn || !icon) return;
-    const container = document.getElementById('pane-edit');
-    const textareas = document.querySelectorAll('#pane-edit textarea.glass-input');
+    const container = document.getElementById('pane-card');
+    const textareas = document.querySelectorAll('#pane-card textarea.glass-input');
     if (btn.classList.contains('active')) {
         textareas.forEach(ta => { ta.style.height = ''; });
         detachEditFieldsAutoGrow();
@@ -1930,11 +1778,11 @@ function toggleEditFieldsExpand() {
         textareas.forEach(ta => {
             if (ta.scrollHeight > ta.clientHeight) autoGrowEditField(ta);
         });
-        // Delegated listener on #pane-edit catches input from any descendant textarea, so dynamically-added alt-greetings auto-grow too.
+        // Delegated listener on #pane-card catches input from any descendant textarea, so dynamically-added alt-greetings auto-grow too.
         if (container && !editFieldsAutoGrowHandler) {
             editFieldsAutoGrowHandler = (e) => {
                 const ta = e.target;
-                if (ta?.matches?.('#pane-edit textarea.glass-input')) {
+                if (ta?.matches?.('#pane-card textarea.glass-input')) {
                     autoGrowEditField(ta);
                 }
             };
@@ -1946,164 +1794,32 @@ function toggleEditFieldsExpand() {
     }
 }
 
-function setEditLock(locked) {
-    isEditLocked = locked;
-    
-    const lockHeader = document.querySelector('.edit-lock-header');
-    const lockStatus = document.getElementById('editLockStatus');
-    const toggleBtn = document.getElementById('toggleEditLockBtn');
-    const saveBtn = document.getElementById('saveEditBtn');
-    const cancelBtn = document.getElementById('cancelEditBtn');
-    const addAltGreetingBtn = document.getElementById('addAltGreetingBtn');
-    const tagInputWrapper = document.getElementById('tagInputWrapper');
-    const tagsContainer = document.getElementById('modalTags');
-    const portraitContainer = document.querySelector('.char-portrait-container');
-    const portraitOverlay = document.getElementById('portraitEditOverlay');
-    
-    // All editable inputs in the edit pane
-    const editInputs = document.querySelectorAll('#pane-edit .glass-input');
-    const removeGreetingBtns = document.querySelectorAll('.remove-alt-greeting-btn');
-    const expandFieldBtns = document.querySelectorAll('.expand-field-btn');
-    const sectionExpandBtns = document.querySelectorAll('.section-expand-btn');
-    
-    if (locked) {
-        lockHeader?.classList.remove('unlocked');
-        if (lockStatus) {
-            lockStatus.innerHTML = '<i class="fa-solid fa-lock"></i><span>Fields are locked. Click unlock to edit.</span>';
-        }
-        if (toggleBtn) {
-            toggleBtn.innerHTML = '<i class="fa-solid fa-lock-open"></i> <span class="btn-label">Unlock Editing</span>';
-        }
-        
-        editInputs.forEach(input => {
-            input.classList.add('locked');
-            input.readOnly = true;
-            if (input.tagName === 'SELECT') input.disabled = true;
-        });
-        
-        if (saveBtn) saveBtn.disabled = true;
-        if (cancelBtn) cancelBtn.style.display = 'none';
-        if (addAltGreetingBtn) addAltGreetingBtn.classList.add('hidden');
-        removeGreetingBtns.forEach(btn => btn.classList.add('hidden'));
-        
-        // Hide expand buttons when locked
-        expandFieldBtns.forEach(btn => btn.classList.add('hidden'));
-        sectionExpandBtns.forEach(btn => btn.classList.add('hidden'));
-
-        // Hide portrait click-to-change overlay
-        if (portraitContainer) portraitContainer.classList.remove('editing-unlocked');
-        if (portraitOverlay) portraitOverlay.classList.add('hidden');
-        modal?.classList.remove('editing-unlocked');
-        
-        // Reset field expand toggle
-        const fieldsToggle = document.getElementById('editFieldsToggleBtn');
-        if (fieldsToggle?.classList.contains('active')) {
-            document.querySelectorAll('#pane-edit textarea.glass-input').forEach(ta => { ta.style.height = ''; });
-            detachEditFieldsAutoGrow();
-            fieldsToggle.classList.remove('active');
-            const icon = fieldsToggle.querySelector('i');
-            if (icon) icon.className = 'fa-solid fa-up-right-and-down-left-from-center';
-            fieldsToggle.title = 'Expand all fields to fit content';
-        }
-        
-        // Lorebook editor
-        const addLorebookEntryBtn = document.getElementById('addLorebookEntryBtn');
-        if (addLorebookEntryBtn) addLorebookEntryBtn.disabled = true;
-        document.querySelectorAll('.lorebook-entry-edit input, .lorebook-entry-edit textarea').forEach(input => {
-            input.classList.add('locked');
-            input.readOnly = true;
-            if (input.type === 'checkbox') input.disabled = true;
-        });
-        document.querySelectorAll('.lorebook-entry-delete, .lorebook-entry-toggle').forEach(btn => {
-            btn.style.pointerEvents = 'none';
-            btn.style.opacity = '0.5';
-        });
-
-        // Hide tag input and show non-editable tags
-        if (tagInputWrapper) tagInputWrapper.classList.add('hidden');
-        if (tagsContainer) tagsContainer.classList.remove('editable');
-        if (activeChar) renderSidebarTags(getCurrentTagsArray(), false);
-    } else {
-        lockHeader?.classList.add('unlocked');
-        if (lockStatus) {
-            lockStatus.innerHTML = '<i class="fa-solid fa-unlock"></i><span>Editing enabled. Remember to save your changes!</span>';
-        }
-        if (toggleBtn) {
-            toggleBtn.innerHTML = '<i class="fa-solid fa-lock"></i> <span class="btn-label">Lock Editing</span>';
-        }
-        
-        editInputs.forEach(input => {
-            input.classList.remove('locked');
-            input.readOnly = false;
-            if (input.tagName === 'SELECT') input.disabled = false;
-        });
-        
-        if (saveBtn) saveBtn.disabled = false;
-        if (cancelBtn) cancelBtn.style.display = '';
-        if (addAltGreetingBtn) addAltGreetingBtn.classList.remove('hidden');
-        removeGreetingBtns.forEach(btn => btn.classList.remove('hidden'));
-        
-        // Show expand buttons when unlocked
-        expandFieldBtns.forEach(btn => btn.classList.remove('hidden'));
-        sectionExpandBtns.forEach(btn => btn.classList.remove('hidden'));
-
-        // Show portrait click-to-change overlay
-        if (portraitContainer) portraitContainer.classList.add('editing-unlocked');
-        if (portraitOverlay) portraitOverlay.classList.remove('hidden');
-        modal?.classList.add('editing-unlocked');
-        
-        // Lorebook editor
-        const addLorebookEntryBtn = document.getElementById('addLorebookEntryBtn');
-        if (addLorebookEntryBtn) addLorebookEntryBtn.disabled = false;
-        document.querySelectorAll('.lorebook-entry-edit input, .lorebook-entry-edit textarea').forEach(input => {
-            input.classList.remove('locked');
-            input.readOnly = false;
-            if (input.type === 'checkbox') input.disabled = false;
-        });
-        document.querySelectorAll('.lorebook-entry-delete, .lorebook-entry-toggle').forEach(btn => {
-            btn.style.pointerEvents = '';
-            btn.style.opacity = '';
-        });
-
-        // Show tag input and make tags editable
-        if (tagInputWrapper) tagInputWrapper.classList.remove('hidden');
-        if (tagsContainer) tagsContainer.classList.add('editable');
-        renderSidebarTags(getCurrentTagsArray(), true);
-    }
-}
-
-function cancelEditing() {
+// Revert button: re-populate the Card pane from activeChar (discarding the form's
+// edits), restore sidebar tags, discard any pending avatar replacement, clear the
+// dirty flag. Confirms only when the form is actually dirty.
+async function revertCardTab() {
     if (!activeChar) return;
-    
-    // Restore original values (text fields use originalValues which are already normalized)
-    document.getElementById('editName').value = originalValues.name || '';
-    document.getElementById('editDescription').value = originalValues.description || '';
-    document.getElementById('editFirstMes').value = originalValues.first_mes || '';
-    document.getElementById('editCreator').value = originalValues.creator || '';
-    document.getElementById('editVersion').value = originalValues.character_version || '';
-    document.getElementById('editTagline').value = originalValues.tagline || '';
-    document.getElementById('editListingName').value = originalValues.listingName || '';
-    document.getElementById('editPersonality').value = originalValues.personality || '';
-    document.getElementById('editScenario').value = originalValues.scenario || '';
-    document.getElementById('editMesExample').value = originalValues.mes_example || '';
-    document.getElementById('editSystemPrompt').value = originalValues.system_prompt || '';
-    document.getElementById('editPostHistoryInstructions').value = originalValues.post_history_instructions || '';
-    document.getElementById('editCreatorNotes').value = originalValues.creator_notes || '';
-    
-    // Restore tag array from original values
-    _editTagsArray = [...(originalValues.tagsArray || [])];
-    
-    // Restore alternate greetings from raw data
-    populateAltGreetingsEditor(originalRawData.altGreetings || []);
-    
-    // Restore lorebook from raw data
-    populateLorebookEditor(originalRawData.characterBook);
+    if (isCardDirty || isRawDirty) {
+        const ok = await showConfirm({
+            title: 'Discard unsaved edits?',
+            message: `Revert ${getCharacterName(activeChar) || 'this character'} to its last saved state?`,
+            confirmLabel: 'Revert',
+            cancelLabel: 'Keep Editing',
+            danger: true,
+        });
+        if (!ok) return;
+    }
 
-    // Discard any pending avatar replacement
     clearPendingAvatar();
-    
-    // Re-lock (this also re-renders sidebar tags via setEditLock)
-    setEditLock(true);
-    showToast("Changes discarded", "info");
+
+    isRawDirty = false;
+    _editPanePopulated = false;
+    await populateEditPane(); // also clears isCardDirty
+    if (_rawTabPopulated) {
+        _rawTabPopulated = false;
+        await populateRawTab();
+    }
+
+    showToast("Changes reverted", "info");
 }
 

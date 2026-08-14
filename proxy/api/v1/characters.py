@@ -61,6 +61,9 @@ _SORTS: dict[str, str] = {
     # When the card arrived, not when its file was last touched. The better
     # default for "recently added" -- see CardOut.linked_at.
     "added": "linked_at",
+    # When the card was created rather than when it arrived here. Stable across
+    # the bulk passes, which is what makes it worth having as its own ordering.
+    "created": "create_date",
     "size": "size",
     "greetings": "greeting_count",
     "lore": "lore_entry_count",
@@ -92,6 +95,7 @@ def _card_out(record: catalog.CardSummary, *, extensions: bool = False) -> CardO
         size=record.size,
         modified=datetime.fromtimestamp(record.mtime, tz=timezone.utc),
         linked_at=record.linked_at,
+        create_date=record.create_date,
         thumb_url=f"{_shared.PREFIX}/characters/{quoted}/thumb",
         png_url=f"{_shared.PREFIX}/characters/{quoted}/png",
         error=record.error or None,
@@ -196,7 +200,7 @@ def list_characters(
     ),
     sort: str = Query(
         "name",
-        description="One of name, creator, added, modified, size, greetings, lore, description, prompt. Prefix with `-` to reverse.",
+        description="One of name, creator, added, created, modified, size, greetings, lore, description, prompt. Prefix with `-` to reverse.",
     ),
     limit: int = Query(60, ge=0, le=5000, description="0 means no limit -- the whole filtered set."),
     offset: int = Query(0, ge=0),

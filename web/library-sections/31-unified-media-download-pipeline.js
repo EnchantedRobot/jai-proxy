@@ -223,59 +223,6 @@ const localizeLog = document.getElementById('localizeLog');
 const localizeMediaBtn = document.getElementById('localizeMediaBtn');
 let localizeAbortController = null;
 
-// Per-character media localization toggle
-const charLocalizeToggle = document.getElementById('charLocalizeToggle');
-
-// Setup per-character localization toggle
-charLocalizeToggle?.addEventListener('change', async () => {
-    if (!activeChar?.avatar) return;
-    
-    const isChecked = charLocalizeToggle.checked;
-    const globalEnabled = getSetting('mediaLocalizationEnabled');
-    const localizeToggleLabel = document.querySelector('.localize-toggle');
-    
-    // If the toggle matches global setting, remove the per-char override (use global)
-    // Otherwise, set a per-char override
-    if (isChecked === globalEnabled) {
-        setCharacterMediaLocalization(activeChar.avatar, null); // Use global
-    } else {
-        setCharacterMediaLocalization(activeChar.avatar, isChecked);
-    }
-    
-    // Update visual indicator for override status
-    const status = getMediaLocalizationStatus(activeChar.avatar);
-    if (localizeToggleLabel) {
-        localizeToggleLabel.classList.toggle('has-override', status.hasOverride);
-        
-        if (status.hasOverride) {
-            const overrideType = status.isEnabled ? 'ENABLED' : 'DISABLED';
-            const globalStatus = status.globalEnabled ? 'enabled' : 'disabled';
-            localizeToggleLabel.title = `Override: ${overrideType} for this character (global is ${globalStatus})`;
-        } else {
-            const globalStatus = status.globalEnabled ? 'enabled' : 'disabled';
-            localizeToggleLabel.title = `Using global setting (${globalStatus})`;
-        }
-    }
-    
-    // Clear cache to force re-evaluation
-    clearMediaLocalizationCache(activeChar.avatar);
-    
-    // Re-apply localization to the currently displayed content
-    if (isChecked) {
-        const desc = activeChar.description || (activeChar.data ? activeChar.data.description : "") || "";
-        const firstMes = activeChar.first_mes || (activeChar.data ? activeChar.data.first_mes : "") || "";
-        const altGreetings = activeChar.alternate_greetings || (activeChar.data ? activeChar.data.alternate_greetings : []) || [];
-        const creatorNotes = activeChar.creator_notes || (activeChar.data ? activeChar.data.creator_notes : "") || "";
-        
-        await applyMediaLocalizationToModal(activeChar, desc, firstMes, altGreetings, creatorNotes);
-        showToast('Media localization enabled for this character', 'success');
-    } else {
-        // Refresh without localization - reload the modal content
-        openModal(activeChar);
-        showToast('Media localization disabled for this character', 'info');
-    }
-});
-
 // Close localize modal handlers
 function closeLocalizeModalHandler() {
     localizeAbortController?.abort();

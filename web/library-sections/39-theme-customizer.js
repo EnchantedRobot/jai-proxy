@@ -252,13 +252,9 @@ window.registerOverlay?.({ id: 'importModal',               tier: 7, close: _hid
 window.registerOverlay?.({ id: 'localizeModal',             tier: 7, close: _hideClModalVisible('localizeModal') });
 window.registerOverlay?.({ id: 'bulkLocalizeModal',         tier: 7, close: _hideClModalVisible('bulkLocalizeModal') });
 window.registerOverlay?.({ id: 'bulkLocalizeSummaryModal',  tier: 7, close: _hideClModalVisible('bulkLocalizeSummaryModal') });
-window.registerOverlay?.({ id: 'bulkAutoLinkModal',         tier: 7, close: _hideClModalVisible('bulkAutoLinkModal') });
 window.registerOverlay?.({ id: 'charDuplicatesModal',       tier: 7, close: () => closeCharDuplicatesModal() });
 window.registerOverlay?.({ id: 'preImportDuplicateModal',   tier: 7, close: _hideClModalVisible('preImportDuplicateModal') });
 window.registerOverlay?.({ id: 'providerLinkModal',         tier: 7, close: _hideClModalVisible('providerLinkModal') });
-
-// Static .confirm-modal in HTML (uses .hidden toggle, not .visible).
-window.registerOverlay?.({ id: 'confirmSaveModal', tier: 7, close: (el) => el?.classList.add('hidden') });
 
 // Dynamic confirm-modals (created/removed each invocation; registry entry persists).
 window.registerOverlay?.({ id: 'deleteConfirmModal',  tier: 7, static: false, close: (el) => el?.remove() });

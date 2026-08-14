@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark">
     <meta name="referrer" content="no-referrer">
     <meta name="character-library" content="1"><!-- marker for the optional JanitorAI bridge userscript -->
-    <title>Character Archive</title>
+    <title>Archive</title>
     <link rel="stylesheet" href="library.css?v=108">
     <!-- Fonts, vendored. Upstream pulled these from SillyTavern's server root
          (/webfonts, /css); nothing serves that root any more, so they live under
@@ -81,110 +81,74 @@
     <div class="app-container">
         <!-- Top Toolbar -->
         <header class="topbar">
-            <div class="logo-area">
-                <i class="fa-solid fa-layer-group accent-icon"></i>
-                <h1>Character<span>Library</span></h1>
-            </div>
+            <div class="topbar-row topbar-row-main">
+                <div class="logo-area">
+                    <i class="fa-solid fa-layer-group accent-icon"></i>
+                    <h1>Archive</h1>
+                </div>
 
-            <div class="view-toggle">
-                <button class="view-toggle-btn active" data-view="characters">
-                    <i class="fa-solid fa-users"></i> Characters
-                </button>
-                <button class="view-toggle-btn" data-view="online">
-                    <i class="fa-solid fa-globe"></i> Online
-                </button>
-            </div>
-
-            <div class="search-area">
-                <div class="search-box">
-                    <i class="fa-solid fa-search"></i>
-                    <input type="search" id="searchInput" placeholder="Search characters..." autocomplete="one-time-code">
-                    <button id="clearSearchBtn" class="clear-search-btn hidden" title="Clear search">
-                        <i class="fa-solid fa-times"></i>
+                <div class="view-toggle">
+                    <button class="view-toggle-btn active" data-view="characters">
+                        <i class="fa-solid fa-users"></i> <span>Characters</span>
                     </button>
-                    <button id="advFilterBtn" class="adv-filter-btn" title="Advanced Filters">
-                        <i class="fa-solid fa-filter"></i>
+                    <button class="view-toggle-btn" data-view="online">
+                        <i class="fa-solid fa-globe"></i> <span>Online</span>
                     </button>
                 </div>
-                <div id="advFilterPanel" class="adv-filter-panel hidden">
-                    <div class="adv-filter-header">
-                        <span class="adv-filter-title">Filters</span>
-                        <div class="adv-filter-header-actions">
-                            <button id="advFilterPresetsBtn" class="adv-filter-presets-btn" title="Saved presets">
-                                <i class="fa-regular fa-bookmark"></i><span> Presets</span>
-                            </button>
-                            <button id="advFilterClearAll" class="adv-filter-clear">Clear all</button>
-                        </div>
-                    </div>
-                    <div id="advFilterPresetsPanel" class="adv-filter-presets-panel hidden">
-                        <div id="advFilterPresetsList" class="adv-filter-presets-list"></div>
-                        <div class="adv-filter-presets-save">
-                            <input type="search" id="advFilterPresetNameInput" class="adv-filter-presets-name-input" placeholder="Filter or name new preset..." autocomplete="off" maxlength="40">
-                            <button id="advFilterPresetSaveBtn" class="adv-filter-presets-save-btn" title="Save current filters as preset">
-                                <i class="fa-solid fa-floppy-disk"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div id="advFilterRows" class="adv-filter-rows"></div>
-                    <button id="advFilterAddBtn" class="adv-filter-add">
-                        <i class="fa-solid fa-plus"></i> Add filter
-                    </button>
-                </div>
-                <div class="search-settings-container">
-                    <button id="searchSettingsBtn" class="glass-btn icon-only" title="Search Settings">
-                        <i class="fa-solid fa-sliders"></i>
-                    </button>
-                    <div id="searchSettingsMenu" class="dropdown-menu hidden">
-                        <div class="dropdown-section-title">Search in</div>
-                        <label><input type="checkbox" id="searchName" checked> Character Name</label>
-                        <label><input type="checkbox" id="searchListingName" checked> Listing Name</label>
-                        <label><input type="checkbox" id="searchTags" checked> Tags</label>
-                        <label><input type="checkbox" id="searchAuthor" checked> Author</label>
-                        <label><input type="checkbox" id="searchNotes"> Creator's Notes</label>
-                        <label><input type="checkbox" id="searchTagline"> Tagline</label>
-                        <div class="dropdown-divider"></div>
-                        <label><input type="checkbox" id="searchFavoritesOnly"> <i class="fa-solid fa-star" style="color: var(--cl-favorite-gold); margin-right: 2px;"></i> Favorites only</label>
-                    </div>
-                </div>
-            </div>
 
-            <div class="filter-area" id="filterArea">
-                <select id="sortSelect" class="glass-select">
-                    <option value="name_asc" data-icon="fa-solid fa-arrow-down-a-z">Name (A-Z)</option>
-                    <option value="name_desc" data-icon="fa-solid fa-arrow-up-z-a">Name (Z-A)</option>
-                    <option value="date_new" data-icon="fa-solid fa-clock-rotate-left">Last Modified (Newest)</option>
-                    <option value="date_old" data-icon="fa-solid fa-clock-rotate-left">Last Modified (Oldest)</option>
-                    <option value="created_new" data-icon="fa-solid fa-calendar-plus">Date Created (Newest)</option>
-                    <option value="created_old" data-icon="fa-solid fa-calendar-plus">Date Created (Oldest)</option>
-                    <option value="tokens_high" data-icon="fa-solid fa-weight-hanging">Token Count (High to Low)</option>
-                    <option value="tokens_low" data-icon="fa-solid fa-feather">Token Count (Low to High)</option>
-                    <option value="random" data-icon="fa-solid fa-shuffle">Random</option>
-                </select>
-
-                <div class="filter-group" style="position: relative;">
-                    <button id="tagFilterBtn" class="glass-btn tag-filter-btn" title="Filter by tags">
-                        <i class="fa-solid fa-tags"></i> <span id="tagFilterLabel">Tags</span>
-                    </button>
-                    <div id="tagFilterPopup" class="dropdown-menu tag-filter-popup hidden" style="width: 270px; max-height: 420px;">
-                        <div class="tag-search-row">
-                            <input type="search" id="tagSearchInput" placeholder="Find tags..." autocomplete="one-time-code">
-                            <button id="clearAllTagsBtn" class="glass-btn icon-only clear-tags-btn" title="Clear all tag filters">
-                                <i class="fa-solid fa-xmark"></i>
-                            </button>
+                <div class="search-area">
+                    <div class="search-box">
+                        <i class="fa-solid fa-search"></i>
+                        <input type="search" id="searchInput" placeholder="Search characters..." autocomplete="one-time-code">
+                        <button id="clearSearchBtn" class="clear-search-btn hidden" title="Clear search">
+                            <i class="fa-solid fa-times"></i>
+                        </button>
+                        <button id="advFilterBtn" class="adv-filter-btn" title="Advanced Filters">
+                            <i class="fa-solid fa-filter"></i>
+                        </button>
+                    </div>
+                    <div id="advFilterPanel" class="adv-filter-panel hidden">
+                        <div class="adv-filter-header">
+                            <span class="adv-filter-title">Filters</span>
+                            <div class="adv-filter-header-actions">
+                                <button id="advFilterPresetsBtn" class="adv-filter-presets-btn" title="Saved presets">
+                                    <i class="fa-regular fa-bookmark"></i><span> Presets</span>
+                                </button>
+                                <button id="advFilterClearAll" class="adv-filter-clear">Clear all</button>
+                            </div>
                         </div>
-                        <div id="tagLogicRow" class="tag-logic-row hidden">
-                            <button id="includeLogicBtn" class="tag-logic-toggle include-logic" data-mode="any" title="Toggle between Any (OR) and All (AND) for included tags">
-                                <i class="fa-solid fa-check"></i> <span>Match Any</span>
-                            </button>
-                            <button id="excludeLogicBtn" class="tag-logic-toggle exclude-logic" data-mode="all" title="Toggle between Any and All for excluded tags">
-                                <i class="fa-solid fa-minus"></i> <span>Hide All</span>
-                            </button>
+                        <div id="advFilterPresetsPanel" class="adv-filter-presets-panel hidden">
+                            <div id="advFilterPresetsList" class="adv-filter-presets-list"></div>
+                            <div class="adv-filter-presets-save">
+                                <input type="search" id="advFilterPresetNameInput" class="adv-filter-presets-name-input" placeholder="Filter or name new preset..." autocomplete="off" maxlength="40">
+                                <button id="advFilterPresetSaveBtn" class="adv-filter-presets-save-btn" title="Save current filters as preset">
+                                    <i class="fa-solid fa-floppy-disk"></i>
+                                </button>
+                            </div>
                         </div>
-                        <div id="tagFilterContent" style="overflow-y: auto; flex: 1;">
-                             <!-- Tags injected via JS -->
+                        <div id="advFilterRows" class="adv-filter-rows"></div>
+                        <button id="advFilterAddBtn" class="adv-filter-add">
+                            <i class="fa-solid fa-plus"></i> Add filter
+                        </button>
+                    </div>
+                    <div class="search-settings-container">
+                        <button id="searchSettingsBtn" class="glass-btn icon-only" title="Search Settings">
+                            <i class="fa-solid fa-sliders"></i>
+                        </button>
+                        <div id="searchSettingsMenu" class="dropdown-menu hidden">
+                            <div class="dropdown-section-title">Search in</div>
+                            <label><input type="checkbox" id="searchName" checked> Character Name</label>
+                            <label><input type="checkbox" id="searchListingName" checked> Listing Name</label>
+                            <label><input type="checkbox" id="searchTags" checked> Tags</label>
+                            <label><input type="checkbox" id="searchAuthor" checked> Author</label>
+                            <label><input type="checkbox" id="searchNotes"> Creator's Notes</label>
+                            <label><input type="checkbox" id="searchTagline"> Tagline</label>
+                            <div class="dropdown-divider"></div>
+                            <label><input type="checkbox" id="searchFavoritesOnly"> <i class="fa-solid fa-star" style="color: var(--cl-favorite-gold); margin-right: 2px;"></i> Favorites only</label>
                         </div>
                     </div>
                 </div>
+
                 <div class="notifications-container hidden">
                     <button id="notificationsBtn" class="glass-btn icon-only notifications-btn" title="Notifications">
                         <i class="fa-solid fa-bell"></i>
@@ -194,6 +158,7 @@
                         <div class="notif-section" data-notif-section="media-downloads"></div>
                     </div>
                 </div>
+
                 <div class="more-options-container">
                     <button id="moreOptionsBtn" class="glass-btn icon-only" title="More Options">
                         <i class="fa-solid fa-ellipsis-vertical"></i>
@@ -205,29 +170,10 @@
                         <button id="checkDuplicatesBtn" class="dropdown-item">
                             <i class="fa-solid fa-clone"></i> Find Duplicates
                         </button>
-                        <button id="bulkAutoLinkBtn" class="dropdown-item">
-                            <i class="fa-solid fa-link"></i> Auto-Link Characters
-                        </button>
                         <button id="tagManagerBtn" class="dropdown-item">
                             <i class="fa-solid fa-tags"></i> Tag Consolidation
                         </button>
                         <div class="dropdown-divider"></div>
-                        <button id="menuRefreshBtn" class="dropdown-item">
-                            <i class="fa-solid fa-sync"></i> Refresh
-                        </button>
-                        <button id="menuMultiSelectBtn" class="dropdown-item topbar-overflow-item">
-                            <i class="fa-solid fa-object-group"></i> Select Mode
-                        </button>
-                        <button id="menuSortBtn" class="dropdown-item topbar-overflow-item-narrow">
-                            <i class="fa-solid fa-arrow-down-wide-short"></i> Sort
-                        </button>
-                        <button id="menuFavoritesBtn" class="dropdown-item topbar-overflow-item-narrow">
-                            <i class="fa-solid fa-star"></i> Favorites Filter
-                        </button>
-                        <button id="menuTagsBtn" class="dropdown-item topbar-overflow-item-narrow">
-                            <i class="fa-solid fa-tags"></i> Tag Filter
-                        </button>
-                        <div class="dropdown-divider topbar-overflow-item"></div>
                         <button id="gallerySettingsBtn" class="dropdown-item">
                             <i class="fa-solid fa-gear"></i> Settings
                         </button>
@@ -235,8 +181,54 @@
                 </div>
             </div>
 
-            <!-- Filters wrapper - prevents layout shift by maintaining consistent space -->
-            <div class="filters-wrapper">
+            <div class="topbar-row topbar-row-controls">
+                <div class="filter-area" id="filterArea">
+                    <select id="sortSelect" class="glass-select">
+                        <option value="name_asc" data-icon="fa-solid fa-arrow-down-a-z">Name (A-Z)</option>
+                        <option value="name_desc" data-icon="fa-solid fa-arrow-up-z-a">Name (Z-A)</option>
+                        <option value="date_new" data-icon="fa-solid fa-clock-rotate-left">Last Modified (Newest)</option>
+                        <option value="date_old" data-icon="fa-solid fa-clock-rotate-left">Last Modified (Oldest)</option>
+                        <option value="created_new" data-icon="fa-solid fa-calendar-plus">Date Created (Newest)</option>
+                        <option value="created_old" data-icon="fa-solid fa-calendar-plus">Date Created (Oldest)</option>
+                        <option value="tokens_high" data-icon="fa-solid fa-weight-hanging">Token Count (High to Low)</option>
+                        <option value="tokens_low" data-icon="fa-solid fa-feather">Token Count (Low to High)</option>
+                        <option value="random" data-icon="fa-solid fa-shuffle">Random</option>
+                    </select>
+
+                    <div class="filter-group" style="position: relative;">
+                        <button id="tagFilterBtn" class="glass-btn tag-filter-btn" title="Filter by tags">
+                            <i class="fa-solid fa-tags"></i> <span id="tagFilterLabel">Tags</span>
+                        </button>
+                        <div id="tagFilterPopup" class="dropdown-menu tag-filter-popup hidden" style="width: 270px; max-height: 420px;">
+                            <div class="tag-search-row">
+                                <input type="search" id="tagSearchInput" placeholder="Find tags..." autocomplete="one-time-code">
+                                <button id="clearAllTagsBtn" class="glass-btn icon-only clear-tags-btn" title="Clear all tag filters">
+                                    <i class="fa-solid fa-xmark"></i>
+                                </button>
+                            </div>
+                            <div id="tagLogicRow" class="tag-logic-row hidden">
+                                <button id="includeLogicBtn" class="tag-logic-toggle include-logic" data-mode="any" title="Toggle between Any (OR) and All (AND) for included tags">
+                                    <i class="fa-solid fa-check"></i> <span>Match Any</span>
+                                </button>
+                                <button id="excludeLogicBtn" class="tag-logic-toggle exclude-logic" data-mode="all" title="Toggle between Any and All for excluded tags">
+                                    <i class="fa-solid fa-minus"></i> <span>Hide All</span>
+                                </button>
+                            </div>
+                            <div id="tagFilterContent" style="overflow-y: auto; flex: 1;">
+                                 <!-- Tags injected via JS -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <button id="favoritesFilterBtn" class="glass-btn" title="Show favorites only" aria-pressed="false">
+                        <i class="fa-solid fa-star"></i> <span>Favorites</span>
+                    </button>
+
+                    <button id="refreshLibraryBtn" class="glass-btn" title="Refresh library">
+                        <i class="fa-solid fa-sync"></i> <span>Refresh</span>
+                    </button>
+                </div>
+
                 <!-- Online view - provider selector + filters -->
                 <div class="filter-area online-filters" id="onlineFilterArea">
                     <div id="providerSelectorArea"></div>
@@ -251,7 +243,7 @@
                 <div class="loading-icon">
                     <i class="fa-solid fa-layer-group"></i>
                 </div>
-                <div class="loading-title">Character<span>Library</span></div>
+                <div class="loading-title">Archive</div>
                 <div class="loading-progress" aria-hidden="true"><span></span></div>
                 <div class="loading-subtitle">Loading your collection</div>
             </div>
@@ -274,15 +266,24 @@
     <!-- ChubAI modals (login + preview) are injected by the provider at runtime -->
 
     <!-- Edit/Detail Modal -->
-    <div id="charModal" class="modal-overlay hidden">
+    <div id="charModal" class="modal-overlay hidden editing-unlocked">
         <button id="charModalNavPrev" class="char-modal-nav char-modal-nav-prev" aria-label="Previous character" style="display: none;"></button>
         <button id="charModalNavNext" class="char-modal-nav char-modal-nav-next" aria-label="Next character" style="display: none;"></button>
         <div class="modal-glass">
             <div class="modal-header">
                 <h2 id="modalTitle">Character Name</h2>
                 <div class="modal-controls">
+                    <button id="applyCardBtn" class="action-btn primary hidden" title="Apply changes">
+                        <i class="fa-solid fa-check"></i> <span class="btn-label">Apply</span>
+                    </button>
+                    <button id="revertCardBtn" class="action-btn secondary hidden" title="Revert changes">
+                        <i class="fa-solid fa-rotate-left"></i> <span class="btn-label">Revert</span>
+                    </button>
                     <button id="favoriteCharBtn" class="action-btn favorite-btn" title="Toggle Favorite">
                         <i class="fa-regular fa-star"></i>
+                    </button>
+                    <button id="downloadCharBtn" class="action-btn" title="Download PNG">
+                        <i class="fa-solid fa-download"></i>
                     </button>
                     <button id="deleteCharBtn" class="action-btn danger-hover" title="Delete Character">
                         <i class="fa-solid fa-trash"></i>
@@ -293,13 +294,13 @@
             
             <div class="modal-body">
                 <div class="modal-sidebar">
-                    <div class="char-portrait-container">
+                    <div class="char-portrait-container editing-unlocked">
                         <img id="modalImage" src="" alt="Character Portrait">
                         <div id="portraitViewOverlay" class="portrait-view-overlay" title="Click to view image">
                             <i class="fa-solid fa-eye"></i>
                             <span>View Image</span>
                         </div>
-                        <div id="portraitEditOverlay" class="portrait-edit-overlay hidden" title="Click to change card image">
+                        <div id="portraitEditOverlay" class="portrait-edit-overlay" title="Click to change card image">
                             <i class="fa-solid fa-camera"></i>
                             <span>Change Image</span>
                         </div>
@@ -325,10 +326,10 @@
                         <div class="sidebar-label">
                             <i class="fa-solid fa-tags"></i> Tags
                         </div>
-                        <div class="tags-container" id="modalTags">
+                        <div class="tags-container editable" id="modalTags">
                             <!-- Tags injected here -->
                         </div>
-                        <div class="tag-input-wrapper hidden" id="tagInputWrapper">
+                        <div class="tag-input-wrapper" id="tagInputWrapper">
                             <input type="search" id="tagInput" class="glass-input tag-input" placeholder="Add tag..." autocomplete="one-time-code">
                             <div id="tagAutocomplete" class="tag-autocomplete hidden"></div>
                         </div>
@@ -343,16 +344,16 @@
                 
                 <div class="modal-content-tabs">
                     <div class="tab-nav">
-                        <button class="tab-btn active" data-tab="details">Details</button>
-                        <button class="tab-btn" data-tab="edit">Edit</button>
+                        <button class="tab-btn active" data-tab="card">Card</button>
                         <button class="tab-btn" data-tab="gallery">Gallery</button>
                         <button class="tab-btn" data-tab="related">Related</button>
-                        <button class="tab-btn hidden" data-tab="info" id="infoTabBtn"><i class="fa-solid fa-microscope"></i> Info</button>
+                        <button class="tab-btn" data-tab="info" id="infoTabBtn"><i class="fa-solid fa-microscope"></i> Info</button>
+                        <button class="tab-btn" data-tab="raw">Raw</button>
                     </div>
                     
-                    <div class="tab-pane active" id="pane-details">
+                    <div class="tab-pane active" id="pane-card" data-tab="card">
                         <p class="meta-info">
-                            Created: <span id="modalDate"></span> 
+                            Created: <span id="modalDate"></span>
                             <span id="modalAuthorContainer" style="display:none">• Author: <a href="#" id="modalAuthor" class="creator-link" title="Click to filter by this creator"></a></span>
                             <span class="provider-link-indicator" id="providerLinkIndicator" title="Click to link to a provider">
                                 • <i class="fa-solid fa-link"></i> <span class="provider-link-text">Link</span>
@@ -365,72 +366,29 @@
                         <div class="provider-tagline-row" id="modalProviderTaglineRow" style="display:none;">
                             <span class="provider-tagline-text" id="modalProviderTagline"></span>
                         </div>
-                        
+
                         <div class="creator-notes-box" id="modalCreatorNotesBox" style="display:none; margin-bottom: 18px;">
-                            <details class="creator-notes-details detail-collapsible" id="creatorNotesDetails">
-                                <summary style="display: flex; align-items: center; gap: 8px;">
-                                    <i class="fa-solid fa-feather-pointed"></i>
-                                    <span style="flex: 1;">Creator's Notes</span>
-                                    <button type="button" class="creator-notes-expand-btn" id="creatorNotesExpandBtn" title="View full screen">
-                                        <i class="fa-solid fa-expand"></i>
-                                    </button>
-                                </summary>
-                                <div id="modalCreatorNotes" class="scrolling-text detail-collapsible-body"></div>
-                            </details>
-                        </div>
-
-                        <div class="description-box">
-                            <h3 class="section-h3"><i class="fa-solid fa-scroll" style="margin-right: 6px; opacity: 0.7;"></i>Description</h3>
-                            <div id="modalDescription" class="scrolling-text"></div>
-                        </div>
-                        <div class="first-mes-box">
-                            <div class="content-header">
-                                <h3 class="section-h3 expandable-section-title" id="firstMesTitleExpand" title="Click to expand"><i class="fa-solid fa-message" style="margin-right: 6px; opacity: 0.7;"></i>First Message</h3>
-                            </div>
-                            <div id="modalFirstMes" class="scrolling-text"></div>
-                        </div>
-
-                        <div class="alt-greetings-box" id="modalAltGreetingsBox" style="display:none; margin-top: 16px;">
-                            <details id="altGreetingsDetails" class="detail-collapsible">
-                                <summary style="display: flex; align-items: center; gap: 10px;">
-                                    <span style="flex: 1;"><i class="fa-solid fa-comments" style="margin-right: 8px; opacity: 0.7;"></i>Alternate Greetings (<span id="altGreetingsCount">0</span>)</span>
-                                    <button type="button" class="content-expand-btn" id="altGreetingsExpandBtn" title="Expand">
-                                        <i class="fa-solid fa-expand"></i>
-                                    </button>
-                                </summary>
-                                <div id="modalAltGreetings" class="scrolling-text detail-collapsible-body"></div>
-                            </details>
-                        </div>
-
-                        <div class="lorebook-box" id="modalLorebookBox" style="display:none; margin-top: 16px;">
-                            <details class="detail-collapsible">
-                                <summary><i class="fa-solid fa-book"></i> Embedded Lorebook (<span id="lorebookEntryCount">0</span> entries)</summary>
-                                <div id="modalLorebookContent" class="scrolling-text detail-collapsible-body"></div>
-                            </details>
-                        </div>
-
-                    </div>
-
-                    <div class="tab-pane" id="pane-edit">
-                        <div class="edit-lock-header">
-                            <div class="lock-status" id="editLockStatus">
-                                <i class="fa-solid fa-lock"></i>
-                                <span>Fields are locked. Click unlock to edit.</span>
-                            </div>
-                            <div class="lock-header-actions">
-                                <button type="button" id="toggleEditLockBtn" class="action-btn secondary small">
-                                    <i class="fa-solid fa-lock-open"></i> <span class="btn-label">Unlock Editing</span>
+                            <div class="creator-notes-header-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                <i class="fa-solid fa-feather-pointed"></i>
+                                <span style="flex: 1; font-weight: 600;">Creator's Notes</span>
+                                <button type="button" class="expand-field-btn" data-field="editCreatorNotes" data-label="Creator's Notes" title="Expand editor" id="editCreatorNotesExpandBtn" style="display:none;">
+                                    <i class="fa-solid fa-expand"></i>
                                 </button>
-                                <button type="button" id="editPaneVersionsBtn" class="action-btn secondary small" title="Version History">
-                                    <i class="fa-solid fa-clock-rotate-left"></i> <span class="btn-label">Versions</span>
+                                <button type="button" id="creatorNotesEditToggleBtn" class="content-expand-btn" title="Edit Creator's Notes">
+                                    <i class="fa-solid fa-pen"></i>
+                                </button>
+                                <button type="button" class="creator-notes-expand-btn" id="creatorNotesExpandBtn" title="View full screen">
+                                    <i class="fa-solid fa-expand"></i>
                                 </button>
                             </div>
+                            <div id="modalCreatorNotes" class="scrolling-text"></div>
+                            <textarea id="editCreatorNotes" class="glass-input hidden" rows="6" placeholder="Tips, warnings, or info for users..." autocomplete="one-time-code"></textarea>
                         </div>
 
                         <div class="edit-section">
                             <h4 class="section-header">
                                 <i class="fa-solid fa-user"></i> Basic Information
-                                <button type="button" id="editFieldsToggleBtn" class="section-expand-btn hidden" title="Expand all fields to fit content">
+                                <button type="button" id="editFieldsToggleBtn" class="section-expand-btn" title="Expand all fields to fit content">
                                     <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
                                 </button>
                             </h4>
@@ -458,44 +416,28 @@
                             </div>
                         </div>
 
-                        <div class="edit-section">
-                            <h4 class="section-header"><i class="fa-solid fa-scroll"></i> Character Definition</h4>
+                        <div class="description-box">
+                            <h3 class="section-h3"><i class="fa-solid fa-scroll" style="margin-right: 6px; opacity: 0.7;"></i>Description</h3>
                             <div class="form-group expandable-field">
-                                <label>Description / Persona</label>
-                                <button type="button" class="expand-field-btn hidden" data-field="editDescription" data-label="Description / Persona" title="Expand editor">
+                                <button type="button" class="expand-field-btn" data-field="editDescription" data-label="Description / Persona" title="Expand editor">
                                     <i class="fa-solid fa-expand"></i>
                                 </button>
-                                <textarea id="editDescription" class="glass-input" rows="5" placeholder="Who is this character?" autocomplete="one-time-code"></textarea>
+                                <textarea id="editDescription" class="glass-input" rows="6" placeholder="Who is this character?" autocomplete="one-time-code"></textarea>
                             </div>
+                        </div>
+                        <div class="first-mes-box">
+                            <h3 class="section-h3"><i class="fa-solid fa-message" style="margin-right: 6px; opacity: 0.7;"></i>First Message</h3>
                             <div class="form-group expandable-field">
-                                <label>Personality Summary</label>
-                                <button type="button" class="expand-field-btn hidden" data-field="editPersonality" data-label="Personality Summary" title="Expand editor">
+                                <button type="button" id="expandGreetingsBtn" class="section-expand-btn" title="Edit all greetings in expanded view">
                                     <i class="fa-solid fa-expand"></i>
                                 </button>
-                                <textarea id="editPersonality" class="glass-input" rows="3" placeholder="Brief personality traits..." autocomplete="one-time-code"></textarea>
-                            </div>
-                            <div class="form-group expandable-field">
-                                <label>Scenario / Setting</label>
-                                <button type="button" class="expand-field-btn hidden" data-field="editScenario" data-label="Scenario / Setting" title="Expand editor">
-                                    <i class="fa-solid fa-expand"></i>
-                                </button>
-                                <textarea id="editScenario" class="glass-input" rows="3" placeholder="The current situation..." autocomplete="one-time-code"></textarea>
+                                <textarea id="editFirstMes" class="glass-input" rows="6" placeholder="Opening message from the character..." autocomplete="one-time-code"></textarea>
                             </div>
                         </div>
 
-                        <div class="edit-section">
-                            <h4 class="section-header">
-                                <i class="fa-solid fa-comments"></i> Messages
-                                <button type="button" id="expandGreetingsBtn" class="section-expand-btn hidden" title="Edit all greetings in expanded view">
-                                    <i class="fa-solid fa-expand"></i>
-                                </button>
-                            </h4>
-                            <div class="form-group">
-                                <label>First Message</label>
-                                <textarea id="editFirstMes" class="glass-input" rows="5" placeholder="Opening message from the character..." autocomplete="one-time-code"></textarea>
-                            </div>
-                            <div class="form-group">
-                                <label>Alternate Greetings <span class="label-hint">(one per text box)</span></label>
+                        <details class="detail-collapsible" style="margin-bottom: 12px;">
+                            <summary><i class="fa-solid fa-comments"></i> Alternate Greetings <span id="altGreetingsCount" class="lorebook-count"></span></summary>
+                            <div class="detail-collapsible-body form-group">
                                 <div id="altGreetingsEditContainer" class="alt-greetings-container">
                                     <!-- Dynamically populated -->
                                 </div>
@@ -503,68 +445,75 @@
                                     <i class="fa-solid fa-plus"></i> Add Greeting
                                 </button>
                             </div>
-                            <div class="form-group expandable-field">
-                                <label>Example Dialogue <span class="label-hint">(for training context)</span></label>
-                                <button type="button" class="expand-field-btn hidden" data-field="editMesExample" data-label="Example Dialogue" title="Expand editor">
+                        </details>
+
+                        <details class="detail-collapsible" style="margin-bottom: 12px;">
+                            <summary><i class="fa-solid fa-brain"></i> Personality</summary>
+                            <div class="detail-collapsible-body form-group expandable-field">
+                                <button type="button" class="expand-field-btn" data-field="editPersonality" data-label="Personality Summary" title="Expand editor">
+                                    <i class="fa-solid fa-expand"></i>
+                                </button>
+                                <textarea id="editPersonality" class="glass-input" rows="3" placeholder="Brief personality traits..." autocomplete="one-time-code"></textarea>
+                            </div>
+                        </details>
+
+                        <details class="detail-collapsible" style="margin-bottom: 12px;">
+                            <summary><i class="fa-solid fa-map"></i> Scenario</summary>
+                            <div class="detail-collapsible-body form-group expandable-field">
+                                <button type="button" class="expand-field-btn" data-field="editScenario" data-label="Scenario / Setting" title="Expand editor">
+                                    <i class="fa-solid fa-expand"></i>
+                                </button>
+                                <textarea id="editScenario" class="glass-input" rows="3" placeholder="The current situation..." autocomplete="one-time-code"></textarea>
+                            </div>
+                        </details>
+
+                        <details class="detail-collapsible" style="margin-bottom: 12px;">
+                            <summary><i class="fa-solid fa-quote-left"></i> Example Dialogue</summary>
+                            <div class="detail-collapsible-body form-group expandable-field">
+                                <button type="button" class="expand-field-btn" data-field="editMesExample" data-label="Example Dialogue" title="Expand editor">
                                     <i class="fa-solid fa-expand"></i>
                                 </button>
                                 <textarea id="editMesExample" class="glass-input" rows="5" placeholder="{{user}}: Hello!\n{{char}}: *waves* Hi there!" autocomplete="one-time-code"></textarea>
                             </div>
-                        </div>
+                        </details>
 
-                        <div class="edit-section">
-                            <h4 class="section-header"><i class="fa-solid fa-wand-magic-sparkles"></i> Advanced (Prompt Overrides)</h4>
-                            <div class="form-group expandable-field">
-                                <label>System Prompt <span class="label-hint">(Main Prompt Override)</span></label>
-                                <button type="button" class="expand-field-btn hidden" data-field="editSystemPrompt" data-label="System Prompt" title="Expand editor">
+                        <details class="detail-collapsible" style="margin-bottom: 12px;">
+                            <summary><i class="fa-solid fa-terminal"></i> System Prompt</summary>
+                            <div class="detail-collapsible-body form-group expandable-field">
+                                <button type="button" class="expand-field-btn" data-field="editSystemPrompt" data-label="System Prompt" title="Expand editor">
                                     <i class="fa-solid fa-expand"></i>
                                 </button>
                                 <textarea id="editSystemPrompt" class="glass-input" rows="4" placeholder="Overrides your default system prompt..." autocomplete="one-time-code"></textarea>
                             </div>
-                            <div class="form-group expandable-field">
-                                <label>Post-History Instructions <span class="label-hint">(Jailbreak)</span></label>
-                                <button type="button" class="expand-field-btn hidden" data-field="editPostHistoryInstructions" data-label="Post-History Instructions" title="Expand editor">
+                        </details>
+
+                        <details class="detail-collapsible" style="margin-bottom: 12px;">
+                            <summary><i class="fa-solid fa-clock-rotate-left"></i> Post-History Instructions</summary>
+                            <div class="detail-collapsible-body form-group expandable-field">
+                                <button type="button" class="expand-field-btn" data-field="editPostHistoryInstructions" data-label="Post-History Instructions" title="Expand editor">
                                     <i class="fa-solid fa-expand"></i>
                                 </button>
                                 <textarea id="editPostHistoryInstructions" class="glass-input" rows="4" placeholder="Instructions placed after chat history..." autocomplete="one-time-code"></textarea>
                             </div>
-                            <div class="form-group expandable-field">
-                                <label>Creator's Notes <span class="label-hint">(For users, not sent to AI)</span></label>
-                                <button type="button" class="expand-field-btn hidden" data-field="editCreatorNotes" data-label="Creator's Notes" title="Expand editor">
-                                    <i class="fa-solid fa-expand"></i>
-                                </button>
-                                <textarea id="editCreatorNotes" class="glass-input" rows="4" placeholder="Tips, warnings, or info for users..." autocomplete="one-time-code"></textarea>
-                            </div>
-                        </div>
+                        </details>
 
-                        <div class="edit-section lorebook-edit-section">
-                            <h4 class="section-header">
+                        <details class="detail-collapsible lorebook-edit-section">
+                            <summary>
                                 <i class="fa-solid fa-book"></i> Embedded Lorebook
                                 <span id="lorebookEditCount" class="lorebook-count">(0 entries)</span>
-                                <button type="button" id="expandLorebookBtn" class="section-expand-btn hidden" title="Edit lorebook in expanded view">
+                                <button type="button" id="expandLorebookBtn" class="section-expand-btn" title="Edit lorebook in expanded view">
                                     <i class="fa-solid fa-expand"></i>
                                 </button>
-                            </h4>
-                            <details id="lorebookEditDetails">
-                                <summary class="lorebook-toggle-summary">
-                                    <i class="fa-solid fa-chevron-down expand-icon"></i>
-                                    <span>Show/Hide Entries</span>
-                                </summary>
-                                <div class="lorebook-edit-content">
-                                    <div id="lorebookEntriesEdit" class="lorebook-entries-container">
-                                        <!-- Dynamically populated -->
-                                    </div>
-                                    <button type="button" id="addLorebookEntryBtn" class="action-btn secondary small" style="margin-top: 10px;">
-                                        <i class="fa-solid fa-plus"></i> Add Entry
-                                    </button>
+                            </summary>
+                            <div class="detail-collapsible-body lorebook-edit-content">
+                                <div id="lorebookEntriesEdit" class="lorebook-entries-container">
+                                    <!-- Dynamically populated -->
                                 </div>
-                            </details>
-                        </div>
-
-                        <div class="form-actions" id="editFormActions">
-                            <button id="cancelEditBtn" class="action-btn secondary" style="display: none;"><i class="fa-solid fa-times"></i> Cancel</button>
-                            <button id="saveEditBtn" class="action-btn primary" disabled><i class="fa-solid fa-save"></i> Save Changes</button>
-                        </div>
+                                <button type="button" id="addLorebookEntryBtn" class="action-btn secondary small" style="margin-top: 10px;">
+                                    <i class="fa-solid fa-plus"></i> Add Entry
+                                </button>
+                            </div>
+                        </details>
                     </div>
 
                     <div class="tab-pane" id="pane-gallery">
@@ -574,10 +523,6 @@
                                 <button id="localizeMediaBtn" class="action-btn secondary small" title="Download remote images from character card">
                                     <i class="fa-solid fa-download"></i> Download Media
                                 </button>
-                                <label class="localize-toggle" title="Replace remote URLs with local files when viewing this character">
-                                    <input type="checkbox" id="charLocalizeToggle">
-                                    <span class="localize-toggle-label"><i class="fa-solid fa-link-slash"></i> Use Local Media</span>
-                                </label>
                             </div>
                         </div>
                         <div class="gallery-id-warning hidden" id="galleryIdWarning">
@@ -638,6 +583,19 @@
                             <!-- Populated by JS -->
                         </div>
                     </div>
+
+                    <div class="tab-pane" id="pane-raw">
+                        <div class="raw-tab-header">
+                            <h4><i class="fa-solid fa-file-code"></i> Raw Card JSON</h4>
+                            <div class="raw-tab-actions">
+                                <span id="rawJsonError" class="raw-json-error hidden"></span>
+                                <button type="button" id="copyRawJsonBtn" class="action-btn secondary small">
+                                    <i class="fa-solid fa-copy"></i> Copy
+                                </button>
+                            </div>
+                        </div>
+                        <textarea id="rawCardJson" class="glass-input raw-json-textarea" spellcheck="false" autocomplete="off"></textarea>
+                    </div>
                 </div>
             </div>
         </div>
@@ -690,9 +648,6 @@
                             </button>
                             <button id="providerLinkGalleryBtn" class="provider-link-btn secondary">
                                 <i class="fa-solid fa-images"></i> Download Gallery
-                            </button>
-                            <button id="providerLinkVersionsBtn" class="provider-link-btn secondary">
-                                <i class="fa-solid fa-clock-rotate-left"></i> Version History
                             </button>
                             <button id="providerLinkUnlinkBtn" class="provider-link-btn text-danger">
                                 <i class="fa-solid fa-unlink"></i> Unlink
@@ -993,68 +948,6 @@ https://jannyai.com/characters/uuid_slug
         </div>
     </div>
 
-    <!-- Bulk Auto-Link Modal -->
-    <div id="bulkAutoLinkModal" class="cl-modal">
-        <div class="cl-modal-content bulk-auto-link-modal-content">
-            <div class="cl-modal-header">
-                <h3><i class="fa-solid fa-link"></i> Auto-Link Characters</h3>
-                <button class="cl-modal-close" id="closeBulkAutoLinkModal"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <div class="cl-modal-body">
-                <!-- Scanning Phase -->
-                <div id="bulkAutoLinkScanning" class="bulk-auto-link-phase">
-                    <div class="bulk-auto-link-scan-info">
-                        <img id="bulkAutoLinkScanAvatar" src="" alt="">
-                        <span id="bulkAutoLinkScanName">Preparing...</span>
-                    </div>
-                    <p id="bulkAutoLinkScanStatus">Scanning library for unlinked characters...</p>
-                    <div class="import-progress">
-                        <div class="import-progress-header">
-                            <span>Progress</span>
-                            <span id="bulkAutoLinkScanProgress">0/0</span>
-                        </div>
-                        <div class="import-progress-bar">
-                            <div id="bulkAutoLinkScanFill" class="import-progress-fill"></div>
-                        </div>
-                    </div>
-                    <div class="bulk-auto-link-scan-stats">
-                        <span><i class="fa-solid fa-check-circle"></i> <span id="bulkAutoLinkConfidentCount">0</span> confident</span>
-                        <span><i class="fa-solid fa-question-circle"></i> <span id="bulkAutoLinkUncertainCount">0</span> need review</span>
-                        <span><i class="fa-solid fa-times-circle"></i> <span id="bulkAutoLinkNoMatchCount">0</span> no match</span>
-                    </div>
-                </div>
-                
-                <!-- Results Phase -->
-                <div id="bulkAutoLinkResults" class="bulk-auto-link-phase hidden">
-                    <div class="bulk-auto-link-tabs">
-                        <button class="bulk-auto-link-tab active" data-tab="confident">
-                            <i class="fa-solid fa-check-circle"></i> Confident (<span id="bulkAutoLinkConfidentTabCount">0</span>)
-                        </button>
-                        <button class="bulk-auto-link-tab" data-tab="uncertain">
-                            <i class="fa-solid fa-question-circle"></i> Needs Review (<span id="bulkAutoLinkUncertainTabCount">0</span>)
-                        </button>
-                        <button class="bulk-auto-link-tab" data-tab="nomatch">
-                            <i class="fa-solid fa-times-circle"></i> No Match (<span id="bulkAutoLinkNoMatchTabCount">0</span>)
-                        </button>
-                    </div>
-                    <div class="bulk-auto-link-actions" id="bulkAutoLinkConfidentActions">
-                        <button class="action-btn small secondary bulk-auto-link-select-all"><i class="fa-solid fa-check-double"></i> Select All</button>
-                        <button class="action-btn small secondary bulk-auto-link-deselect-all"><i class="fa-solid fa-square"></i> Deselect All</button>
-                    </div>
-                    <div class="bulk-auto-link-list-container">
-                        <div id="bulkAutoLinkConfidentList" class="bulk-auto-link-list"></div>
-                        <div id="bulkAutoLinkUncertainList" class="bulk-auto-link-list" style="display: none;"></div>
-                        <div id="bulkAutoLinkNoMatchList" class="bulk-auto-link-list" style="display: none;"></div>
-                    </div>
-                </div>
-            </div>
-            <div class="cl-modal-footer">
-                <button id="bulkAutoLinkCancelBtn" class="action-btn secondary"><i class="fa-solid fa-stop"></i> Stop</button>
-                <button id="bulkAutoLinkApplyBtn" class="action-btn primary hidden"><i class="fa-solid fa-link"></i> Link Selected (<span id="bulkAutoLinkSelectedCount">0</span>)</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Character Duplicates Scan Modal -->
     <div id="charDuplicatesModal" class="cl-modal">
         <div class="cl-modal-content char-duplicates-modal-content">
@@ -1100,25 +993,6 @@ https://jannyai.com/characters/uuid_slug
     </div>
 
     <!-- DataCat -> JanitorAI batch re-link -->
-    <!-- Save Confirmation Modal -->
-    <div id="confirmSaveModal" class="confirm-modal hidden">
-        <div class="confirm-modal-content">
-            <div class="confirm-modal-header">
-                <h3><i class="fa-solid fa-clipboard-check"></i> Confirm Changes</h3>
-                <button class="close-confirm-btn" id="closeConfirmModal">&times;</button>
-            </div>
-            <div class="confirm-modal-body">
-                <p>Review the following changes before saving:</p>
-                <div class="changes-diff" id="changesDiff">
-                    <!-- Diff will be populated here -->
-                </div>
-            </div>
-            <div class="confirm-modal-footer">
-                <button id="cancelSaveBtn" class="action-btn secondary"><i class="fa-solid fa-times"></i> Cancel</button>
-                <button id="confirmSaveBtn" class="action-btn primary"><i class="fa-solid fa-check"></i> Confirm Save</button>
-            </div>
-        </div>
-    </div>
 
     <!-- Gallery Settings Modal -->
     <div id="gallerySettingsModal" class="cl-modal">
@@ -1690,19 +1564,6 @@ https://jannyai.com/characters/uuid_slug
                         </div>
                         
                         <div class="settings-group">
-                            <div class="settings-group-title"><i class="fa-solid fa-link-slash"></i> URL Replacement</div>
-                            <div class="settings-row">
-                                <label>
-                                    <input type="checkbox" id="settingsMediaLocalization" checked> Replace remote URLs with local files
-                                </label>
-                                <span class="settings-hint">Auto-replace embedded remote media with local gallery files. Files must be downloaded first.</span>
-                            </div>
-                            <div class="settings-row settings-sub-note">
-                                <span class="settings-hint"><i class="fa-solid fa-info-circle"></i> Per-character overrides available in the character detail panel.</span>
-                            </div>
-                        </div>
-                        
-                        <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-download"></i> Bulk Operations</div>
                             <div class="settings-row">
                                 <button id="bulkLocalizeBtn" class="settings-action-btn primary">
@@ -1887,16 +1748,6 @@ https://jannyai.com/characters/uuid_slug
                         </div>
                         
                         <div class="settings-group">
-                            <div class="settings-group-title"><i class="fa-solid fa-microscope"></i> Character Inspection</div>
-                            <div class="settings-row">
-                                <label>
-                                    <input type="checkbox" id="settingsShowInfoTab"> Show "Info" tab in character modal
-                                </label>
-                                <span class="settings-hint">Displays card metadata, file paths, and internal mappings for debugging</span>
-                            </div>
-                        </div>
-                        
-                        <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-link"></i> Export</div>
                             <div class="settings-row">
                                 <label>
@@ -2010,7 +1861,6 @@ https://jannyai.com/characters/uuid_slug
     <script src="library-sections/23-utility-functions.js?v=1"></script>
     <script src="library-sections/24-import-summary-modal.js?v=1"></script>
     <script src="library-sections/25-provider-link-feature.js?v=1"></script>
-    <script src="library-sections/26-bulk-auto-link-feature.js?v=1"></script>
     <script src="library-sections/27-update-lock.js?v=1"></script>
     <script src="library-sections/30-media-localization-feature.js?v=1"></script>
     <script src="library-sections/31-unified-media-download-pipeline.js?v=1"></script>
@@ -2024,6 +1874,6 @@ https://jannyai.com/characters/uuid_slug
     <script src="library-sections/40-core-api-bridge.js?v=1"></script>
     <script src="library-sections/42-additional-character-lorebooks-charlore.js?v=1"></script>
     <script type="module" src="lib/index.js?v=1"></script>
-    <script type="module" src="modules/module-loader.js?v=47"></script>
+    <script type="module" src="modules/module-loader.js?v=48"></script>
 </body>
 </html>

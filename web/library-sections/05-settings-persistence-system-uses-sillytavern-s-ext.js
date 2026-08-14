@@ -74,8 +74,6 @@ const DEFAULT_SETTINGS = {
     richCreatorNotes: true,
     expandCreatorNotes: false,
     highlightColor: '#4a9eff',
-    mediaLocalizationEnabled: true,
-    mediaLocalizationPerChar: {},
     importMediaAction: 'ask',
     importDirectDownloads: false,
     includeExternalGalleries: true,
@@ -95,7 +93,6 @@ const DEFAULT_SETTINGS = {
     // defaulting it off makes every gallery look empty until the user finds the
     // setting.
     uniqueGalleryFolders: true,
-    showInfoTab: false,
     themeCustomizer: false,
     customCSS: '',
     customCSSMode: 'raw',

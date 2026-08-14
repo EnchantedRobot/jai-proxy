@@ -51,6 +51,10 @@ class CardOut(BaseModel):
         default="",
         description="When this card was acquired, stamped by the importer into `extensions.jai.linkedAt`. Present on every card in the archive and the only trustworthy 'date added': mtimes were flattened by the bulk passes. A raw ISO-8601 string, passed through exactly as the card carries it.",
     )
+    create_date: str = Field(
+        default="",
+        description="When the card was created, as SillyTavern means it: the root-level `create_date` the card carries, or the earliest provider `linkedAt` it is derived from for a card written before this archive stamped the field. Distinct from `linked_at`, which is `extensions.jai`'s stamp and is rewritten by bulk passes -- this one is stable. Raw ISO-8601, or empty for a card with no provenance at all.",
+    )
     thumb_url: str
     png_url: str
     extensions: dict[str, Any] | None = Field(

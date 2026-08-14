@@ -10,7 +10,7 @@ from typing import Any
 
 from PIL import Image
 
-from proxy.cards import gallery, pngtools
+from proxy.cards import dates, gallery, pngtools
 from proxy.cards.naming import id_fragment, safe_filename
 from proxy.cards.avatar_image import normalize_avatar
 from proxy.config import settings
@@ -222,6 +222,11 @@ class PngWriter:
         # Every card leaves here with a gallery_id -- resolved against the card
         # this write may be overwriting, hence after the path is known.
         _stamp_gallery_id(card_payload, path)
+
+        # ...and with a root-level `create_date`, derived from the provenance the
+        # importer just stamped. SillyTavern writes this field on every card and
+        # sorts on it; so does CharacterLibrary. See proxy/cards/dates.py.
+        dates.stamp(card_payload)
 
         # Normalize whatever the avatar is (webp/jpg/png) to PNG bytes, crop a
         # detected 3-image stack down to its primary portrait and cap the

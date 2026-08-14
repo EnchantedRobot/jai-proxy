@@ -133,6 +133,11 @@ function toggleFavoritesFilter(forceState) {
     if (settingsBtn) {
         settingsBtn.classList.toggle('active', showFavoritesOnly);
     }
+    const filterBtn = document.getElementById('favoritesFilterBtn');
+    if (filterBtn) {
+        filterBtn.classList.toggle('is-active', showFavoritesOnly);
+        filterBtn.setAttribute('aria-pressed', String(showFavoritesOnly));
+    }
     performSearch();
 }
 

@@ -17,6 +17,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from proxy import deps
@@ -110,8 +111,28 @@ logging.getLogger("uvicorn.access").addFilter(QuietAccessFilter())
 # StaticFiles only rewrites directory requests and looks for a 404.html,
 # neither of which applies here -- so an unmatched path 404s (verified live).
 # This app has no client-side deep-link routing that would need that fallback.
+class NoCacheStaticFiles(StaticFiles):
+    """Serve the frontend with browser caching switched off.
+
+    StaticFiles sends ETag/Last-Modified but no Cache-Control, which leaves
+    Chrome free to apply heuristic freshness. That bit us badly: a hard reload
+    only bypasses the cache for the *navigation's* own subresources, so the
+    modules under web/modules/ -- imported later, when the user opens the tag
+    manager or switches to Online -- kept being served from cache. Stale code
+    is indistinguishable from broken code, and we burned a session on it.
+
+    This is a localhost archive serving a few hundred KB of its own assets.
+    Always-fresh is worth more than the bytes.
+    """
+
+    def file_response(self, *args, **kwargs) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-store, must-revalidate"
+        return response
+
+
 if WEB_DIR.is_dir():
-    app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+    app.mount("/", NoCacheStaticFiles(directory=WEB_DIR, html=True), name="web")
 else:  # pragma: no cover -- only in a checkout with the frontend removed
     logger.warning("web/ is missing at %s; the browser UI will not be served", WEB_DIR)
 

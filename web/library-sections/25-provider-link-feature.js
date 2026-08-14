@@ -3,6 +3,48 @@
 // ==============================================
 
 /**
+ * Persist a provider link for a character.
+ * Updates in-memory state via the provider's setLinkInfo, then saves to server.
+ */
+async function saveProviderLink(char, provider, linkInfo) {
+    if (!char?.avatar) throw new Error('No character or avatar');
+
+    // Non-blocking auto-snapshot before link (overwrites the cl namespace).
+
+    // Populate provider namespace + drop cl in-memory so the spread carries the new link and the cl-delete has a target.
+    provider.setLinkInfo(char, linkInfo);
+    const charInArray = allCharacters.find(c => c.avatar === char.avatar);
+    if (charInArray && charInArray !== char) {
+        provider.setLinkInfo(charInArray, linkInfo);
+    }
+    for (const c of [char, charInArray].filter(Boolean)) {
+        if (c.data?.extensions && 'cl' in c.data.extensions) delete c.data.extensions.cl;
+    }
+
+    // Persist via applyCardFieldUpdates; the provider namespace rides the existing-extensions spread, so only the cl-delete is a dot-path update.
+    const success = await window.applyCardFieldUpdates(char.avatar, {
+        'extensions.cl': ST_UNSET_SENTINEL,
+    });
+    if (!success) throw new Error('Failed to save provider link');
+
+    // Recompute the listing-name + tagline search keys (CL-side state outside char.data; helper doesnt know about it).
+    const listingName = getListingNameFromExtensions(char);
+    char._lowerListingName = listingName ? listingName.toLowerCase() : '';
+    char._lowerTagline = getDisplayTagline(char).toLowerCase();
+    if (charInArray && charInArray !== char) {
+        charInArray._lowerListingName = char._lowerListingName;
+        charInArray._lowerTagline = char._lowerTagline;
+    }
+
+    // Same-tick ST sync: setLinkInfo on mainChar makes the new link visible immediately, ahead of the async refetch.
+    try {
+        const context = getSTContext();
+        const mainChar = context?.characters?.find(c => c.avatar === char.avatar);
+        if (mainChar) provider.setLinkInfo(mainChar, linkInfo);
+    } catch (_) { /* non-critical */ }
+}
+
+/**
  * Update the provider link indicator in the modal (generic — any provider)
  * @param {Object} char - Character object
  */
@@ -197,15 +239,13 @@ function openProviderLinkModal(char) {
         // Provider-specific button visibility
         const viewBtn = document.getElementById('providerLinkViewInGalleryBtn');
         const galleryBtn = document.getElementById('providerLinkGalleryBtn');
-        const versionsBtn = document.getElementById('providerLinkVersionsBtn');
         const statsEl = document.getElementById('providerLinkStats');
-        
+
         if (viewBtn) {
             viewBtn.classList.remove('hidden');
             viewBtn.innerHTML = `<i class="fa-solid fa-eye"></i> View on ${escapeHtml(provider.name)}`;
         }
         if (galleryBtn) galleryBtn.classList.toggle('hidden', !provider.supportsGallery);
-        if (versionsBtn) versionsBtn.classList.remove('hidden');
         
         // Fetch live stats from the provider (if supported)
         if (typeof provider.fetchLinkStats === 'function') {
@@ -758,17 +798,6 @@ on('providerLinkUpdateLockBtn', 'click', async () => {
     } catch (err) {
         console.error('[UpdateLock] Failed to toggle:', err);
         showToast('Failed to save update lock', 'error');
-    }
-});
-
-// Version History button in provider link modal
-on('providerLinkVersionsBtn', 'click', () => {
-    if (activeChar) {
-        // Close the link modal, then switch to the Versions tab
-        const linkModal = document.getElementById('providerLinkModal');
-        if (linkModal) linkModal.classList.remove('visible');
-        const editVBtn = document.getElementById('editPaneVersionsBtn');
-        if (editVBtn) editVBtn.click();
     }
 });
 

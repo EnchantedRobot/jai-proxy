@@ -293,18 +293,6 @@ function buildSingleMenuItems(char, cardElement) {
         });
     }
     
-    // Version history (available for ALL characters - local snapshots + remote if provider-linked)
-    items.push({
-        icon: 'fa-solid fa-clock-rotate-left',
-        label: 'Version History',
-        action: () => {
-            const charVersions = CoreAPI.getModule('character-versions');
-            if (charVersions?.openVersionHistory) {
-                charVersions.openVersionHistory(char);
-            }
-        }
-    });
-    
     // Gallery viewer
     items.push({
         icon: 'fa-solid fa-images',
@@ -751,6 +739,7 @@ export default {
     show,
     hide,
     attachToCard,
+    downloadCharacterPng,
     // Bulk actions - exposed for multi-select toolbar + batch-transfer chooser
     bulkToggleFavorites,
     bulkExport,

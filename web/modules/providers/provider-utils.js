@@ -301,7 +301,7 @@ async function buildBrowseErrorReport(c) {
     const err = c.error || {};
     const flags = Object.entries(c.flags || {}).map(([k, v]) => `${k}=${v}`).join(' | ');
     const lines = [
-        `Character Library v${env.cl} browse error report (${c.time})`,
+        `Archive v${env.cl} browse error report (${c.time})`,
         `provider: ${c.provider} | view: ${c.view}`,
         `error: ${err.message || String(err)}`,
     ];

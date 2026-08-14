@@ -291,6 +291,75 @@ const CD_ADAPTERS = {
 };
 
 /**
+ * Shared Online-tab filter bar chrome: Browse/Following toggle, a sort container
+ * (provider supplies its own <select>s), Tags, Hide Owned / Hide Possible toggles,
+ * and Refresh. Only the sort/tag *contents* differ by provider — this is the fixed
+ * shape every provider's filter bar renders into.
+ * @param {Object} opts
+ * @param {string} opts.prefix - element id / class prefix, e.g. 'chub' or 'datacat'
+ * @param {string} opts.viewBtnAttr - data-attribute name for the mode toggle, e.g. 'chub-view'
+ * @param {string} opts.sortSelectsHtml - the provider's own sort <select>(s), unchanged
+ * @param {boolean} [opts.hasFollowing=true] - whether to render the Following tab
+ * @param {string} [opts.followingValue='following'] - data-${viewBtnAttr} value for the Following tab
+ * @param {string} [opts.followingTitle] - tooltip for the Following tab
+ */
+export function renderBrowseFilterBar({
+    prefix,
+    viewBtnAttr,
+    sortSelectsHtml,
+    hasFollowing = true,
+    followingValue = 'following',
+    followingTitle = 'Characters from creators you follow',
+}) {
+    return `
+            ${hasFollowing ? `
+            <!-- Discovery Mode Toggle -->
+            <div class="chub-view-toggle">
+                <button class="${prefix}-view-btn active" data-${viewBtnAttr}="browse" title="Browse all characters">
+                    <i class="fa-solid fa-compass"></i> <span>Browse</span>
+                </button>
+                <button class="${prefix}-view-btn" data-${viewBtnAttr}="${followingValue}" title="${followingTitle}">
+                    <i class="fa-solid fa-users"></i> <span>Following</span>
+                </button>
+            </div>` : ''}
+
+            <!-- Sort dropdown container -->
+            <div class="browse-sort-container">
+                ${sortSelectsHtml}
+            </div>
+
+            <!-- Tags -->
+            <div class="browse-tags-dropdown-container" style="position: relative;">
+                <button id="${prefix}TagsBtn" class="glass-btn" title="Tag filters">
+                    <i class="fa-solid fa-tags"></i> <span id="${prefix}TagsBtnLabel">Tags</span>
+                </button>
+                <div id="${prefix}TagsDropdown" class="dropdown-menu browse-tags-dropdown hidden">
+                    <div class="browse-tags-search-row">
+                        <input type="search" id="${prefix}TagsSearchInput" placeholder="Search tags..." autocomplete="one-time-code">
+                        <button id="${prefix}TagsClearBtn" class="glass-btn icon-only" title="Clear all tag filters">
+                            <i class="fa-solid fa-rotate-left"></i>
+                        </button>
+                    </div>
+                    <div class="browse-tags-list" id="${prefix}TagsList"></div>
+                </div>
+            </div>
+
+            <!-- Hide Owned / Hide Possible -->
+            <button id="${prefix}HideOwnedBtn" class="glass-btn browse-hide-toggle" title="Hide characters already in your archive" aria-pressed="false">
+                <i class="fa-solid fa-check"></i>
+            </button>
+            <button id="${prefix}HidePossibleBtn" class="glass-btn browse-hide-toggle possible" title="Hide likely duplicates" aria-pressed="false">
+                <i class="fa-solid fa-check"></i>
+            </button>
+
+            <!-- Refresh -->
+            <button id="${prefix}RefreshBtn" class="glass-btn icon-only" title="Refresh">
+                <i class="fa-solid fa-sync"></i>
+            </button>
+    `;
+}
+
+/**
  * Base class for Online tab browse views.
  * Subclasses MUST override at least renderView().
  */

@@ -14,15 +14,36 @@ import CoreAPI from './core-api.js';
 // CSS LOADER
 // ========================================
 
-const MODULE_CSS_VERSION = 80;
+/* Cache-buster for everything this file pulls in at runtime.
+ *
+ * The <script> tags in index.html each carry their own ?v=, but a bare
+ * bare dynamic-import specifier does NOT inherit the importing module's query
+ * string -- the URL is byte-identical forever, so the browser is free to pin
+ * it and never ask again. Because these are fetched *after* navigation, a hard
+ * reload does not touch them either: the entire lazy tree (both providers,
+ * tag-manager, batch-*, the extractors) went on serving pre-edit code while
+ * index.html and library.css updated normally.
+ *
+ * Bump this ONE number whenever anything under web/modules/ changes.
+ */
+const MODULE_VERSION = 81;
+
+function versioned(path) {
+    const url = new URL(path, import.meta.url);
+    url.searchParams.set('v', MODULE_VERSION);
+    return url.href;
+}
+
+/** Dynamic import that actually re-fetches after an edit. Use instead of bare import(). */
+function importModule(path) {
+    return import(versioned(path));
+}
 
 function loadModuleCSS(path) {
     return new Promise((resolve) => {
         const link = document.createElement('link');
         link.rel = 'stylesheet';
-        const url = new URL(path, import.meta.url);
-        url.searchParams.set('v', MODULE_CSS_VERSION);
-        link.href = url.href;
+        link.href = versioned(path);
         link.onload = resolve;
         link.onerror = resolve;
         document.head.appendChild(link);
@@ -131,7 +152,7 @@ async function initModuleSystem() {
     // ============================
 
     try {
-        const multiSelectModule = await import('./multi-select.js');
+        const multiSelectModule = await importModule('./multi-select.js');
         loadModuleCSS('./multi-select.css');
         ModuleLoader.register('multi-select', multiSelectModule.default);
     } catch (err) {
@@ -139,7 +160,7 @@ async function initModuleSystem() {
     }
 
     try {
-        const contextMenuModule = await import('./context-menu.js');
+        const contextMenuModule = await importModule('./context-menu.js');
         loadModuleCSS('./context-menu.css');
         ModuleLoader.register('context-menu', contextMenuModule.default);
     } catch (err) {
@@ -147,7 +168,7 @@ async function initModuleSystem() {
     }
 
     try {
-        const galleryViewerModule = await import('./gallery-viewer.js');
+        const galleryViewerModule = await importModule('./gallery-viewer.js');
         loadModuleCSS('./gallery-viewer.css');
         ModuleLoader.register('gallery-viewer', galleryViewerModule.default);
 
@@ -159,7 +180,7 @@ async function initModuleSystem() {
 
     try {
         loadModuleCSS('./media-download-queue.css');
-        const mediaQueueModule = await import('./media-download-queue.js');
+        const mediaQueueModule = await importModule('./media-download-queue.js');
         ModuleLoader.register('media-download-queue', mediaQueueModule.default);
 
         window.enqueueMediaDownloadJob = mediaQueueModule.enqueueJob;
@@ -175,15 +196,15 @@ async function initModuleSystem() {
         if (_extractorsLoaded) return;
         _extractorsLoaded = true;
         try {
-            const { findCharacterGalleryUrls, extractGalleryImages, identifyGallerySources } = await import('./gallery-extractors/extractor-registry.js');
+            const { findCharacterGalleryUrls, extractGalleryImages, identifyGallerySources } = await importModule('./gallery-extractors/extractor-registry.js');
             await Promise.all([
-                import('./gallery-extractors/imgchest.js'),
-                import('./gallery-extractors/imgbb.js'),
-                import('./gallery-extractors/gdrive.js'),
-                import('./gallery-extractors/catbox.js'),
-                import('./gallery-extractors/mega.js'),
-                import('./gallery-extractors/postimg.js'),
-                import('./gallery-extractors/imgbox.js')
+                importModule('./gallery-extractors/imgchest.js'),
+                importModule('./gallery-extractors/imgbb.js'),
+                importModule('./gallery-extractors/gdrive.js'),
+                importModule('./gallery-extractors/catbox.js'),
+                importModule('./gallery-extractors/mega.js'),
+                importModule('./gallery-extractors/postimg.js'),
+                importModule('./gallery-extractors/imgbox.js')
             ]);
             window.findCharacterGalleryUrls = findCharacterGalleryUrls;
             window.extractGalleryImages = extractGalleryImages;
@@ -203,8 +224,8 @@ async function initModuleSystem() {
     loadModuleCSS('./providers/datacat/datacat-browse.css');
     {
         const providerImports = [
-            { name: 'chub', load: () => import('./providers/chub/chub-provider.js') },
-            { name: 'datacat', load: () => import('./providers/datacat/datacat-provider.js') },
+            { name: 'chub', load: () => importModule('./providers/chub/chub-provider.js') },
+            { name: 'datacat', load: () => importModule('./providers/datacat/datacat-provider.js') },
         ];
         const results = await Promise.allSettled(providerImports.map(p => p.load()));
         for (let i = 0; i < results.length; i++) {
@@ -245,7 +266,7 @@ async function initModuleSystem() {
 
 function setupLazyBatchTagging() {
     ModuleLoader._registerLazy('batch-tagging', async () => {
-        const mod = await import('./batch-tagging.js');
+        const mod = await importModule('./batch-tagging.js');
         loadModuleCSS('./batch-tagging.css');
         ModuleLoader.register('batch-tagging', mod.default);
         await mod.default.init({});
@@ -261,7 +282,7 @@ function setupLazyBatchTagging() {
 
 function setupLazyBatchTransfer() {
     ModuleLoader._registerLazy('batch-transfer', async () => {
-        const mod = await import('./batch-transfer.js');
+        const mod = await importModule('./batch-transfer.js');
         loadModuleCSS('./batch-transfer.css');
         ModuleLoader.register('batch-transfer', mod.default);
         await mod.default.init({});
@@ -281,7 +302,7 @@ function setupLazyBatchTransfer() {
 
 function setupLazyTagManager() {
     ModuleLoader._registerLazy('tag-manager', async () => {
-        const mod = await import('./tag-manager.js');
+        const mod = await importModule('./tag-manager.js');
         loadModuleCSS('./tag-manager.css');
         ModuleLoader.register('tag-manager', mod.default);
         await mod.default.init({});

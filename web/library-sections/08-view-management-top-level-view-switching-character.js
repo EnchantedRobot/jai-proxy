@@ -108,10 +108,6 @@ function switchView(view) {
     if (charFilters) charFilters.style.display = 'none';
     if (onlineFilters) onlineFilters.style.display = 'none';
 
-    // Online view needs filters-wrapper to grow so the left/right split works
-    const filtersWrapper = document.querySelector('.filters-wrapper');
-    if (filtersWrapper) filtersWrapper.style.flex = (view === 'online') ? '1' : '';
-
     if (view === 'characters') {
         if (charFilters) charFilters.style.display = 'flex';
         if (importBtn) importBtn.style.display = '';

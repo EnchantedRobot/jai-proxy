@@ -48,11 +48,12 @@ function addTag(tag) {
     currentTags.push(trimmedTag);
     setTagsFromArray(currentTags);
     renderSidebarTags(currentTags, true);
-    
+    refreshApplyState?.();
+
     // Clear sidebar input
     const tagInput = document.getElementById('tagInput');
     if (tagInput) tagInput.value = '';
-    
+
     hideTagAutocomplete();
 }
 
@@ -64,6 +65,7 @@ function removeTag(tag) {
     const newTags = currentTags.filter(t => t !== tag);
     setTagsFromArray(newTags);
     renderSidebarTags(newTags, true);
+    refreshApplyState?.();
 }
 
 /**

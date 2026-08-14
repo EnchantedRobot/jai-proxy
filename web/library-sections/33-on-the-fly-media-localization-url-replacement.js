@@ -34,53 +34,14 @@ function extractFilenameFromUrl(url) {
 }
 
 /**
- * Check if media localization is enabled for a character
- * @param {string} avatar - Character avatar filename (e.g., "Rory.png")
- * @returns {boolean} Whether localization is enabled
+ * Media localization is always on -- local media is authoritative whenever it exists,
+ * remote is the fallback. The URL-substitution below already no-ops when the gallery
+ * has no matching local file, which is what makes "always on" safe.
+ * @param {string} avatar - Character avatar filename (e.g., "Rory.png"), unused
+ * @returns {boolean} always true
  */
 function isMediaLocalizationEnabled(avatar) {
-    const globalEnabled = getSetting('mediaLocalizationEnabled') !== false; // Default true
-    const perCharSettings = getSetting('mediaLocalizationPerChar') || {};
-    
-    // Check per-character override first
-    if (avatar && avatar in perCharSettings) {
-        return perCharSettings[avatar];
-    }
-    
-    // Fall back to global setting
-    return globalEnabled;
-}
-
-/**
- * Check if a character has a per-character override (not using global setting)
- * @param {string} avatar - Character avatar filename
- * @returns {object} { hasOverride: boolean, isEnabled: boolean, globalEnabled: boolean }
- */
-function getMediaLocalizationStatus(avatar) {
-    const globalEnabled = getSetting('mediaLocalizationEnabled') !== false; // Default true
-    const perCharSettings = getSetting('mediaLocalizationPerChar') || {};
-    const hasOverride = avatar && avatar in perCharSettings;
-    const isEnabled = hasOverride ? perCharSettings[avatar] : globalEnabled;
-    
-    return { hasOverride, isEnabled, globalEnabled };
-}
-
-/**
- * Set per-character media localization setting
- * @param {string} avatar - Character avatar filename
- * @param {boolean|null} enabled - true/false to override, null to use global
- */
-function setCharacterMediaLocalization(avatar, enabled) {
-    const perCharSettings = getSetting('mediaLocalizationPerChar') || {};
-    
-    if (enabled === null) {
-        // Remove override, use global
-        delete perCharSettings[avatar];
-    } else {
-        perCharSettings[avatar] = enabled;
-    }
-    
-    setSetting('mediaLocalizationPerChar', perCharSettings);
+    return true;
 }
 
 /**

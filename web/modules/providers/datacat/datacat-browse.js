@@ -5,7 +5,7 @@
 //   - JanitorAI MeiliSearch: text search + sort (activated via janny_* sort modes)
 //   - Extraction: cloud-browser extraction for JanitorAI-only characters
 
-import { BrowseView } from '../browse-view.js';
+import { BrowseView, renderBrowseFilterBar } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
 import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG, skeletonLines, deferRender, deferCall, isMobileMode, finishBrowseImport, renderBrowseError } from '../provider-utils.js';
 import {
@@ -89,16 +89,14 @@ let datacatCreatorSortMode = 'chat_count';
 
 let datacatFilterHideOwned = false;
 let datacatFilterHidePossible = false;
-let datacatFilterHideJanitor = false;
-let datacatFilterHideSaucepan = false;
 
 // Fresh endpoint pagination
 let datacatFreshLimit24 = 80;
 let datacatFreshLimitWeek = 20;
 const FRESH_PAGE_INCREMENT = 20;
 
-// NSFW filter (client-side)
-let datacatNsfwEnabled = false;
+// NSFW filtering is gone as a UI toggle; the API still requires the param, so it's always sent true.
+const NSFW_ALLOWED = true;
 
 // Faceted tag filtering
 let datacatActiveTagIds = new Set();
@@ -359,21 +357,13 @@ function renderGrid(characters, append = false) {
         datacatGridRenderedCount = 0;
     }
 
-    let filtered = datacatNsfwEnabled
-        ? characters
-        : characters.filter(c => !isNsfw(c));
+    let filtered = characters;
 
     if (datacatFilterHideOwned) {
         filtered = filtered.filter(c => !isCharInLocalLibrary(c));
     }
     if (datacatFilterHidePossible) {
         filtered = filtered.filter(c => !isCharPossibleMatchObj(c));
-    }
-    if (datacatFilterHideJanitor) {
-        filtered = filtered.filter(c => getSourceKind(c) !== 'janitor');
-    }
-    if (datacatFilterHideSaucepan) {
-        filtered = filtered.filter(c => getSourceKind(c) !== 'saucepan');
     }
 
     // Client-side: persistent exclude tags from settings
@@ -469,7 +459,7 @@ async function loadCharacters(append = false) {
                 page: meiliCurrentPage,
                 limit: PAGE_SIZE,
                 sort: datacatSortMode,
-                nsfw: datacatNsfwEnabled,
+                nsfw: NSFW_ALLOWED,
                 includeTags: jannyActiveTagIds,
             });
             list = data?.characters || [];
@@ -482,7 +472,7 @@ async function loadCharacters(append = false) {
                 sort: hampterSort,
                 page: hampterCurrentPage,
                 search: hampterSearchQuery,
-                nsfw: datacatNsfwEnabled,
+                nsfw: NSFW_ALLOWED,
                 authToken: (await window.datacatJanitoraiGetToken?.()) || '',
                 // Browsing is an explicit user action, so a Cloudflare block here may spend a
                 // clearance-refresh tab. Update checks and other background work never do.
@@ -686,7 +676,7 @@ async function loadCharacters(append = false) {
                     error: err,
                     message: `Load failed: ${err.message}`,
                     view: `browse/${datacatSortMode}`,
-                    flags: { nsfw: datacatNsfwEnabled },
+                    flags: { nsfw: NSFW_ALLOWED },
                     retry: () => loadCharacters(false),
                 });
             }
@@ -916,21 +906,6 @@ function updateTagsVisibility() {
         const dropdown = document.getElementById('datacatTagsDropdown');
         if (dropdown) dropdown.classList.add('hidden');
     }
-}
-
-function updateSourceFilterVisibility() {
-    const section = document.getElementById('datacatFilterSourceSection');
-    if (!section) return;
-    // Source filters only meaningful in DataCat-native sort modes (mixed sources).
-    // Single-source modes (janny_*, hampter_*) make these filters useless.
-    // Following view always mixes sources from followed creators, so always show.
-    if (datacatViewMode === 'following') {
-        section.style.display = '';
-        return;
-    }
-    const isSingleSourceMode = isJannySortMode(datacatSortMode)
-        || isHampterSortMode(datacatSortMode);
-    section.style.display = isSingleSourceMode ? 'none' : '';
 }
 
 const JANNY_ALL_TAGS = Object.entries(JANNY_TAG_MAP)
@@ -1904,8 +1879,6 @@ async function switchDatacatViewMode(mode) {
         btn.classList.toggle('active', btn.dataset.datacatView === mode);
     });
 
-    updateSourceFilterVisibility();
-
     const browseSection = document.getElementById('datacatBrowseSection');
     const followingSection = document.getElementById('datacatFollowingSection');
 
@@ -2049,7 +2022,7 @@ async function loadFollowingCharacters(forceRefresh = false) {
                 error: err,
                 title: 'Error loading timeline',
                 view: 'timeline',
-                flags: { nsfw: datacatNsfwEnabled },
+                flags: { nsfw: NSFW_ALLOWED },
                 retry: () => loadFollowingCharacters(true),
             });
         }
@@ -2139,21 +2112,13 @@ function renderFollowing(append = false) {
 
     let source = datacatFollowingCharacters;
 
-    let filtered = datacatNsfwEnabled
-        ? source
-        : source.filter(c => !isNsfw(c));
+    let filtered = source;
 
     if (datacatFilterHideOwned) {
         filtered = filtered.filter(c => !isCharInLocalLibrary(c));
     }
     if (datacatFilterHidePossible) {
         filtered = filtered.filter(c => !isCharPossibleMatchObj(c));
-    }
-    if (datacatFilterHideJanitor) {
-        filtered = filtered.filter(c => getSourceKind(c) !== 'janitor');
-    }
-    if (datacatFilterHideSaucepan) {
-        filtered = filtered.filter(c => getSourceKind(c) !== 'saucepan');
     }
 
     const dcPersistentExclude = getProviderExcludeTags('datacat');
@@ -2728,8 +2693,8 @@ function renderDatacatLorebooks(scripts) {
     const noneDownloadable = lockedCount === 0
         ? null
         : (allLocked
-            ? 'These lorebooks are private or content-locked by their creator and cannot be downloaded through Character Library.'
-            : 'Some of these lorebooks are private or content-locked and cannot be downloaded through Character Library.');
+            ? 'These lorebooks are private or content-locked by their creator and cannot be downloaded through Archive.'
+            : 'Some of these lorebooks are private or content-locked and cannot be downloaded through Archive.');
 
     if (stat) {
         stat.style.display = 'flex';
@@ -3032,33 +2997,17 @@ function markCardAsImported(charId) {
     }
 }
 
-// ========================================
-// NSFW TOGGLE
-// ========================================
-
-function updateNsfwToggle() {
-    const btn = document.getElementById('datacatNsfwToggle');
-    if (!btn) return;
-
-    if (datacatNsfwEnabled) {
-        btn.classList.add('active');
-        btn.innerHTML = '<i class="fa-solid fa-fire"></i> <span>NSFW On</span>';
-        btn.title = 'NSFW content enabled. Click to show SFW only';
-    } else {
-        btn.classList.remove('active');
-        btn.innerHTML = '<i class="fa-solid fa-shield-halved"></i> <span>SFW Only</span>';
-        btn.title = 'Showing SFW only. Click to include NSFW';
+function updateDatacatHideTogglesState() {
+    const owned = document.getElementById('datacatHideOwnedBtn');
+    if (owned) {
+        owned.classList.toggle('is-active', datacatFilterHideOwned);
+        owned.setAttribute('aria-pressed', String(datacatFilterHideOwned));
     }
-}
-
-function updateDatacatFiltersButtonState() {
-    const btn = document.getElementById('datacatFiltersBtn');
-    if (!btn) return;
-    const count = [datacatFilterHideOwned, datacatFilterHidePossible, datacatFilterHideJanitor, datacatFilterHideSaucepan].filter(Boolean).length;
-    btn.classList.toggle('has-filters', count > 0);
-    btn.innerHTML = count > 0
-        ? `<i class="fa-solid fa-sliders"></i> Features (${count})`
-        : '<i class="fa-solid fa-sliders"></i> <span>Features</span>';
+    const possible = document.getElementById('datacatHidePossibleBtn');
+    if (possible) {
+        possible.classList.toggle('is-active', datacatFilterHidePossible);
+        possible.setAttribute('aria-pressed', String(datacatFilterHidePossible));
+    }
 }
 
 // ========================================
@@ -3069,8 +3018,6 @@ let delegatesInitialized = false;
 let modalEventsAttached = false;
 
 function initDatacatView() {
-    datacatNsfwEnabled = getSetting('datacatNsfw') === true;
-
     if (delegatesInitialized) return;
     delegatesInitialized = true;
 
@@ -3176,46 +3123,24 @@ function initDatacatView() {
         renderFollowing(true);
     });
 
-    // NSFW toggle
-    on('datacatNsfwToggle', 'click', () => {
-        datacatNsfwEnabled = !datacatNsfwEnabled;
-        setSetting('datacatNsfw', datacatNsfwEnabled);
-        updateNsfwToggle();
-        if (datacatViewMode === 'following') {
-            renderFollowing();
-        } else {
-            renderGrid(datacatCharacters, false);
+    // Hide Owned / Hide Possible - topbar toggle buttons
+    const dcHideToggles = [
+        { id: 'datacatHideOwnedBtn', setter: (v) => datacatFilterHideOwned = v, getter: () => datacatFilterHideOwned },
+        { id: 'datacatHidePossibleBtn', setter: (v) => datacatFilterHidePossible = v, getter: () => datacatFilterHidePossible },
+    ];
+    dcHideToggles.forEach(({ id, getter }) => {
+        const btn = document.getElementById(id);
+        if (btn) {
+            btn.classList.toggle('is-active', getter());
+            btn.setAttribute('aria-pressed', String(getter()));
         }
     });
-    updateNsfwToggle();
-
-    updateSourceFilterVisibility();
-
-    // Filters dropdown toggle
-    on('datacatFiltersBtn', 'click', (e) => {
-        e.stopPropagation();
-        CoreAPI.closeAllTopbarDropdowns();
-        document.getElementById('datacatTagsDropdown')?.classList.add('hidden');
-        document.getElementById('datacatFiltersDropdown')?.classList.toggle('hidden');
-    });
-
-    // Filter checkboxes
-    const dcFilterCheckboxes = [
-        { id: 'datacatFilterHideOwned', setter: (v) => datacatFilterHideOwned = v, getter: () => datacatFilterHideOwned },
-        { id: 'datacatFilterHidePossible', setter: (v) => datacatFilterHidePossible = v, getter: () => datacatFilterHidePossible },
-        { id: 'datacatFilterHideJanitor', setter: (v) => datacatFilterHideJanitor = v, getter: () => datacatFilterHideJanitor },
-        { id: 'datacatFilterHideSaucepan', setter: (v) => datacatFilterHideSaucepan = v, getter: () => datacatFilterHideSaucepan },
-    ];
-    dcFilterCheckboxes.forEach(({ id, getter }) => {
-        const cb = document.getElementById(id);
-        if (cb) cb.checked = getter();
-    });
-    updateDatacatFiltersButtonState();
-
-    dcFilterCheckboxes.forEach(({ id, setter }) => {
-        document.getElementById(id)?.addEventListener('change', (e) => {
-            setter(e.target.checked);
-            updateDatacatFiltersButtonState();
+    dcHideToggles.forEach(({ id, setter, getter }) => {
+        document.getElementById(id)?.addEventListener('click', (e) => {
+            setter(!getter());
+            const btn = e.currentTarget;
+            btn.classList.toggle('is-active', getter());
+            btn.setAttribute('aria-pressed', String(getter()));
             if (datacatViewMode === 'following') {
                 renderFollowing();
             } else {
@@ -3250,7 +3175,6 @@ function initDatacatView() {
             if (isJannyTagMode()) renderJannyTagsList();
             else loadFacetedTags();
         }
-        updateSourceFilterVisibility();
         loadCharacters(false);
     });
 
@@ -3284,7 +3208,6 @@ function initDatacatView() {
     on('datacatClearCreatorBtn', 'click', () => clearCreatorFilter());
     // Tags dropdown toggle
     on('datacatTagsBtn', 'click', () => {
-        document.getElementById('datacatFiltersDropdown')?.classList.add('hidden');
         const dropdown = document.getElementById('datacatTagsDropdown');
         if (!dropdown) return;
         dropdown.classList.toggle('hidden');
@@ -3335,7 +3258,6 @@ function initDatacatView() {
     // Dropdown dismiss (click outside)
     datacatBrowseView._registerDropdownDismiss([
         { dropdownId: 'datacatTagsDropdown', buttonId: 'datacatTagsBtn' },
-        { dropdownId: 'datacatFiltersDropdown', buttonId: 'datacatFiltersBtn' },
     ]);
 
     // View mode toggle (Browse / Following)
@@ -3665,8 +3587,6 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
             sort: 'datacatSortSelect',
             timelineSort: 'datacatFollowingSortSelect',
             tags: 'datacatTagsBtn',
-            filters: 'datacatFiltersBtn',
-            nsfw: 'datacatNsfwToggle',
             refresh: 'datacatRefreshBtn',
             modeBrowseSelector: '.datacat-view-btn[data-datacat-view="browse"]',
             modeFollowSelector: '.datacat-view-btn[data-datacat-view="following"]',
@@ -3676,19 +3596,7 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
     // -- Filter Bar --
 
     renderFilterBar() {
-        return `
-            <!-- Mode Toggle -->
-            <div class="chub-view-toggle">
-                <button class="datacat-view-btn active" data-datacat-view="browse" title="Browse all characters">
-                    <i class="fa-solid fa-compass"></i> <span>Browse</span>
-                </button>
-                <button class="datacat-view-btn" data-datacat-view="following" title="Characters from creators you follow">
-                    <i class="fa-solid fa-users"></i> <span>Following</span>
-                </button>
-            </div>
-
-            <!-- Sort -->
-            <div id="datacatSortContainer" class="browse-sort-container">
+        const sortSelectsHtml = `
                 <select id="datacatSortSelect" class="glass-select" title="Sort order">
                     ${buildSortOptionsHtml(datacatSortMode)}
                 </select>
@@ -3698,52 +3606,16 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                     <option value="name_asc">📝 Name A-Z</option>
                     <option value="name_desc">📝 Name Z-A</option>
                     <option value="chat_count">💬 Most Messages</option>
-                </select>
-            </div>
+                </select>`;
 
-            <!-- Tags -->
-            <div class="browse-tags-dropdown-container" style="position: relative;">
-                <button id="datacatTagsBtn" class="glass-btn" title="Tag filters">
-                    <i class="fa-solid fa-tags"></i> <span id="datacatTagsBtnLabel">Tags</span>
-                </button>
-                <div id="datacatTagsDropdown" class="dropdown-menu browse-tags-dropdown hidden">
-                    <div class="browse-tags-search-row">
-                        <input type="search" id="datacatTagsSearchInput" placeholder="Search tags..." autocomplete="one-time-code">
-                        <button id="datacatTagsClearBtn" class="glass-btn icon-only" title="Clear all tag filters">
-                            <i class="fa-solid fa-rotate-left"></i>
-                        </button>
-                    </div>
-                    <div class="browse-tags-list" id="datacatTagsList"></div>
-                </div>
-            </div>
-
-            <!-- Filters -->
-            <div class="browse-more-filters" style="position: relative;">
-                <button id="datacatFiltersBtn" class="glass-btn" title="Filter by character features">
-                    <i class="fa-solid fa-sliders"></i> <span>Features</span>
-                </button>
-                <div id="datacatFiltersDropdown" class="dropdown-menu browse-features-dropdown hidden" style="width: 240px;">
-                    <div class="dropdown-section-title">Library:</div>
-                    <label class="filter-checkbox"><input type="checkbox" id="datacatFilterHideOwned"> <i class="fa-solid fa-check"></i> Hide Owned Characters</label>
-                    <label class="filter-checkbox"><input type="checkbox" id="datacatFilterHidePossible"> <i class="fa-solid fa-check" style="color: #f0a500;"></i> Hide Possible Matches</label>
-                    <div id="datacatFilterSourceSection">
-                        <div class="dropdown-section-title">Source:</div>
-                        <label class="filter-checkbox"><input type="checkbox" id="datacatFilterHideJanitor"> <i class="fa-solid fa-cat"></i> Hide JanitorAI</label>
-                        <label class="filter-checkbox"><input type="checkbox" id="datacatFilterHideSaucepan"> <i class="fa-solid fa-bowl-food"></i> Hide Saucepan</label>
-                    </div>
-                </div>
-            </div>
-
-            <!-- NSFW toggle -->
-            <button id="datacatNsfwToggle" class="glass-btn nsfw-toggle" title="Toggle NSFW content">
-                <i class="fa-solid fa-shield-halved"></i> <span>SFW Only</span>
-            </button>
-
-            <!-- Refresh -->
-            <button id="datacatRefreshBtn" class="glass-btn icon-only" title="Refresh">
-                <i class="fa-solid fa-sync"></i>
-            </button>
-        `;
+        return renderBrowseFilterBar({
+            prefix: 'datacat',
+            viewBtnAttr: 'datacat-view',
+            sortSelectsHtml,
+            hasFollowing: true,
+            followingValue: 'following',
+            followingTitle: 'Characters from creators you follow',
+        });
     }
 
     // -- Main View --
@@ -4065,15 +3937,11 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
         }
         if (defaults.hideOwned) {
             datacatFilterHideOwned = true;
-            const el = document.getElementById('datacatFilterHideOwned');
-            if (el) el.checked = true;
         }
         if (defaults.hidePossible) {
             datacatFilterHidePossible = true;
-            const el = document.getElementById('datacatFilterHidePossible');
-            if (el) el.checked = true;
         }
-        if (defaults.hideOwned || defaults.hidePossible) updateDatacatFiltersButtonState();
+        if (defaults.hideOwned || defaults.hidePossible) updateDatacatHideTogglesState();
     }
 
     activate(container, options = {}) {

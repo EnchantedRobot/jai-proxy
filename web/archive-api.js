@@ -146,9 +146,19 @@
             // collapses "recently added" into alphabetical order. mtime is the
             // fallback for a card from outside this tool.
             //
-            // There is no `create_date` to use instead -- not one card in the
-            // corpus has the field -- so anything finer would be invented.
+            // Note this is what the Info panel labels "Last Modified", and it is
+            // honest as that: `extensions.jai.linkedAt` is restamped whenever
+            // this tool rewrites a card. When the card was *created* is a
+            // separate, stable field -- `create_date`, just below.
             date_added: Date.parse(card.linked_at || card.modified) || 0,
+            // Root-level, outside `data`, because that is where SillyTavern
+            // keeps it and where its own sort reads it. The frontend's "Date
+            // Created" sort and the Info panel's Dates section both key off
+            // this; both were dead while the field was missing. Empty string
+            // rather than absent for a card with no provenance to derive one
+            // from -- getCharacterCreateDateValue filters falsy candidates, so
+            // an undated card still sorts last instead of throwing.
+            create_date: card.create_date || '',
             // Prose the list payload does not carry. Empty, not absent: the
             // frontend's search folds `creator_notes` into its lowercase index
             // and `undefined` would throw.
