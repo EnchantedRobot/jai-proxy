@@ -18,8 +18,10 @@ from typing import Any
 import pytest
 from PIL import Image
 
+from proxy import deps
 from proxy.archive import catalog
 from proxy.cards import pngtools
+from proxy.cards.builder import PngWriter
 from proxy.archive import thumbs
 from proxy.api.v1 import _shared as v1_shared
 from proxy.config import settings
@@ -115,6 +117,11 @@ def archive_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, P
     # archive on the developer's machine and passes for the wrong reason.
     monkeypatch.setattr(catalog, "_index", None)
     monkeypatch.setattr(v1_shared, "thumbnail_store", thumbs.ThumbnailStore(dirs["thumbs"], dirs["characters"]))
+    # And the writer, for the same reason: PngWriter reads `settings.archive_dir`
+    # once, in its constructor, at import time -- so repointing the setting above
+    # is not enough, and a write route that goes through `deps.png_writer` (card
+    # import) would drop test cards into the developer's real archive.
+    monkeypatch.setattr(deps, "png_writer", PngWriter(output_dir=dirs["characters"]))
     return dirs
 
 

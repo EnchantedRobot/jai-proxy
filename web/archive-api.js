@@ -26,11 +26,12 @@
  * quietly reaching a server that isn't there.
  *
  * WRITES
- * Card edits, deletes, avatar replacement and gallery writes map onto the
- * archive's own write endpoints (see the WRITES section below). What is still
- * refused -- acquiring a card from a provider, importing from a URL, standalone
- * world-info files -- answers 501 with a message the UI can show, because a
- * write that silently no-ops is how an archive loses data.
+ * Card edits, deletes, avatar replacement, importing a card file and gallery
+ * writes map onto the archive's own write endpoints (see the WRITES section
+ * below). What is still refused -- creating a card from nothing, fetching a URL
+ * server-side, standalone world-info files, chats -- answers 501 with a message
+ * the UI can show, because a write that silently no-ops is how an archive loses
+ * data. So does any ST-shaped path no route claims: see isHostShaped.
  *
  * Two ST behaviours deliberately do NOT survive the translation:
  *
@@ -658,15 +659,54 @@
             },
         },
 
+        {
+            // A card handed over as a file -- dragged onto the import modal, or
+            // unpacked from a Character Library bundle -- onto the archive's own
+            // intake route, which runs the same cleaning and image pipeline the
+            // /build-* provider routes do.
+            //
+            // Two ST habits do not survive: the archive names the file itself
+            // (`<name>_<id8>.png`), so `preserved_name` -- ST's "keep this avatar
+            // filename so the chat files still point at it" hint -- has nothing
+            // to attach to and is dropped; and duplicates are decided server-side
+            // on the id fragment, so `on_duplicate` is how a caller asks to
+            // replace one. Callers read `file_name` back out of the reply.
+            path: '/api/characters/import',
+            async handler({ form }) {
+                const file = form?.get('avatar');
+                if (!file) return json({ error: 'an avatar file is required' }, 400);
+                const payload = new FormData();
+                payload.append('file', file, file.name || 'card.png');
+                payload.append(
+                    'on_duplicate',
+                    form.get('on_duplicate') === 'overwrite' ? 'overwrite' : 'skip'
+                );
+                const resp = await nativeFetch(`${API}/characters`, {
+                    method: 'POST',
+                    body: payload,
+                });
+                if (!resp.ok) return relayError(resp, 'Importing the card');
+                const written = await resp.json();
+                return json({
+                    file_name: written.id,
+                    duplicate: written.duplicate,
+                    warnings: written.warnings,
+                });
+            },
+        },
+
         // ---- writes the archive does not do ----------------------------------
         //
-        // Acquiring a card is deliberately still refused: an import has to run
-        // the intake pipeline (macro sanitize, avatar crop and resize, pngquant,
-        // provenance stamping) rather than storing whatever the browser embedded,
-        // and that is the next slice of work rather than this one.
+        // Creating a card from nothing has no archive equivalent: a card gets in
+        // here by being acquired from a provider or handed over as a file, both
+        // of which have routes above.
         { path: '/api/characters/create', handler: () => notImplemented('Creating a card') },
-        { path: '/api/characters/import', handler: () => notImplemented('Importing a card') },
-        { path: '/api/content/importURL', handler: () => notImplemented('Importing from a URL') },
+        //
+        // `/api/content/importURL` used to sit here as a refusal. It is gone
+        // because its one caller is gone: fetchDirectImportFile downloads the URL
+        // in the browser now rather than asking a server-side fetcher that was
+        // never going to exist. Should something call it again, isHostShaped
+        // answers with the same 501 this table would have.
         {
             // Standalone World Info *files* are a SillyTavern concept and the
             // archive has no store for them -- its lorebooks live inside cards,
@@ -705,6 +745,30 @@
         return null;
     }
 
+    /**
+     * Whether an unmatched same-origin path is one SillyTavern used to answer.
+     *
+     * This is the backstop for the table above. Anything ST-shaped that no route
+     * claims is a *gap in this file* -- but with no check here it would simply be
+     * passed through to the archive server, which has never heard of it and
+     * answers 404 with a FastAPI `detail` blob. That reads like a broken URL
+     * rather than a missing capability, and it sends whoever is debugging looking
+     * for a typo in a path that is spelled exactly right. So an ST-shaped miss
+     * gets the same loud 501 an explicitly refused route does, naming the path.
+     *
+     * `/api/v1` is the archive's own contract and must pass through untouched, as
+     * must every static asset the page loads (`/img/`, `/lib/`, `/modules/`).
+     */
+    function isHostShaped(pathname) {
+        if (pathname.startsWith(`${API}/`)) return false;
+        return (
+            pathname.startsWith('/api/') ||
+            pathname.startsWith('/user/') ||
+            pathname.startsWith('/characters/') ||
+            pathname === '/thumbnail'
+        );
+    }
+
     // ========================================
     // THE INTERCEPTOR
     // ========================================
@@ -730,7 +794,10 @@
             return nativeFetch(input, init);
         }
         const route = matchRoute(url.pathname);
-        if (!route) return nativeFetch(input, init);
+        if (!route) {
+            if (isHostShaped(url.pathname)) return notImplemented(url.pathname);
+            return nativeFetch(input, init);
+        }
 
         const request = input instanceof Request ? input : null;
         const method = (init?.method || request?.method || 'GET').toUpperCase();

@@ -178,12 +178,26 @@ class PngWriter:
         name: str,
         out_dir: Path | None = None,
         card_id: str | None = None,
+        filename: str | None = None,
+        normalize: bool = True,
     ) -> Path:
         """Embed an already-assembled card envelope (the {spec, spec_version,
         data, ...V2 mirror} dict a CharacterCardV3.to_dict produces) into the
         avatar and write it. `write` routes a CharacterCardV3 through here; the
         import pipeline uses it directly for a Chub card that's passed through as
-        a raw dict (so its lorebook extras and int positions survive untouched)."""
+        a raw dict (so its lorebook extras and int positions survive untouched).
+
+        `filename` overrides the derived `<name>_<id8>.png`. Only an overwrite
+        has any business passing it: a card renamed on disk (`make names`) still
+        answers to its fragment, and writing it back under the *derived* name
+        would leave two files sharing one id -- which is the archive's dedupe key.
+
+        `normalize` runs the intake image pipeline (normalize, crop, cap,
+        quantize) over `avatar_png`. Pass False when those bytes are already a
+        card of ours being re-adopted: the crop and the quantizer are both
+        one-way, so a second pass degrades an image that is already correct. The
+        card chunks are then injected into the given PNG stream unchanged.
+        """
         # Every card is named <name>_<id8>.png -- the id fragment disambiguates
         # two cards sharing a name, so the whole archive fits in one directory
         # without collisions. That flat layout is the default because
@@ -199,9 +213,10 @@ class PngWriter:
             target_dir = out_dir / (safe_filename(creator) if creator.strip() else "unknown_creator")
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        fragment = id_fragment(card_id)
-        stem = safe_filename(name)
-        filename = f"{stem}_{fragment}.png" if fragment else f"{stem}.png"
+        if filename is None:
+            fragment = id_fragment(card_id)
+            stem = safe_filename(name)
+            filename = f"{stem}_{fragment}.png" if fragment else f"{stem}.png"
         path = target_dir / filename
 
         # Every card leaves here with a gallery_id -- resolved against the card
@@ -213,16 +228,19 @@ class PngWriter:
         # longest side, then optionally quantize. pngquant strips text chunks,
         # so the card is injected last -- directly into the (compressed) byte
         # stream.
-        image = Image.open(io.BytesIO(avatar_png)).convert("RGBA")
-        image = normalize_avatar(image)
-        buffer = io.BytesIO()
-        image.save(buffer, "PNG")
-        image_bytes = buffer.getvalue()
+        if normalize:
+            image = Image.open(io.BytesIO(avatar_png)).convert("RGBA")
+            image = normalize_avatar(image)
+            buffer = io.BytesIO()
+            image.save(buffer, "PNG")
+            image_bytes = buffer.getvalue()
 
-        if self._compress and self._pngquant_bin is not None:
-            quantized = pngtools.quantize(image_bytes, self._pngquant_bin)
-            if quantized is not None:
-                image_bytes = quantized
+            if self._compress and self._pngquant_bin is not None:
+                quantized = pngtools.quantize(image_bytes, self._pngquant_bin)
+                if quantized is not None:
+                    image_bytes = quantized
+        else:
+            image_bytes = avatar_png
 
         payload = base64.b64encode(json.dumps(card_payload).encode("utf-8")).decode("ascii")
         image_bytes = pngtools.inject_text_chunks(image_bytes, {"chara": payload, "ccv3": payload})

@@ -308,6 +308,29 @@ fit. Moving the writer server-side (`zipfile`, streamed off disk) is the fix
 when bulk export becomes a real workflow; it was not worth a second
 implementation of a format the client already writes correctly.
 
+## Bundle import
+
+The other half, and it needed a server route rather than an adapter trick: a
+bundle's cards are PNGs, and storing one means running intake over it. That is
+`POST /api/v1/characters` (`proxy/cards/intake.py`), which
+`/api/characters/import` maps onto — so the local-PNG drop and the bundle
+importer both land on it.
+
+Three of ST's assumptions do not survive, and the review dialog was changed to
+match rather than left to fail:
+
+- **The archive names the file.** `<name>_<id8>.png`, derived — so ST's
+  `preserved_name` (which existed so chat files kept pointing at an avatar) is
+  dropped, and the reply's `file_name` is what the caller must key on.
+- **Chats are counted, not restored.** See "Known gaps".
+- **"Import as copy" is gone.** Two cards sharing one id fragment is precisely
+  what the fragment prevents; the policy is skip or overwrite, and an overwrite
+  writes over the file that is on disk *under the name it currently carries*, so
+  a card renamed by `make names` is not resurrected under its old name.
+
+A card of ours re-adopted through this path comes back byte-identical — verified
+by exporting and re-importing one: no re-crop, no second pngquant pass.
+
 ## Writes
 
 Phase 3 made the archive writable. The vendored frontend still calls
@@ -317,6 +340,7 @@ for reads:
 | the frontend calls | the archive gets |
 | --- | --- |
 | `POST /api/characters/merge-attributes` | `PUT /api/v1/characters/<id>` — the whole card |
+| `POST /api/characters/import` | `POST /api/v1/characters` — multipart, see "Bundle import" |
 | `POST /api/characters/edit-avatar` | `PUT /api/v1/characters/<id>/avatar` — multipart |
 | `POST /api/characters/delete` | `DELETE /api/v1/characters/<id>?gallery=keep` |
 | `POST /api/images/upload` | `POST /api/v1/galleries/<folder>/files` — multipart |
@@ -366,17 +390,39 @@ trips for a 500-card selection, against one request now.
   notes alone are 13.3 MB across the archive, which would more than double the
   boot payload for one search field. Name, creator, page title, filename and
   tags all match. Adding it means an `include=notes` on the list endpoint.
-- **Acquiring a card from Chub or DataCat now works** (Phase 3B, see
-  `docs/PHASE_3B_PLAN.md`): the provider is a pure capture layer — it fetches
-  the raw provider JSON and POSTs it to `/build-chub` / `/build-datacat`,
-  which run the full intake pipeline server-side (macro sanitize, avatar crop
-  and resize, pngquant, provenance stamping) instead of storing whatever the
-  browser embedded. `characters/create`, `characters/import` and
-  `content/importURL` still refuse with 501 — they back the local-PNG-file
-  and URL-import modal (a different, still-unbuilt feature) and
-  `web/modules/batch-transfer.js`, unrelated to provider acquisition.
-  Editing, deleting, replacing an image and gallery writes all work; see
-  "Writes" below.
+- **Acquiring a card works from a provider and from a file.** From a provider
+  (Phase 3B, see `docs/PHASE_3B_PLAN.md`) the browser is a pure capture layer —
+  it fetches the raw provider JSON and POSTs it to `/build-chub` /
+  `/build-datacat`, which run the full intake pipeline server-side (macro
+  sanitize, avatar crop and resize, pngquant, provenance stamping) instead of
+  storing whatever the browser embedded. From a file — a PNG dropped on the
+  import modal, or a card unpacked from a bundle `.zip` —
+  `characters/import` now maps onto `POST /api/v1/characters`, which runs the
+  same pipeline (`proxy/cards/intake.py`) with one exception: a card that
+  already carries an `extensions.jai` stamp came out of this archive, so it is
+  adopted verbatim rather than cleaned and re-encoded a second time.
+  `characters/create` still refuses with 501 — creating a card from nothing has
+  no archive equivalent. Editing, deleting, replacing an image and gallery
+  writes all work; see "Writes" below.
+- **Chats are not imported from a bundle, by decision.** The archive stores no
+  chat files and has no route to write one. `batch-transfer.js` counts what a
+  bundle carried and says so at the end of the run; it no longer posts them at
+  `/chats/save`, which turned a clean import into a wall of per-chat failures.
+  The review dialog's "import as copy" policy went with it: identity here is the
+  card's `_<id8>` fragment, and two files sharing one is what that fragment
+  exists to prevent.
+- **URL import downloads in the browser.** ST's server-side
+  `content/importURL` (its host handlers plus `config.yaml`
+  `whitelistImportDomains`) has no archive equivalent, so the route and the call
+  to it are both gone: `fetchDirectImportFile` goes straight to the hardened
+  in-browser fetch it used to keep as a fallback. The cost is that a host which
+  blocks cross-origin reads cannot be imported by URL — the error says so.
+- **An ST path no route claims answers 501, not 404.** `isHostShaped` in
+  `archive-api.js` is the backstop under the route table: anything ST-shaped
+  (`/api/`, `/user/`, `/characters/`, `/thumbnail`) that no route matches is
+  refused here instead of being passed through to the archive server, which
+  would 404 it with a FastAPI error blob — a missing capability disguised as a
+  broken URL. `/api/v1` and every static asset pass through untouched.
 - **The shared LLM client is dead code.** `lorebook-manager` was its last live
   consumer and went in Phase 3. ~250 lines in `library.js`, still exported
   through `core-api.js`, reachable by nothing.

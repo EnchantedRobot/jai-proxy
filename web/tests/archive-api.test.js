@@ -179,17 +179,18 @@ test("gallery thumbnails keep their requested size", async () => {
   assert.deepEqual(calls, ["/api/v1/galleries/Abbie_kz/files/one.webp/thumb?size=384"]);
 });
 
-test("everything else cl-helper offered is gone, and just 404s off the real server", async () => {
+test("everything else cl-helper offered is gone, and refuses rather than 404ing", async () => {
   // No entry in the routing table synthesises this anymore (Phase 3B removed
   // the catch-all stub along with the plugin itself) -- gallery-thumb is the
   // one route kept alive above, and DataCat's own surface moved to a real
-  // backend route (/api/v1/datacat/*, see proxy/api/datacat.py), so an
-  // unmapped cl-helper path now falls through like any other unknown path and
-  // reaches the server for real, where it 404s because nothing answers it.
+  // backend route (/api/v1/datacat/*, see proxy/api/datacat.py). What is left
+  // is an ST-shaped path nothing claims, which the backstop answers: it used to
+  // reach the server and 404, which reads as a typo rather than as a plugin
+  // that is not here.
   const { fetch, calls } = loadAdapter({});
   const resp = await fetch("/api/plugins/cl-helper/avatar-thumb-stats");
-  assert.equal(resp.status, 599, "unstubbed in the test harness -- a live server would 404 it");
-  assert.deepEqual(calls, ["/api/plugins/cl-helper/avatar-thumb-stats"]);
+  assert.equal(resp.status, 501);
+  assert.deepEqual(calls, []);
 });
 
 test("the frontend's own JSON blobs round-trip through browser storage", async () => {
@@ -222,14 +223,14 @@ test("a blob with non-ASCII text survives base64 as UTF-8, not as bytes", async 
 test("the writes the archive does not do still refuse with 501", async () => {
   const { fetch, calls } = loadAdapter({});
   const refused = [
-    // Acquiring a card has to run the intake pipeline rather than storing what
-    // the browser embedded, so it is still refused rather than half-done.
+    // A card gets into the archive by being acquired from a provider or handed
+    // over as a file; creating one from nothing has no equivalent here.
     "/api/characters/create",
-    "/api/characters/import",
-    "/api/content/importURL",
     // Standalone World Info files are a SillyTavern concept; this archive's
     // lorebooks live inside their cards.
     "/api/worldinfo/edit",
+    // No caller left, and no route left either -- isHostShaped answers for it.
+    "/api/content/importURL",
   ];
   for (const path of refused) {
     const resp = await post(fetch, path, {});
@@ -239,6 +240,76 @@ test("the writes the archive does not do still refuse with 501", async () => {
     assert.match((await resp.json()).error, /not supported/);
   }
   assert.deepEqual(calls, [], "a refused write must never reach the server");
+});
+
+test("importing a card file becomes a multipart POST to the archive's intake", async () => {
+  const { fetch, requests } = loadAdapter({
+    "/api/v1/characters": { id: "Nadia_ab12cd34.png", name: "Nadia", duplicate: false },
+  });
+
+  const form = new FormData();
+  form.append("avatar", new File(["png bytes"], "whatever.png", { type: "image/png" }));
+  form.append("file_type", "png");
+  const resp = await fetch("/api/characters/import", { method: "POST", body: form });
+
+  // The caller reads `file_name` back and keys avatar URLs and gallery folders
+  // on it, so the archive's `id` has to arrive under that name.
+  assert.deepEqual(await resp.json(), { file_name: "Nadia_ab12cd34.png", duplicate: false });
+  const [sent] = requests;
+  assert.equal(sent.url, "/api/v1/characters");
+  assert.equal(sent.method, "POST");
+  assert.equal(sent.body.get("file").name, "whatever.png");
+  // Default policy: never silently replace a card that is already here.
+  assert.equal(sent.body.get("on_duplicate"), "skip");
+});
+
+test("an overwrite says so, and nothing else can ask for one", async () => {
+  const { fetch, requests } = loadAdapter({
+    "/api/v1/characters": { id: "Abbie_0d162f5f.png", name: "Abbie", overwritten: true },
+  });
+
+  for (const policy of ["overwrite", "copy", undefined]) {
+    const form = new FormData();
+    form.append("avatar", new File(["x"], "c.png", { type: "image/png" }));
+    if (policy) form.append("on_duplicate", policy);
+    await fetch("/api/characters/import", { method: "POST", body: form });
+  }
+
+  // `copy` is not a thing the archive can do -- two cards sharing one id
+  // fragment is what the fragment exists to prevent -- so anything that is not
+  // an explicit overwrite lands on skip.
+  assert.deepEqual(
+    requests.map((r) => r.body.get("on_duplicate")),
+    ["overwrite", "skip", "skip"]
+  );
+});
+
+test("an ST path no route claims refuses loudly instead of reaching the server", async () => {
+  // The backstop. Without it an unmapped ST-shaped URL is passed straight
+  // through to the archive server, which 404s it with a FastAPI error blob --
+  // a missing capability disguised as a broken URL.
+  const { fetch, calls } = loadAdapter({});
+  for (const path of ["/api/characters/edit-attribute", "/api/backgrounds/all", "/user/notes/x"]) {
+    const resp = await fetch(path, { method: "POST" });
+    assert.equal(resp.status, 501, `${path} should refuse`);
+  }
+  assert.deepEqual(calls, [], "a refused path must never reach the server");
+});
+
+test("the archive's own API and the page's assets pass straight through", async () => {
+  const { fetch, calls } = loadAdapter({
+    "/api/v1/characters/Abbie_0d162f5f.png": card(),
+    "/img/ai4.png": {},
+    "/lib/whatever.js": {},
+  });
+  await fetch("/api/v1/characters/Abbie_0d162f5f.png");
+  await fetch("/img/ai4.png");
+  await fetch("/lib/whatever.js");
+  assert.deepEqual(calls, [
+    "/api/v1/characters/Abbie_0d162f5f.png",
+    "/img/ai4.png",
+    "/lib/whatever.js",
+  ]);
 });
 
 test("saving a card becomes a PUT of the whole card body", async () => {

@@ -16,12 +16,24 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, Header, HTTPException, Query, Request, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 
+from proxy import deps
 from proxy.api.schemas import (
     BulkTagsIn,
     BulkTagsOut,
     CardDetailOut,
+    CardImportOut,
     CardListOut,
     CardOut,
     CardWriteIn,
@@ -32,7 +44,7 @@ from proxy.api.schemas import (
 )
 from proxy.api.v1 import _shared
 from proxy.archive import catalog
-from proxy.cards import edit, gallery, pngtools
+from proxy.cards import edit, gallery, intake, pngtools
 from proxy.config import settings
 
 logger = logging.getLogger("jai_proxy.api")
@@ -267,6 +279,80 @@ def get_character(card_id: str) -> CardDetailOut:
         spec_version=str(outer.get("spec_version", "")),
         card=data,
         gallery=_gallery_out(record),
+    )
+
+
+@router.post("/characters", response_model=CardImportOut, summary="Adopt a card PNG into the archive")
+def import_character(
+    file: UploadFile = File(description="A tavern card PNG -- the card is read out of its tEXt chunks."),
+    on_duplicate: Literal["skip", "overwrite"] = Form(
+        "skip",
+        description="What to do when the archive already holds this card's `_<id8>` fragment. `skip` reports the card already there; `overwrite` replaces it in place, under the name it currently carries.",
+    ),
+) -> CardImportOut:
+    """Take in a card as a file: a PNG dragged onto the import modal, or one
+    unpacked from a Character Library bundle.
+
+    The other door into the archive. The `/build-*` routes each know a site and
+    take what the browser captured there; this one is handed the finished card
+    and has to work out what it is -- see `proxy.cards.intake`, which owns that
+    judgement and the cleaning that follows from it.
+
+    Duplicates are decided on the `_<id8>` fragment alone, never the name, like
+    every other duplicate check in the archive: a card renamed by `make names`
+    is still the same card. A skipped duplicate is a 200 naming the file that is
+    already here, not an error -- the caller wanted it present, and it is.
+    """
+    raw = file.file.read()
+    if not raw:
+        raise HTTPException(status_code=422, detail="the uploaded file is empty")
+    try:
+        prepared = intake.adopt(raw)
+    except intake.IntakeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    idx = _shared.index()
+    existing = idx.by_fragment(prepared.fragment) if prepared.fragment else ()
+    if existing and on_duplicate == "skip":
+        record = existing[0]
+        logger.info("import: already have %s (%s)", prepared.name, record.filename)
+        return CardImportOut(
+            id=record.filename,
+            name=record.name,
+            creator=record.creator,
+            source=prepared.source,
+            duplicate=True,
+            warnings=prepared.warnings,
+        )
+
+    # An overwrite writes over the file that is here now, whatever it is called;
+    # letting the derived name win would leave two cards sharing one fragment.
+    target = existing[0].filename if existing else None
+    try:
+        path = deps.png_writer.write_payload(
+            prepared.payload,
+            raw,
+            creator=prepared.creator,
+            name=prepared.name,
+            card_id=prepared.card_id or None,
+            filename=target,
+            normalize=prepared.normalize,
+        )
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"cannot write the card: {exc}") from exc
+
+    # New pixels behind a name the cache may already hold -- the avatar cache has
+    # no staleness check, so an overwrite would otherwise keep showing the old face.
+    _shared.thumbnail_store.forget(path.name)
+    catalog.index().refresh(force=True)
+    logger.info("import: saved %s card %s (%s)", prepared.source, prepared.name, path.name)
+    return CardImportOut(
+        id=path.name,
+        name=prepared.name,
+        creator=prepared.creator,
+        source=prepared.source,
+        overwritten=bool(existing),
+        warnings=prepared.warnings,
     )
 
 

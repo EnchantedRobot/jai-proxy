@@ -705,14 +705,13 @@ function renderImportReview() {
 
     const rows = manifest.characters.map((entry, idx) => {
         const exists = existingAvatars.has(entry.avatar);
-        const chats = (entry.chatFiles || []).length;
         const files = (entry.gallery?.files || []).length;
         return `
         <label class="btx-review-row">
             <input type="checkbox" class="btx-review-check" data-index="${idx}" checked>
             <div class="btx-review-info">
                 <div class="btx-review-name">${CoreAPI.escapeHtml(entry.name || entry.avatar)}${exists ? '<span class="btx-exists-badge">In library</span>' : ''}</div>
-                <div class="btx-review-meta">${chats} chat${chats !== 1 ? 's' : ''} · ${files} gallery file${files !== 1 ? 's' : ''}</div>
+                <div class="btx-review-meta">${files} gallery file${files !== 1 ? 's' : ''}</div>
             </div>
         </label>`;
     }).join('');
@@ -721,10 +720,11 @@ function renderImportReview() {
         <div class="btx-review-header">${manifest.characters.length} character${manifest.characters.length !== 1 ? 's' : ''} in "${CoreAPI.escapeHtml(state.importSourceName)}"</div>
         <div class="btx-review-list">${rows}</div>
         <div class="btx-policy">
+            <!-- No "import as copy": a card's identity here is its id fragment, and two
+                 files sharing one is the thing that fragment exists to prevent. -->
             <div class="btx-policy-title">If a character already exists here</div>
             <label class="btx-policy-row"><input type="radio" name="btxPolicy" value="skip" checked><span><strong>Skip</strong> - leave the existing character untouched</span></label>
-            <label class="btx-policy-row"><input type="radio" name="btxPolicy" value="overwrite"><span><strong>Overwrite</strong> - replace the card in place, add the bundled chats and gallery</span></label>
-            <label class="btx-policy-row"><input type="radio" name="btxPolicy" value="copy"><span><strong>Import as copy</strong> - keep both (the copy shares the gallery folder)</span></label>
+            <label class="btx-policy-row"><input type="radio" name="btxPolicy" value="overwrite"><span><strong>Overwrite</strong> - replace the card in place and add the bundled gallery</span></label>
         </div>
         ${(worldCount || auxRefCount) ? `
         <label class="btx-worlds-check">
@@ -835,6 +835,8 @@ async function runBundleImport() {
 
     const existingAvatars = new Set(CoreAPI.getAllCharacters().map(c => c.avatar));
     const results = [];
+    // `chats` counts what the bundle carried and this archive will not take, not
+    // what was restored -- see the chat note in the character loop below.
     const stats = { imported: 0, skipped: 0, failed: 0, chats: 0, files: 0, aux: 0 };
 
     // Worlds resolve BEFORE the character loop: chat headers are written during it and
@@ -871,11 +873,12 @@ async function runBundleImport() {
             const formData = new FormData();
             formData.append('avatar', new File([cardBytes], entry.avatar, { type: 'image/png' }));
             formData.append('file_type', 'png');
-            // preserved_name keeps the avatar filename (chats key on it); omitted only
-            // for the copy path so ST dedupes to a fresh name.
-            if (!collision || policy === 'overwrite') {
-                formData.append('preserved_name', entry.avatar);
-            }
+            // The archive names the file itself and decides duplicates on the card's
+            // id fragment, so the policy travels as an instruction rather than as ST's
+            // preserved_name hint. `copy` has no server-side meaning here -- two cards
+            // with one id is exactly what the fragment exists to prevent -- so it lands
+            // on skip and the reply says the card is already present.
+            formData.append('on_duplicate', policy === 'overwrite' ? 'overwrite' : 'skip');
             // Snapshot the card being replaced in place, like every other destructive local mutation.
             // embedAvatar: the overwrite replaces the PNG artwork too, so the live avatar URL
             // would show the NEW art on the old snapshot.
@@ -895,9 +898,12 @@ async function runBundleImport() {
                 headers: { 'X-CSRF-Token': CoreAPI.getCSRFToken() },
                 body: formData,
             });
-            if (!importResp.ok) throw new Error(`import failed (HTTP ${importResp.status})`);
+            if (!importResp.ok) {
+                const detail = tryParseJson(await importResp.text())?.error || '';
+                throw new Error(detail || `import failed (HTTP ${importResp.status})`);
+            }
             const result = tryParseJson(await importResp.text());
-            if (!result || result.error || !result.file_name) throw new Error('SillyTavern rejected the card');
+            if (!result || result.error || !result.file_name) throw new Error('the archive rejected the card');
             const newAvatar = String(result.file_name).toLowerCase().endsWith('.png')
                 ? result.file_name
                 : `${result.file_name}.png`;
@@ -910,39 +916,12 @@ async function runBundleImport() {
             stats.imported++;
             const effectiveGalleryId = keepGalleryId || entry.galleryId || null;
 
-            // /chats/save keeps the original filenames; ST's own /chats/import would
-            // rename every file to "<name> - <date> imported".
-            let chatCount = 0;
-            try {
-                const srcFolder = entry.avatar.replace(/\.png$/i, '');
-                for (const chatFile of entry.chatFiles || []) {
-                    if (state.abort) break;
-                    const bytes = await readZipEntry(zip, `chats/${srcFolder}/${chatFile}`);
-                    if (!bytes) continue;
-                    const chat = dec.decode(bytes).split('\n').map(tryParseJson).filter(Boolean);
-                    if (chat.length === 0) continue;
-                    // Chat-bound lore rides the header line; re-point it when identity
-                    // resolution landed that book under a deduped name.
-                    const bound = chat[0]?.chat_metadata?.world_info;
-                    if (bound && worldNameMap.has(bound) && worldNameMap.get(bound) !== bound) {
-                        chat[0].chat_metadata.world_info = worldNameMap.get(bound);
-                    }
-                    const saveResp = await CoreAPI.apiRequest('/chats/save', 'POST', {
-                        avatar_url: newAvatar,
-                        file_name: chatFile.replace(/\.jsonl$/i, ''),
-                        chat,
-                        force: true,
-                    });
-                    if (saveResp.ok) {
-                        chatCount++;
-                        stats.chats++;
-                    } else {
-                        logLine(`${entry.name}: chat "${chatFile}" failed to save`, 'warn');
-                    }
-                }
-            } catch (err) {
-                logLine(`${entry.name}: chat restore interrupted: ${err.message}`, 'warn');
-            }
+            // Chats in the bundle are counted and left in it. The archive stores no
+            // chat files by decision -- there is no route to write one, and the pass
+            // that used to try (/chats/save) turned a clean import into a wall of
+            // per-chat failures. Counted rather than ignored so the run says out loud
+            // that something in the bundle did not come across.
+            stats.chats += (entry.chatFiles || []).length;
 
             // Target folder is resolved with THIS instance's gallery settings so the
             // files land where the gallery will actually look for them.
@@ -979,7 +958,7 @@ async function runBundleImport() {
                 logLine(`${entry.name}: gallery restore interrupted: ${err.message}`, 'warn');
             }
 
-            logLine(`${entry.name || entry.avatar}: imported${newAvatar !== entry.avatar ? ` as ${newAvatar}` : ''} (${chatCount} chats, ${fileCount} files)`, 'success');
+            logLine(`${entry.name || entry.avatar}: imported${newAvatar !== entry.avatar ? ` as ${newAvatar}` : ''} (${fileCount} files)`, 'success');
         } catch (err) {
             stats.failed++;
             logLine(`${entry.name || entry.avatar}: ${err.message}`, 'error');
@@ -1090,7 +1069,10 @@ async function runBundleImport() {
     }
 
     setProgress(1, state.abort ? 'Import cancelled' : 'Import complete');
-    logLine(`Imported ${stats.imported}, skipped ${stats.skipped}, failed ${stats.failed} (${stats.chats} chats, ${stats.files} gallery files${stats.aux ? `, ${stats.aux} additional lorebook link${stats.aux !== 1 ? 's' : ''}` : ''})`, stats.failed ? 'warn' : 'success');
+    logLine(`Imported ${stats.imported}, skipped ${stats.skipped}, failed ${stats.failed} (${stats.files} gallery files${stats.aux ? `, ${stats.aux} additional lorebook link${stats.aux !== 1 ? 's' : ''}` : ''})`, stats.failed ? 'warn' : 'success');
+    if (stats.chats > 0) {
+        logLine(`${stats.chats} ${stats.chats === 1 ? 'chat was' : 'chats were'} not imported: the archive does not store chats`, 'info');
+    }
     state.running = false;
     renderDoneFooter();
 }

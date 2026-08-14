@@ -208,6 +208,30 @@ class TagsApplyOut(BaseModel):
     )
 
 
+class CardImportOut(BaseModel):
+    """What adopting an uploaded card PNG did.
+
+    `duplicate` is a success, not a failure: a card whose id fragment is already
+    in the archive is left exactly as it is and its filename reported, the same
+    answer the `/build-*` routes give when a click re-acquires something already
+    saved. The caller wanted the card present, and it is.
+    """
+
+    id: str = Field(description="The card's filename in the archive -- its id everywhere in the API.")
+    name: str
+    creator: str = ""
+    source: str = Field(
+        description="Where the card was judged to come from: `archive` for one of our own being re-adopted, else `chub`/`datacat`/`jannyai`/`png`."
+    )
+    duplicate: bool = Field(
+        default=False, description="The fragment was already on disk and nothing was written."
+    )
+    overwritten: bool = Field(
+        default=False, description="An existing card of the same id was replaced in place."
+    )
+    warnings: list[str] = Field(default=[])
+
+
 class DeletedOut(BaseModel):
     """Where a delete put things. Paths, not booleans, because the whole point
     of binning rather than unlinking is that someone can go and get it back."""

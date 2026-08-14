@@ -963,15 +963,17 @@ importClearFiles?.addEventListener('click', () => {
 // ==================== LOCAL PNG IMPORT ====================
 
 /**
- * Import a single local PNG character card into SillyTavern
- * Reads the PNG, extracts card metadata, and sends to ST's import endpoint
+ * Import a single local PNG character card into the archive
+ * Reads the PNG, extracts card metadata, and posts it to the archive's intake
  * @param {File} file - The PNG file
  * @returns {Promise<Object>} Import result: { success, fileName, fullPath, avatarUrl, error }
  */
-// Direct-URL import: ST's server-side endpoint first (its host handlers plus
-// config.yaml whitelistImportDomains; no CORS involved), then the hardened
-// media fetch as fallback for hosts ST refuses. Returns a File for the
-// local-import pipeline.
+// Direct-URL import, in the browser. This used to try ST's server-side
+// /content/importURL first (its host handlers plus config.yaml
+// whitelistImportDomains, no CORS involved) and fall back to the hardened media
+// fetch. The archive has no server-side URL fetcher, so the first leg could only
+// ever fail -- one guaranteed-refused request per link -- and the fallback is now
+// the whole path. Returns a File for the local-import pipeline.
 async function fetchDirectImportFile(url, signal) {
     const nameFromUrl = () => {
         let name = '';
@@ -980,27 +982,9 @@ async function fetchDirectImportFile(url, signal) {
         return /\.png$/i.test(name) ? name : `${name}.png`;
     };
 
-    try {
-        const resp = await apiRequest('/content/importURL', 'POST', { url }, { signal });
-        if (resp.ok) {
-            const kind = resp.headers.get('x-custom-content-type');
-            if (kind && kind !== 'character') throw new Error(`URL resolves to a ${kind}, not a character card`);
-            const blob = await resp.blob();
-            const cd = resp.headers.get('content-disposition') || '';
-            let name = cd.match(/filename="?([^";]+)"?/i)?.[1] || nameFromUrl();
-            if (!/\.png$/i.test(name)) name += '.png';
-            return new File([blob], name, { type: 'image/png' });
-        }
-        debugLog('[Import] ST importURL refused', resp.status, '- falling back to direct fetch:', url);
-    } catch (e) {
-        if (signal?.aborted) throw e;
-        if (/not a character card/.test(e?.message || '')) throw e;
-        debugLog('[Import] ST importURL failed, falling back to direct fetch:', e?.message || e);
-    }
-
     const dl = await downloadMediaToMemory(url, 30000, signal);
     if (!dl.success) {
-        throw new Error(`download failed: ${dl.error || 'unknown error'} (arbitrary hosts may need whitelistImportDomains in SillyTavern's config.yaml)`);
+        throw new Error(`download failed: ${dl.error || 'unknown error'} (the browser fetches these directly, so a host that blocks cross-origin reads cannot be imported by URL)`);
     }
     if (!/^image\/png$/i.test(dl.detectedType || dl.contentType || '')) {
         throw new Error(`URL is ${dl.detectedType || dl.contentType || 'not a PNG'}; only PNG character cards are supported`);
@@ -1008,7 +992,7 @@ async function fetchDirectImportFile(url, signal) {
     return new File([dl.arrayBuffer], nameFromUrl(), { type: 'image/png' });
 }
 
-// ST's import endpoint responds with the extensionless base name, while everything
+// ST's import endpoint responded with the extensionless base name, while everything
 // downstream (avatar lookups, /characters/get, folder resolution) keys on the real
 // .png filename; canonicalize at the seam.
 function ensurePngExt(name) {
@@ -1079,7 +1063,8 @@ async function importLocalCharacter(file) {
         // Re-embed updated card data if enrichment or gallery_id changed it
         let pngToUpload = needsReembed ? embedCharacterDataInPng(arrayBuffer, cardData) : arrayBuffer;
         
-        // Send to ST's import endpoint
+        // Hand the card to the archive's intake, which cleans it, crops and
+        // quantizes the image, stamps provenance and names the file.
         const uploadFile = new File([pngToUpload], file.name, { type: 'image/png' });
         const formData = new FormData();
         formData.append('avatar', uploadFile);
@@ -1751,7 +1736,7 @@ startImportBtn?.addEventListener('click', async () => {
         
         // Check abort AFTER import completes (import itself is atomic — card was already uploaded)
         if (shouldStop()) {
-            // If the import succeeded, still count it since the card is already in ST
+            // If the import succeeded, still count it since the card is already saved
             if (result.success) {
                 successCount++;
                 if (result.fileName) importedFileNames.push(result.fileName);
