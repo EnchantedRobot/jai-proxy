@@ -490,6 +490,42 @@ export function normalizeBrowseName(name) {
     return result;
 }
 
+// Emoji/pictographic glyphs + variation-selector/ZWJ, matched anywhere in the string (not just
+// a leading prefix) -- hand-entered Chub/DataCat tags decorate either end ("👩 female", "female 🔥").
+const TAG_DECORATION_RE = /[\p{Extended_Pictographic}\uFE0F\u200D]/gu;
+
+/**
+ * Canonical matching key for a tag: strips emoji and all punctuation/whitespace, then
+ * lowercases. "Female", "#female", "👩 female", "FEMALE", "fe-male" all collapse to
+ * "female" so hand-entered tags with inconsistent decoration/casing still match each
+ * other -- online tag lists (Chub, DataCat) are freeform and rarely agree on either.
+ * @param {string} tag
+ * @returns {string}
+ */
+export function tagMatchKey(tag) {
+    if (!tag) return '';
+    return String(tag)
+        .replace(TAG_DECORATION_RE, '')
+        .replace(/[^\p{L}\p{N}]/gu, '')
+        .toLowerCase();
+}
+
+/**
+ * Human-readable label for a tag filter selector: strips emoji/punctuation noise but
+ * keeps word spacing, then title-cases the result ("👩 FEMALE-presenting" -> "Female Presenting").
+ * @param {string} tag
+ * @returns {string}
+ */
+export function tagDisplayLabel(tag) {
+    if (!tag) return '';
+    const cleaned = String(tag)
+        .replace(TAG_DECORATION_RE, '')
+        .replace(/[^\p{L}\p{N}]+/gu, ' ')
+        .trim();
+    if (!cleaned) return '';
+    return cleaned.toLowerCase().replace(/\b\p{L}/gu, c => c.toUpperCase());
+}
+
 /**
  * Format a number with K/M suffixes.
  * @param {number} num

@@ -7,7 +7,7 @@
 
 import { BrowseView, renderBrowseFilterBar } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
-import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG, skeletonLines, deferRender, deferCall, isMobileMode, finishBrowseImport, renderBrowseError } from '../provider-utils.js';
+import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG, skeletonLines, deferRender, deferCall, isMobileMode, finishBrowseImport, renderBrowseError, tagMatchKey, tagDisplayLabel } from '../provider-utils.js';
 import {
     DATACAT_API_BASE,
     resolveDatacatAvatarUrl,
@@ -98,8 +98,9 @@ const FRESH_PAGE_INCREMENT = 20;
 // NSFW filtering is gone as a UI toggle; the API still requires the param, so it's always sent true.
 const NSFW_ALLOWED = true;
 
-// Faceted tag filtering
-let datacatActiveTagIds = new Set();
+// Faceted tag filtering. Map<tagId, 'include'|'exclude'> -- like Chub's chubTagFilters, tags
+// cycle neutral -> include -> exclude -> neutral and are matched locally (see getDatacatActiveTagKeys).
+let datacatTagFilters = new Map();
 let datacatTagGroups = [];
 let datacatTags = [];
 let datacatTagsLoaded = false;
@@ -338,14 +339,42 @@ function advanceDatacatPage() {
         meiliCurrentPage++;
     } else {
         const parsed = parseSortMode(datacatSortMode);
-        // Mirrors isFreshMode: tag-filtered or searched fresh sorts load via the offset endpoint,
-        // so growing the fresh limits for them advanced nothing (the old stall) - they ride the offset
-        if (parsed && datacatActiveTagIds.size === 0 && !datacatSearchQuery) {
+        // Mirrors isFreshMode: searched fresh sorts load via the offset endpoint, so growing the
+        // fresh limits for them advanced nothing (the old stall) - they ride the offset instead.
+        // Tags no longer route to the offset endpoint (they're a local-only filter now).
+        if (parsed && !datacatSearchQuery) {
             if (parsed.window === '24h') datacatFreshLimit24 += FRESH_PAGE_INCREMENT;
             else datacatFreshLimitWeek += FRESH_PAGE_INCREMENT;
         }
     }
     return loadCharacters(true);
+}
+
+// DataCat's own tagIds query param is unreliable server-side (misses matches "half the time" --
+// its backend association between tag IDs and characters isn't a clean join), so the faceted tag
+// filter is local-only like everything else here: the server only ever sees the main sort/search/
+// creator query, and the active tags just narrow whatever that query already fetched. Matching
+// goes through each active tag's own name/slug (not its numeric id, which card payloads don't
+// carry) so casing/decoration mismatches are handled the same way as persistent excludes.
+function getDatacatActiveTagKeys() {
+    const includeKeys = [];
+    const excludeKeys = [];
+    for (const [id, state] of datacatTagFilters) {
+        const tag = datacatTags.find(t => t.id === id);
+        const key = tagMatchKey(tag?.name || tag?.slug || '');
+        if (!key) continue;
+        if (state === 'exclude') excludeKeys.push(key);
+        else includeKeys.push(key);
+    }
+    return { includeKeys, excludeKeys };
+}
+
+function characterMatchesDatacatTags(character, includeKeys, excludeKeys) {
+    if (includeKeys.length === 0 && excludeKeys.length === 0) return true;
+    const names = resolveTagNames(character.tags || []).map(tagMatchKey);
+    if (includeKeys.length > 0 && !includeKeys.every(k => names.includes(k))) return false;
+    if (excludeKeys.length > 0 && excludeKeys.some(k => names.includes(k))) return false;
+    return true;
 }
 
 function renderGrid(characters, append = false) {
@@ -366,17 +395,21 @@ function renderGrid(characters, append = false) {
         filtered = filtered.filter(c => !isCharPossibleMatchObj(c));
     }
 
+    // Active faceted tag filters (local-only, see getDatacatActiveTagKeys)
+    const { includeKeys: dcIncludeTags, excludeKeys: dcExcludeTags } = getDatacatActiveTagKeys();
+    if (dcIncludeTags.length > 0 || dcExcludeTags.length > 0) {
+        filtered = filtered.filter(c => characterMatchesDatacatTags(c, dcIncludeTags, dcExcludeTags));
+    }
+
     // Client-side: persistent exclude tags from settings
     const dcPersistentExclude = getProviderExcludeTags('datacat');
     if (dcPersistentExclude.length > 0) {
-        const lowerExclude = dcPersistentExclude.map(t => t.toLowerCase());
+        const excludeKeys = dcPersistentExclude.map(tagMatchKey);
         filtered = filtered.filter(c => {
-            const names = resolveTagNames(c.tags || []).map(n => n.toLowerCase());
-            return !lowerExclude.some(et => names.includes(et));
+            const names = resolveTagNames(c.tags || []).map(tagMatchKey);
+            return !excludeKeys.some(et => names.includes(et));
         });
     }
-
-
 
     const startIdx = append ? datacatGridRenderedCount : 0;
     const html = filtered.slice(startIdx).map(c => createDatacatCard(c)).join('');
@@ -397,7 +430,7 @@ function updateLoadMore() {
 
 async function loadCharacters(append = false) {
     if (append && datacatIsLoading) return;
-    if (!append) { datacatAutoTopUps = 0; datacatTopUpVisible = 0; }
+    if (!append) { datacatAutoTopUps = 0; datacatTopUpVisible = 0; datacatBrowseView.resetAutoLoadMore(); }
     const thisToken = ++datacatLoadToken;
     datacatIsLoading = true;
     let visibleNew = Infinity; // error paths must never trigger the top-up chain
@@ -497,18 +530,18 @@ async function loadCharacters(append = false) {
             total = data?.total || 0;
             hampterTotalPages = total > 0 ? Math.ceil(total / (data?.pageSize || 34)) : 0;
         } else {
-            const tagIds = [...datacatActiveTagIds];
             const parsed = parseSortMode(datacatSortMode);
-            // Search and tags both force the offset endpoint (fresh has neither); keep this
-            // in lockstep with isFreshMode below and the fresh gate in advanceDatacatPage
-            const useRecent = !parsed || tagIds.length > 0 || !!datacatSearchQuery;
+            // Search forces the offset endpoint (fresh has none); tags are never sent to the
+            // server (DataCat's tagIds filtering is unreliable) -- they're applied locally in
+            // renderGrid instead, against whichever endpoint the sort/search already picked. Keep
+            // this in lockstep with isFreshMode below and the fresh gate in advanceDatacatPage.
+            const useRecent = !parsed || !!datacatSearchQuery;
             if (useRecent) {
                 const data = await fetchRecentPublic({
                     limit: PAGE_SIZE,
                     offset: datacatCurrentOffset,
-                    tagIds: tagIds.length > 0 ? tagIds : undefined,
                     search: datacatSearchQuery || undefined,
-                    // recent-public honors only sortBy=score, so Score sorts survive tag/search
+                    // recent-public honors only sortBy=score, so Score sorts survive search
                     // filtering; the other fresh sorts fall back to newest-first on this path
                     sortBy: parsed?.sortBy === 'score' ? 'score' : undefined
                 });
@@ -532,7 +565,7 @@ async function loadCharacters(append = false) {
         if (!delegatesInitialized) return;
 
         const freshParsed = parseSortMode(datacatSortMode);
-        const isFreshMode = datacatBrowseMode !== 'creator' && freshParsed && datacatActiveTagIds.size === 0 && !datacatSearchQuery;
+        const isFreshMode = datacatBrowseMode !== 'creator' && freshParsed && !datacatSearchQuery;
         const isMeili = isJannySortMode(datacatSortMode);
         const isHampter = isHampterSortMode(datacatSortMode);
 
@@ -693,9 +726,9 @@ async function loadCharacters(append = false) {
         }
     }
 
-    // Client-side filters (NSFW-off, hide-owned/possible/source, excludes) can shrink a raw page
-    // to a sliver, which reads as the infinite scroll stalling at the bottom. Chain fetches until
-    // a full page of VISIBLE cards has landed for this user action, capped like chub's loop.
+    // Client-side filters (NSFW-off, hide-owned/possible/source, tags, excludes) can shrink a raw
+    // page to a sliver, which reads as the infinite scroll stalling at the bottom. Chain fetches
+    // until a full page of VISIBLE cards has landed for this user action, capped like chub's loop.
     if (Number.isFinite(visibleNew) && thisToken === datacatLoadToken && delegatesInitialized
         && datacatViewMode === 'browse' && datacatHasMore
         && (append || datacatCharacters.length > 0)) {
@@ -720,7 +753,7 @@ async function loadFacetedTags() {
     const container = document.getElementById('datacatTagsList');
     if (container) container.innerHTML = '<div class="browse-tags-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading tags...</div>';
     try {
-        const data = await fetchFacetedTags({ activeTagIds: [...datacatActiveTagIds] });
+        const data = await fetchFacetedTags({ activeTagIds: [...datacatTagFilters.keys()] });
         if (!data) {
             if (container) container.innerHTML = '<div class="browse-tags-empty">Failed to load tags</div>';
             return;
@@ -740,7 +773,7 @@ async function loadFacetedTags() {
 
 async function refreshTagCounts() {
     try {
-        const data = await fetchFacetedTags({ activeTagIds: [...datacatActiveTagIds] });
+        const data = await fetchFacetedTags({ activeTagIds: [...datacatTagFilters.keys()] });
         if (!data) return;
         datacatTags = data.tags || [];
         renderTagsList(document.getElementById('datacatTagsSearchInput')?.value || '');
@@ -759,20 +792,26 @@ function renderTagsList(filter = '') {
     }
 
     const filterLower = filter.toLowerCase();
+    const filterKey = tagMatchKey(filter);
     const matchesFilter = (tag) => {
         if (!filter) return true;
         const name = (tag.name || tag.slug || '').toLowerCase();
         const slug = (tag.slug || '').toLowerCase();
-        return name.includes(filterLower) || slug.includes(filterLower);
+        if (name.includes(filterLower) || slug.includes(filterLower)) return true;
+        return tagMatchKey(tag.name || tag.slug || '').includes(filterKey);
     };
 
     const buildRow = (tag) => {
-        const active = datacatActiveTagIds.has(tag.id);
-        const stateClass = active ? 'state-include' : 'state-neutral';
-        const stateIcon = active ? '<i class="fa-solid fa-plus"></i>' : '';
-        const stateTitle = active ? 'Active: click to remove' : 'Click to filter';
+        const state = datacatTagFilters.get(tag.id) || 'neutral';
+        const stateClass = `state-${state}`;
+        const stateIcon = state === 'include' ? '<i class="fa-solid fa-check"></i>'
+                        : state === 'exclude' ? '<i class="fa-solid fa-minus"></i>'
+                        : '';
+        const stateTitle = state === 'include' ? 'Included - click to exclude'
+                        : state === 'exclude' ? 'Excluded - click to clear'
+                        : 'Neutral - click to include';
         const countStr = tag.count != null ? ` (${formatNumber(tag.count)})` : '';
-        const cleanName = (tag.name || tag.slug || '').replace(/^[\p{Emoji_Presentation}\p{Emoji}\uFE0F\u200D]+\s*/u, '').trim() || tag.name;
+        const cleanName = tagDisplayLabel(tag.name || tag.slug || '') || tag.name;
         return `
             <div class="browse-tag-filter-item" data-tag-id="${tag.id}">
                 <button class="browse-tag-state-btn ${stateClass}" title="${stateTitle}">${stateIcon}</button>
@@ -800,8 +839,8 @@ function renderTagsList(filter = '') {
     const ungrouped = datacatTags
         .filter(t => !groupIds.has(t.groupId) && matchesFilter(t))
         .sort((a, b) => {
-            const aActive = datacatActiveTagIds.has(a.id) ? 0 : 1;
-            const bActive = datacatActiveTagIds.has(b.id) ? 0 : 1;
+            const aActive = datacatTagFilters.has(a.id) ? 0 : 1;
+            const bActive = datacatTagFilters.has(b.id) ? 0 : 1;
             if (aActive !== bActive) return aActive - bActive;
             return (b.count || 0) - (a.count || 0);
         });
@@ -838,35 +877,53 @@ function renderTagsList(filter = '') {
         const tag = datacatTags.find(t => t.id === tagId);
         const group = tag ? datacatTagGroups.find(g => g.id === tag.groupId) : null;
 
-        if (datacatActiveTagIds.has(tagId)) {
-            datacatActiveTagIds.delete(tagId);
-        } else {
+        // Cycle: neutral -> include -> exclude -> neutral (mirrors Chub's chubTagFilters cycle)
+        const current = datacatTagFilters.get(tagId) || 'neutral';
+        let newState;
+        if (current === 'neutral') {
+            newState = 'include';
             if (group?.exclusive) {
                 for (const otherTag of datacatTags.filter(t => t.groupId === group.id)) {
-                    datacatActiveTagIds.delete(otherTag.id);
+                    datacatTagFilters.delete(otherTag.id);
                 }
             }
-            datacatActiveTagIds.add(tagId);
+            datacatTagFilters.set(tagId, 'include');
+        } else if (current === 'include') {
+            newState = 'exclude';
+            datacatTagFilters.set(tagId, 'exclude');
+        } else {
+            newState = 'neutral';
+            datacatTagFilters.delete(tagId);
         }
 
-        cycleTagState(item.querySelector('.browse-tag-state-btn'), datacatActiveTagIds.has(tagId));
+        cycleTagState(item.querySelector('.browse-tag-state-btn'), newState);
         updateTagsButton();
-        datacatCurrentOffset = 0;
-        loadCharacters(false);
+        if (datacatViewMode === 'following') {
+            // Following already has the full followed-creator set loaded client-side --
+            // just re-filter it, no need to touch the (unrelated) browse-mode fetch.
+            renderFollowing();
+        } else {
+            datacatCurrentOffset = 0;
+            loadCharacters(false);
+        }
         refreshTagCounts();
     };
 }
 
-function cycleTagState(btn, active) {
+function cycleTagState(btn, state) {
     btn.className = 'browse-tag-state-btn';
-    if (active) {
+    if (state === 'include') {
         btn.classList.add('state-include');
-        btn.innerHTML = '<i class="fa-solid fa-plus"></i>';
-        btn.title = 'Active: click to remove';
+        btn.innerHTML = '<i class="fa-solid fa-check"></i>';
+        btn.title = 'Included - click to exclude';
+    } else if (state === 'exclude') {
+        btn.classList.add('state-exclude');
+        btn.innerHTML = '<i class="fa-solid fa-minus"></i>';
+        btn.title = 'Excluded - click to clear';
     } else {
         btn.classList.add('state-neutral');
         btn.innerHTML = '';
-        btn.title = 'Click to filter';
+        btn.title = 'Neutral - click to include';
     }
 }
 
@@ -877,7 +934,7 @@ function updateTagsButton() {
 
     const count = isJannyTagMode()
         ? jannyActiveTagIds.size
-        : datacatActiveTagIds.size;
+        : datacatTagFilters.size;
     if (count > 0) {
         btn.classList.add('has-filters');
         if (label) label.innerHTML = `Tags <span class="tag-count">(${count})</span>`;
@@ -2121,12 +2178,19 @@ function renderFollowing(append = false) {
         filtered = filtered.filter(c => !isCharPossibleMatchObj(c));
     }
 
+    // Active faceted tag filters (local-only, see getDatacatActiveTagKeys) -- Following already
+    // has the full followed-creator set client-side, so this is a plain array filter, same as browse.
+    const { includeKeys: dcIncludeTags, excludeKeys: dcExcludeTags } = getDatacatActiveTagKeys();
+    if (dcIncludeTags.length > 0 || dcExcludeTags.length > 0) {
+        filtered = filtered.filter(c => characterMatchesDatacatTags(c, dcIncludeTags, dcExcludeTags));
+    }
+
     const dcPersistentExclude = getProviderExcludeTags('datacat');
     if (dcPersistentExclude.length > 0) {
-        const lowerExclude = dcPersistentExclude.map(t => t.toLowerCase());
+        const excludeKeys = dcPersistentExclude.map(tagMatchKey);
         filtered = filtered.filter(c => {
-            const names = resolveTagNames(c.tags || []).map(n => n.toLowerCase());
-            return !lowerExclude.some(et => names.includes(et));
+            const names = resolveTagNames(c.tags || []).map(tagMatchKey);
+            return !excludeKeys.some(et => names.includes(et));
         });
     }
 
@@ -2138,7 +2202,7 @@ function renderFollowing(append = false) {
             <div class="chub-timeline-empty">
                 <i class="fa-solid fa-filter"></i>
                 <h3>No Matching Characters</h3>
-                <p>No characters match your current NSFW filter setting.</p>
+                <p>No characters match your current filters.</p>
             </div>
         `;
         datacatBrowseView.updateLoadMoreVisibility('datacatFollowingLoadMore', false, false);
@@ -3235,13 +3299,17 @@ function initDatacatView() {
             jannyActiveTagIds.clear();
             renderJannyTagsList();
         } else {
-            datacatActiveTagIds.clear();
+            datacatTagFilters.clear();
             renderTagsList();
             refreshTagCounts();
         }
         updateTagsButton();
-        datacatCurrentOffset = 0;
-        loadCharacters(false);
+        if (datacatViewMode === 'following') {
+            renderFollowing();
+        } else {
+            datacatCurrentOffset = 0;
+            loadCharacters(false);
+        }
     });
 
     // Tags search input: filter the current rendered list
@@ -3959,7 +4027,7 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
             datacatGridRenderedCount = 0;
             datacatCreatorId = null;
             datacatCreatorName = '';
-            datacatActiveTagIds.clear();
+            datacatTagFilters.clear();
             datacatTagsLoaded = false;
             datacatViewMode = 'browse';
             datacatFollowingCharacters = [];

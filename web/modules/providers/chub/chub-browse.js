@@ -2,7 +2,7 @@
 
 import { BrowseView, renderBrowseFilterBar } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
-import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG, skeletonLines, deferRender, deferCall, isMobileMode, finishBrowseImport, proxyEncode, readJsonClassified, renderBrowseError } from '../provider-utils.js';
+import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG, skeletonLines, deferRender, deferCall, isMobileMode, finishBrowseImport, proxyEncode, readJsonClassified, renderBrowseError, tagMatchKey, tagDisplayLabel } from '../provider-utils.js';
 import {
     CHUB_API_BASE,
     CHUB_GATEWAY_BASE,
@@ -408,10 +408,9 @@ class ChubBrowseView extends BrowseView {
                 </select>
 
                 <!-- Sort Direction (Browse mode only) -->
-                <select id="chubSortDirection" class="glass-select-small" title="Sort direction">
-                    <option value="desc" selected data-icon="fa-solid fa-arrow-down-wide-short">Descending</option>
-                    <option value="asc" data-icon="fa-solid fa-arrow-up-short-wide">Ascending</option>
-                </select>`;
+                <button id="chubSortDirectionBtn" class="glass-btn icon-only" title="Sort direction: Descending" aria-pressed="false">
+                    <i class="fa-solid fa-arrow-down-wide-short"></i>
+                </button>`;
 
         return renderBrowseFilterBar({
             prefix: 'chub',
@@ -852,13 +851,12 @@ function initChubView() {
     const discoveryPresetEl = document.getElementById('chubDiscoveryPreset');
     const timelineSortEl = document.getElementById('chubTimelineSortHeader');
     const authorSortEl = document.getElementById('chubAuthorSortSelect');
-    const sortDirectionEl = document.getElementById('chubSortDirection');
-    
+
     if (discoveryPresetEl) discoveryPresetEl.value = chubDiscoveryPreset;
     if (timelineSortEl) timelineSortEl.value = chubTimelineSort;
     if (authorSortEl) authorSortEl.value = chubAuthorSort;
-    
-    for (const el of [discoveryPresetEl, timelineSortEl, authorSortEl, sortDirectionEl]) {
+
+    for (const el of [discoveryPresetEl, timelineSortEl, authorSortEl]) {
         if (!el) continue;
         const wasHidden = el.classList.contains('browse-filter-hidden');
         CoreAPI.initCustomSelect?.(el);
@@ -867,7 +865,8 @@ function initChubView() {
             el._customSelect.container.classList.add('browse-filter-hidden');
         }
     }
-    
+    updateChubSortDirectionBtn();
+
     setupChubGridDelegates();
     
     // View mode toggle (Browse/Timeline)
@@ -1476,10 +1475,29 @@ function initChubTagsDropdown() {
     });
     
     // Sort direction
-    document.getElementById('chubSortDirection')?.addEventListener('change', (e) => {
-        chubSortAscending = e.target.value === 'asc';
+    document.getElementById('chubSortDirectionBtn')?.addEventListener('click', () => {
+        chubSortAscending = !chubSortAscending;
+        updateChubSortDirectionBtn();
         triggerChubReload();
     });
+}
+
+/**
+ * Sync the sort-direction toggle button's icon/title/aria-pressed to chubSortAscending.
+ */
+function updateChubSortDirectionBtn() {
+    const btn = document.getElementById('chubSortDirectionBtn');
+    if (!btn) return;
+    const icon = btn.querySelector('i');
+    if (chubSortAscending) {
+        if (icon) icon.className = 'fa-solid fa-arrow-up-short-wide';
+        btn.title = 'Sort direction: Ascending';
+    } else {
+        if (icon) icon.className = 'fa-solid fa-arrow-down-wide-short';
+        btn.title = 'Sort direction: Descending';
+    }
+    btn.classList.toggle('is-active', chubSortAscending);
+    btn.setAttribute('aria-pressed', String(chubSortAscending));
 }
 
 /**
@@ -1534,22 +1552,36 @@ function renderChubTagsDropdownList(filter = '') {
         return;
     }
     
-    // Filter tags
+    // Filter tags -- matched on the decoration-stripped key so a search for "female" also
+    // surfaces hand-entered variants like "#Female" or "👩 female".
     const filterLower = filter.toLowerCase();
+    const filterKey = tagMatchKey(filter);
     const filteredTags = filter
-        ? chubPopularTags.filter(tag => tag.toLowerCase().includes(filterLower))
+        ? chubPopularTags.filter(tag => tagMatchKey(tag).includes(filterKey))
         : chubPopularTags;
 
-    const hasExactMatch = filter && filteredTags.some(t => t.toLowerCase() === filterLower);
+    const hasExactMatch = filter && filteredTags.some(t => tagMatchKey(t) === filterKey);
     const showCustomAdd = filter && filterLower.length >= 2 && !hasExactMatch;
     
     if (filteredTags.length === 0 && !showCustomAdd) {
         container.innerHTML = '<div class="browse-tags-empty">No matching tags</div>';
         return;
     }
-    
+
+    // Collapse decoration variants ("female" / "#female" / "👩 female") into a single row.
+    // An active (included/excluded) variant wins the slot so its state stays visible.
+    const dedupedByKey = new Map();
+    for (const tag of filteredTags) {
+        const key = tagMatchKey(tag) || tag;
+        const existing = dedupedByKey.get(key);
+        if (!existing || (chubTagFilters.get(tag) && !chubTagFilters.get(existing))) {
+            dedupedByKey.set(key, tag);
+        }
+    }
+    const dedupedTags = [...dedupedByKey.values()];
+
     // Sort: active filters first, then alphabetically
-    const sortedTags = [...filteredTags].sort((a, b) => {
+    const sortedTags = [...dedupedTags].sort((a, b) => {
         const aState = chubTagFilters.get(a);
         const bState = chubTagFilters.get(b);
         // Active filters (include/exclude) come first
@@ -1580,7 +1612,7 @@ function renderChubTagsDropdownList(filter = '') {
         return `
             <div class="browse-tag-filter-item" data-tag="${escapeHtml(tag)}">
                 <button class="browse-tag-state-btn ${stateClass}" title="${stateTitle}">${stateIcon}</button>
-                <span class="tag-label">${escapeHtml(tag)}</span>
+                <span class="tag-label">${escapeHtml(tagDisplayLabel(tag) || tag)}</span>
             </div>
         `;
     }).join('');
@@ -2153,21 +2185,38 @@ function _handleTimelineCardClick(e) {
     if (char) openChubCharPreview(char);
 }
 
+// Chub's own topics/excludetopics query params are unreliable server-side (include silently
+// misses matches, exclude often doesn't apply at all -- their tag data is too inconsistent to
+// filter on remotely). Tag filtering is therefore local-only everywhere: the server only ever
+// sees the main query (search/creator/sort/nsfw); tags just narrow whatever that already fetched.
+// Matched on the decoration-stripped key so "female" also catches a card tagged "#Female" or
+// "👩 female".
+function getChubActiveTagKeys() {
+    const includeKeys = [];
+    const excludeKeys = [];
+    for (const [tag, state] of chubTagFilters) {
+        if (state === 'include') includeKeys.push(tagMatchKey(tag));
+        else if (state === 'exclude') excludeKeys.push(tagMatchKey(tag));
+    }
+    for (const t of getProviderExcludeTags('chub')) {
+        const key = tagMatchKey(t);
+        if (key && !excludeKeys.includes(key)) excludeKeys.push(key);
+    }
+    return { includeKeys, excludeKeys };
+}
+
+function charMatchesChubTagFilters(char, includeKeys, excludeKeys) {
+    if (includeKeys.length === 0 && excludeKeys.length === 0) return true;
+    const charTopics = (char.topics || []).map(tagMatchKey);
+    if (includeKeys.length > 0 && !includeKeys.every(t => charTopics.includes(t))) return false;
+    if (excludeKeys.length > 0 && excludeKeys.some(t => charTopics.includes(t))) return false;
+    return true;
+}
+
 function renderChubTimeline(appendOnly = false) {
     const grid = document.getElementById('chubTimelineGrid');
-    
-    // Build tag include/exclude sets for client-side filtering
-    const includeTags = [];
-    const excludeTags = [];
-    for (const [tag, state] of chubTagFilters) {
-        if (state === 'include') includeTags.push(tag.toLowerCase());
-        else if (state === 'exclude') excludeTags.push(tag.toLowerCase());
-    }
-    // Persistent excludes are user-typed; lowercase to match the charTopics map below.
-    for (const t of getProviderExcludeTags('chub')) {
-        const lt = t.toLowerCase();
-        if (!excludeTags.includes(lt)) excludeTags.push(lt);
-    }
+
+    const { includeKeys: includeTags, excludeKeys: excludeTags } = getChubActiveTagKeys();
 
     let sourceChars = chubTimelineCharacters;
 
@@ -2180,11 +2229,7 @@ function renderChubTimeline(appendOnly = false) {
             if (chubFilterHideOwned && isCharInLocalLibrary(c)) return false;
             if (chubFilterHidePossible && isCharPossibleMatchObj(c)) return false;
             // Tag filters (client-side - timeline data already has topics)
-            if (includeTags.length > 0 || excludeTags.length > 0) {
-                const charTopics = (c.topics || []).map(t => t.toLowerCase());
-                if (includeTags.length > 0 && !includeTags.every(t => charTopics.includes(t))) return false;
-                if (excludeTags.length > 0 && excludeTags.some(t => charTopics.includes(t))) return false;
-            }
+            if (!charMatchesChubTagFilters(c, includeTags, excludeTags)) return false;
             return true;
         });
     } else {
@@ -2613,25 +2658,11 @@ async function loadChubCharacters(forceRefresh = false) {
             }
         }
         
-        // === Advanced Tag Filters ===
-        // Include tags (topics)
-        const includeTags = [];
-        const excludeTags = [];
-        for (const [tag, state] of chubTagFilters) {
-            if (state === 'include') includeTags.push(tag);
-            else if (state === 'exclude') excludeTags.push(tag);
-        }
-        // Merge persistent exclude tags from settings
-        for (const t of getProviderExcludeTags('chub')) {
-            if (!excludeTags.includes(t)) excludeTags.push(t);
-        }
-        if (includeTags.length > 0) {
-            params.set('topics', includeTags.join(','));
-        }
-        if (excludeTags.length > 0) {
-            params.set('excludetopics', excludeTags.join(','));
-        }
-        
+        // Tag filters are deliberately NOT sent as topics/excludetopics query params -- Chub's
+        // server-side tag matching is unreliable (include silently misses matches, exclude often
+        // doesn't apply). They're applied locally below instead, same as Timeline/Following.
+        const { includeKeys: includeTags, excludeKeys: excludeTags } = getChubActiveTagKeys();
+
         // Sort direction
         if (chubSortAscending) {
             params.set('asc', 'true');
@@ -2682,17 +2713,19 @@ async function loadChubCharacters(forceRefresh = false) {
         chubHasMore = (data.data?.cursor ?? data.cursor) != null && nodes.length > 0;
         const wasAppend = chubCurrentPage > 1;
         
-        // When "hide owned" is active, auto-fetch additional pages if too many
-        // cards were filtered out, so the grid doesn't look sparse.
+        // When "hide owned"/"hide possible" or a tag filter is active, auto-fetch additional
+        // pages if too many cards were filtered out client-side, so the grid doesn't look sparse.
         // Targets a full page (24) of visible cards per user action; capped at
         // 3 extra fetches to avoid runaway requests when most results are owned.
         // Cost: up to 3 additional lightweight search API calls (JSON-only, no
         // image data); the extra card objects in chubCharacters are ~1-2 KB each.
-        const chubHasClientFilters = chubFilterHideOwned || chubFilterHidePossible;
+        const chubHasClientFilters = chubFilterHideOwned || chubFilterHidePossible ||
+            includeTags.length > 0 || excludeTags.length > 0;
         if (chubHasClientFilters && chubHasMore) {
             const isFiltered = (c) => {
                 if (chubFilterHideOwned && isCharInLocalLibrary(c)) return true;
                 if (chubFilterHidePossible && isCharPossibleMatchObj(c)) return true;
+                if (!charMatchesChubTagFilters(c, includeTags, excludeTags)) return true;
                 return false;
             };
             let visibleNew = nodes.filter(c => !isFiltered(c)).length;
@@ -2804,7 +2837,9 @@ async function fetchChubUserFavoriteIds({ maxAgeMs = 0 } = {}) {
 function renderChubGrid(appendOnly = false) {
     const grid = document.getElementById('chubGrid');
     
-    // Apply client-side "hide owned" / "hide possible" filters (other filters are server-side)
+    // All filters are client-side: the server only ever sees the main query (search/creator/
+    // sort/nsfw). Tag include/exclude narrows whatever that query already fetched.
+    const { includeKeys: includeTags, excludeKeys: excludeTags } = getChubActiveTagKeys();
     let displayCharacters = chubCharacters;
     if (chubFilterHideOwned) {
         displayCharacters = displayCharacters.filter(c => !isCharInLocalLibrary(c));
@@ -2812,13 +2847,18 @@ function renderChubGrid(appendOnly = false) {
     if (chubFilterHidePossible) {
         displayCharacters = displayCharacters.filter(c => !isCharPossibleMatchObj(c));
     }
-    
+    if (includeTags.length > 0 || excludeTags.length > 0) {
+        displayCharacters = displayCharacters.filter(c => charMatchesChubTagFilters(c, includeTags, excludeTags));
+    }
+
+    const anyClientFilterActive = chubFilterHideOwned || chubFilterHidePossible ||
+        includeTags.length > 0 || excludeTags.length > 0;
     if (displayCharacters.length === 0) {
         chubGridRenderedCount = 0;
         chubCardLookup.clear();
         chubBrowseView.disconnectImageObserver();
-        const message = chubCharacters.length > 0 && (chubFilterHideOwned || chubFilterHidePossible)
-            ? 'All characters in this view are already in your library.'
+        const message = chubCharacters.length > 0 && anyClientFilterActive
+            ? 'No characters in this view match your current filters.'
             : 'Try a different search term or adjust your filters.';
         grid.innerHTML = `
             <div class="browse-empty">

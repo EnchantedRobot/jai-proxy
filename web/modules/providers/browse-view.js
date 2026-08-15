@@ -346,10 +346,10 @@ export function renderBrowseFilterBar({
 
             <!-- Hide Owned / Hide Possible -->
             <button id="${prefix}HideOwnedBtn" class="glass-btn browse-hide-toggle" title="Hide characters already in your archive" aria-pressed="false">
-                <i class="fa-solid fa-check"></i>
+                <i class="fa-solid fa-user"></i>
             </button>
             <button id="${prefix}HidePossibleBtn" class="glass-btn browse-hide-toggle possible" title="Hide likely duplicates" aria-pressed="false">
-                <i class="fa-solid fa-check"></i>
+                <i class="fa-solid fa-person-circle-question"></i>
             </button>
 
             <!-- Refresh -->
@@ -376,6 +376,13 @@ export class BrowseView {
         this._scrollHandler = null;
         this._scrollIndicator = null;
         this._prefetching = false;
+        // Consecutive automatic (non-user-scroll) load-more triggers since the last real scroll
+        // event. Caps the render->updateLoadMoreVisibility->_deferredScrollCheck->loadMore->render
+        // cycle when a client-side filter can never yield a visible match (e.g. a source whose list
+        // payload carries no matchable data at all) -- without this a permanently-empty grid with
+        // hasMore=true re-triggers _deferredScrollCheck after every single render, forever, with no
+        // real scrolling involved. A genuine user scroll resets it since that's bounded by human input.
+        this._autoLoadMoreStreak = 0;
         this._preloadLimit = 48;
         this._lookup = {
             byNameAndCreator: new Set(),
@@ -1049,6 +1056,10 @@ export class BrowseView {
         if (!scrollContainer) return;
 
         this._scrollHandler = () => {
+            // A real scroll event is bounded by human input, unlike the automatic post-render
+            // check below -- any actual scroll means the user is genuinely paging, so it clears
+            // the automatic-trigger streak.
+            this._autoLoadMoreStreak = 0;
             if (!this.isInfiniteScrollEnabled()) return;
             if (this._prefetching || !this.canLoadMore()) return;
 
@@ -1099,13 +1110,29 @@ export class BrowseView {
         requestAnimationFrame(() => {
             if (!this.isInfiniteScrollEnabled()) return;
             if (this._prefetching || !this.canLoadMore()) return;
+            // Hard ceiling on consecutive automatic (unscrolled) fetches: if a client-side filter
+            // can never produce a visible match (e.g. a list payload with no matchable field at
+            // all), the grid stays empty forever with hasMore=true, so this check would otherwise
+            // re-fire after every single render -- no real scrolling involved -- and hammer the
+            // provider indefinitely. A genuine scroll (see _scrollHandler) always clears this.
+            if (this._autoLoadMoreStreak >= 6) return;
             const sc = document.querySelector('.gallery-content');
             if (!sc) return;
             const distanceFromBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight;
             if (distanceFromBottom < this._getScrollThreshold()) {
+                this._autoLoadMoreStreak++;
                 this._triggerLoadMore();
             }
         });
+    }
+
+    /**
+     * Clear the automatic-load-more streak. Providers call this whenever a genuinely new query
+     * starts (filter/search/sort change, fresh non-append load) so a prior exhausted streak
+     * doesn't suppress auto-fill for what is, from the user's perspective, a brand new browse.
+     */
+    resetAutoLoadMore() {
+        this._autoLoadMoreStreak = 0;
     }
 
     _ensureScrollIndicator() {

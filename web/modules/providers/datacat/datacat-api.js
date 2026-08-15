@@ -446,20 +446,20 @@ export async function fetchDatacatCreatorCharacters(creatorId, opts = {}) {
 // ========================================
 
 /**
- * Fetch recent public characters (the main browse endpoint).
+ * Fetch recent public characters (the main browse endpoint). Tag filtering is deliberately not
+ * offered here -- it's applied client-side (see getDatacatActiveTagKeys in datacat-browse.js)
+ * because the server's own tagIds matching is unreliable.
  * @param {Object} [opts]
  * @param {number} [opts.limit=24]
  * @param {number} [opts.offset=0]
- * @param {number[]} [opts.tagIds] - Active tag ID filters
  * @param {string} [opts.search] - Full text search (matches character AND creator names)
  * @param {string} [opts.sortBy] - Result order; the endpoint honors only 'score' (verified live)
  * @param {number} [opts.minTotalTokens=MIN_TOTAL_TOKENS]
  * @returns {Promise<{totalCount: number, characters: Object[]}>} failures throw classified errors
  */
 export async function fetchRecentPublic(opts = {}) {
-    const { limit = 24, offset = 0, tagIds = [], search = '', sortBy = '', minTotalTokens = MIN_TOTAL_TOKENS } = opts;
+    const { limit = 24, offset = 0, search = '', sortBy = '', minTotalTokens = MIN_TOTAL_TOKENS } = opts;
     let path = `/api/characters/recent-public?limit=${limit}&offset=${offset}&summary=1&minTotalTokens=${minTotalTokens}`;
-    if (tagIds.length > 0) path += `&tagIds=${tagIds.join(',')}`;
     if (search) path += `&search=${encodeURIComponent(search)}`;
     if (sortBy) path += `&sortBy=${encodeURIComponent(sortBy)}`;
     const response = await dcFetch(path);
