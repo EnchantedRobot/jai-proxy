@@ -29,7 +29,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from proxy.config import settings
+from proxy.config import ensure_dir, settings
 
 logger = logging.getLogger("jai_proxy.state.lorebook_cache")
 
@@ -43,7 +43,10 @@ def _slug(text: str) -> str:
 class LorebookCache:
     def __init__(self, cache_dir: Path | None = None) -> None:
         self._dir = cache_dir or settings.lorebook_cache_dir
-        self._dir.mkdir(parents=True, exist_ok=True)
+        # ensure_dir, not mkdir: constructed at `import proxy.deps`, before the
+        # server's preflight can report an unusable mount -- see
+        # proxy.config.ensure_dir.
+        ensure_dir(self._dir)
 
     def _path(self, source: str, lorebook_id: str) -> Path:
         # A readable prefix (real ids are filesystem-safe uuids) for eyeballing

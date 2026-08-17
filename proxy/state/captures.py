@@ -4,7 +4,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from proxy.config import settings
+from proxy.config import ensure_dir, settings
 from proxy.cards.models import CaptureRecord
 from proxy.sources.prompts.janitor import SystemPromptParser
 
@@ -39,7 +39,9 @@ class CaptureStore:
     ) -> None:
         self._raw_prompts: list[str] = []
         self._captures_dir = captures_dir or settings.captures_dir
-        self._captures_dir.mkdir(parents=True, exist_ok=True)
+        # ensure_dir, not mkdir: this runs at `import proxy.deps`, before the
+        # server's preflight -- see proxy.config.ensure_dir.
+        ensure_dir(self._captures_dir)
         self._parser = parser or SystemPromptParser()
         self._records: dict[str, CaptureRecord] = {}
         self._load_existing_records()
@@ -125,6 +127,8 @@ class CaptureStore:
         path.write_text(record.model_dump_json(indent=2), encoding="utf-8")
 
     def _load_existing_records(self) -> None:
+        if not self._captures_dir.is_dir():
+            return
         for path in sorted(self._captures_dir.glob("*.json")):
             try:
                 record = CaptureRecord.model_validate_json(path.read_text(encoding="utf-8"))

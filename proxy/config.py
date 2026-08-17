@@ -145,8 +145,21 @@ REQUIRED_DIRS: tuple[Path, ...] = (
     settings.lorebook_cache_dir,
 )
 
-for _required in REQUIRED_DIRS:
+def ensure_dir(path: Path) -> Path:
+    """mkdir -p that records the failure instead of raising it.
+
+    Anything constructed at import time -- the stores in `proxy.deps` build
+    their own directories in `__init__` -- must go through this rather than
+    calling `mkdir` directly. A raise there happens during `import proxy.deps`,
+    which is before `proxy.server.main()` can run the preflight, so the operator
+    gets the very traceback the preflight exists to replace.
+    """
     try:
-        _required.mkdir(parents=True, exist_ok=True)
-    except OSError as _exc:
-        STARTUP_DIR_ERRORS.append((_required, _exc))
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        STARTUP_DIR_ERRORS.append((path, exc))
+    return path
+
+
+for _required in REQUIRED_DIRS:
+    ensure_dir(_required)
