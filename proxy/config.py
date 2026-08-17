@@ -100,9 +100,11 @@ class Settings(BaseSettings):
     compress: bool = True
     pngquant_bin: Path = Path(__file__).resolve().parent / "pngquant"
 
-    # Outbound proxy for server-initiated calls to third-party APIs (currently
-    # just proxy/datacat_client.py's original-avatar lookup). httpx's single
-    # `proxy=` kwarg, so one URL covers http+https; None disables it.
+    # Fallback outbound proxy for everything this server fetches from the
+    # internet. Not read directly by any fetcher -- proxy/runtime/net.py resolves
+    # it, preferring `httpProxyUrl` from data/settings.json (the UI's copy, which
+    # can be changed without a restart) and falling back to this. httpx's single
+    # `proxy=` kwarg, so one URL covers http+https; None means connect directly.
     http_proxy: str | None = None
 
     # How many media items a download run fetches at once, and how many of

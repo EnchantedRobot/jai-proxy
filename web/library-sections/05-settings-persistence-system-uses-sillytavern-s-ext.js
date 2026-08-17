@@ -9,16 +9,6 @@ const DEFAULT_SETTINGS = {
     // ---- Credentials & Auth ----
     chubToken: null,
     chubRememberToken: true,
-    pygmalionEmail: null,
-    pygmalionPassword: null,
-    pygmalionToken: null,
-    pygmalionRememberCredentials: true,
-    wyvernEmail: null,
-    wyvernPassword: null,
-    wyvernToken: null,
-    wyvernRefreshToken: null,
-    wyvernUid: null,
-    wyvernRememberCredentials: true,
     datacatToken: null,
     datacatPublicFeed: false,
     datacatReextractOnUpdate: false,
@@ -26,7 +16,6 @@ const DEFAULT_SETTINGS = {
     // shared pair breaks whichever provider refreshes second.
     datacatJanitoraiToken: null,
     datacatJanitoraiRefreshToken: null,
-    saucepanToken: null,
     janitoraiToken: null,
     janitoraiRefreshToken: null,
     // Kept so a lapsed session can be renewed without hunting for the password again.
@@ -37,17 +26,29 @@ const DEFAULT_SETTINGS = {
     janitoraiBrowserMode: 'managed',
     janitoraiNsfw: false,
     janitoraiExtractOnUpdate: false,
-    ctCookie: null,
+
+    // ---- Network ----
+    // The outbound proxy the *server* routes its own fetches through -- media
+    // downloads, card avatars, the DataCat session, and the /proxy passthrough
+    // this UI falls back to when a provider refuses a direct request. Read by
+    // proxy/runtime/net.py; null or empty means connect directly. The
+    // JAI_PROXY_HTTP_PROXY environment variable is the fallback when unset.
+    httpProxyUrl: null,
+
+    // ---- Userscript Generator ----
+    // What Settings -> Userscripts last generated (web/lib/userscript-generator.js).
+    // Written only by that panel, through setSettings, so the main Save Settings
+    // button neither reads nor overwrites them. A null server URL means "never
+    // generated one" -- the panel then offers this page's own origin.
+    userscriptKey: 'jai',
+    userscriptServerUrl: null,
+    userscriptIncludeTags: [],
+    userscriptExcludeTags: [],
 
     // ---- NSFW Toggles ----
     chubNsfw: false,
     jannyNsfw: false,
-    pygmalionNsfw: false,
-    wyvernNsfw: false,
-    ctNsfw: false,
     datacatNsfw: false,
-    saucepanNsfw: false,
-    saucepanHideExtreme: false,
 
     // ---- Search & Sort ----
     defaultSort: 'name_asc',
@@ -98,7 +99,6 @@ const DEFAULT_SETTINGS = {
     customCSSMode: 'raw',
     exportAsLinks: false,
     showProviderTagline: true,
-    showWyvernTagline: true,
     allowRichTagline: false,
     displayNamePreference: 'card',
     displayNameOverrideEnabled: true,

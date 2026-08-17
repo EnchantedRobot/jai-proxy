@@ -27,6 +27,7 @@ from proxy.api import v1_router
 from proxy.api.build import router as build_router
 from proxy.api.capture import router as capture_router
 from proxy.api.chat import router as chat_router
+from proxy.api.cors_proxy import router as cors_proxy_router
 from proxy.api.datacat import router as datacat_router
 from proxy.api.v1 import _shared as v1_shared
 from proxy.config import REQUIRED_DIRS, ROOT, STARTUP_DIR_ERRORS, settings
@@ -63,6 +64,10 @@ app.include_router(datacat_router)
 app.include_router(build_router)
 app.include_router(capture_router)
 app.include_router(chat_router)
+# The CORS passthrough the vendored frontend falls back to when a provider
+# refuses a browser-direct fetch. Registered before the static mount like every
+# other route; see proxy/api/cors_proxy.py for why it exists at all.
+app.include_router(cors_proxy_router)
 
 app.add_middleware(
     CORSMiddleware,

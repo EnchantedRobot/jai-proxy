@@ -7,6 +7,7 @@ import httpx
 from PIL import Image
 
 from proxy.config import settings
+from proxy.runtime import net
 
 
 def _valid_image(data: bytes) -> bool:
@@ -35,7 +36,10 @@ class AvatarFetcher:
     a card is always exportable."""
 
     def __init__(self, client: httpx.AsyncClient | None = None) -> None:
-        self._client = client or httpx.AsyncClient(timeout=settings.request_timeout)
+        # Held rather than built: `proxy.deps` constructs one of these at import,
+        # so a client built here would pin the proxy setting to whatever it was
+        # when the process started. See proxy.runtime.net.AsyncClientHolder.
+        self._clients = net.AsyncClientHolder(client, timeout=settings.request_timeout)
 
     async def fetch(self, url: str | None, avatar_b64: str | None = None) -> bytes:
         if url:
@@ -50,7 +54,7 @@ class AvatarFetcher:
 
     async def _try_url(self, url: str) -> bytes | None:
         try:
-            resp = await self._client.get(url)
+            resp = await (await self._clients.get()).get(url)
         except httpx.HTTPError:
             return None
         if resp.status_code >= 400:

@@ -44,6 +44,12 @@ WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY proxy/ ./proxy/
 COPY web/ ./web/
+# Source fragments only, not the compiled bundles: the server concatenates them
+# per request with the user's server URL and tag filter substituted in
+# (proxy/userscripts.py). ~60 KB, and it is what makes the userscripts
+# installable without a checkout.
+COPY userscript/src_jai/ ./userscript/src_jai/
+COPY userscript/src_saucepan/ ./userscript/src_saucepan/
 COPY pyproject.toml uv.lock README.md ./
 
 ENV PATH="/app/.venv/bin:${PATH}" \

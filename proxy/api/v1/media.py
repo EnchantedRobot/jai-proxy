@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import time
 
-import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
@@ -31,6 +30,7 @@ from proxy.api.v1 import _shared
 from proxy.cards import gallery
 from proxy.config import settings
 from proxy.media import jobs as media_jobs, manifest as media_manifest, writer as media_writer
+from proxy.runtime import net
 
 router = APIRouter()
 
@@ -126,8 +126,8 @@ def download_character_media(card_id: str, body: MediaDownloadIn) -> StreamingRe
         # A millisecond timestamp as the starting file index, same scheme the
         # JS loop used -- unique across runs without a persistent counter.
         start_index = int(time.time() * 1000)
-        async with httpx.AsyncClient(
-            timeout=30.0, proxy=settings.http_proxy or None, headers={"User-Agent": "Mozilla/5.0"}
+        async with net.async_client(
+            timeout=30.0, headers={"User-Agent": "Mozilla/5.0"}
         ) as client:
             batch = media_writer.download_batch(
                 client,

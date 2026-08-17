@@ -46,7 +46,6 @@ import hashlib
 import io
 import logging
 import re
-import socket
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
@@ -499,21 +498,9 @@ def size_of(path: Path) -> int | None:
         return None
 
 
-def _preflight_dns(url: str) -> str | None:
-    """A reason string if the URL's host resolves only to blocked addresses
-    or doesn't resolve at all, else None. Not a full pin against TOCTOU (see
-    media_guard's docstring) -- a best-effort check run immediately before
-    the request, closing the common DNS-rebinding case without the
-    complexity of pinning the resolved IP through TLS SNI."""
-    parsed = urlsplit(url)
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    try:
-        media_guard.resolve_safe_addresses(parsed.hostname or "", port)
-    except media_guard.UnsafeAddressError as exc:
-        return str(exc)
-    except socket.gaierror as exc:
-        return f"DNS resolution failed: {exc}"
-    return None
+# Shared with the browser's CORS passthrough (proxy/api/cors_proxy.py); it lived
+# here first, and the name is kept so the call sites below read unchanged.
+_preflight_dns = media_guard.preflight_dns
 
 
 @contextlib.asynccontextmanager

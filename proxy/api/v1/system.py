@@ -17,6 +17,7 @@ from proxy.api.v1 import _shared
 from proxy.archive import catalog
 from proxy.cards import gallery
 from proxy.config import settings
+from proxy.runtime import net
 from proxy.state import ui_settings
 
 logger = logging.getLogger("jai_proxy.api")
@@ -136,8 +137,14 @@ def put_settings(blob: dict) -> dict:
     own boot migrations rely on being able to do.
     """
     try:
-        return _settings_store().write(blob)
+        stored = _settings_store().write(blob)
     except ui_settings.SettingsError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # The one key the server itself reads out of this blob is `httpProxyUrl`,
+    # and its lookup is memoized against the file's mtime. Mtime granularity is
+    # only worth trusting when it has actually changed -- here we know for
+    # certain the file just did.
+    net.reset_cache()
+    return stored
 
 

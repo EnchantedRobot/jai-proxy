@@ -612,12 +612,7 @@ function performSearch() {
                 const provId = linkFilterPrefix === 'chub' ? 'chub'
                     : (linkFilterPrefix === 'janitorai' || linkFilterPrefix === 'jai') ? 'janitorai'
                     : linkFilterPrefix === 'janny' ? 'jannyai'
-                    : (linkFilterPrefix === 'charactertavern' || linkFilterPrefix === 'ct') ? 'chartavern'
-                    : linkFilterPrefix === 'pygmalion' ? 'pygmalion'
-                    : linkFilterPrefix === 'wyvern' ? 'wyvern'
                     : (linkFilterPrefix === 'datacat' || linkFilterPrefix === 'dc') ? 'datacat'
-                    : linkFilterPrefix === 'saucepan' ? 'saucepan'
-                    : (linkFilterPrefix === 'botbooru' || linkFilterPrefix === 'bb') ? 'botbooru'
                     : null;
                 const prov = provId ? window.ProviderRegistry?.getProvider(provId) : null;
                 isLinked = prov ? !!prov.getLinkInfo(c) : false;

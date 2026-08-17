@@ -6,6 +6,7 @@
 import './world-info-api.js';   // side-effect only: window.getWorldInfoData / saveWorldInfoData / listWorldInfoFiles
 import './scrollbar-auto-hide.js';   // side-effect only
 import './keyboard-navigation.js';   // side-effect only
+import './userscript-generator.js';   // side-effect only: wires Settings -> Userscripts on first open
 import { FALLBACK_AVATAR_SVG } from './fallback-images.js';
 import { isMobileMode } from './mobile-mode.js';
 import { ENDPOINTS } from './api-endpoints.js';

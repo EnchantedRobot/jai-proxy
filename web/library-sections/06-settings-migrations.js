@@ -305,6 +305,13 @@ function setupSettingsModal() {
     const defaultSortSelect = document.getElementById('settingsDefaultSort');
     const defaultFilterPresetSelect = document.getElementById('settingsDefaultFilterPreset');
     const groupFavoritesFirstCheckbox = document.getElementById('settingsGroupFavoritesFirst');
+
+    // Outbound proxy (General panel). The value is the server's, not this page's:
+    // nothing the browser fetches goes through it -- see updateProxyStatus below.
+    const httpProxyUrlInput = document.getElementById('settingsHttpProxyUrl');
+    const proxyStatusBadge = document.getElementById('proxyStatusBadge');
+    const proxyStatusDetail = document.getElementById('proxyStatusDetail');
+    const testProxyBtn = document.getElementById('testProxyBtn');
     
     // Experimental features
     const richCreatorNotesCheckbox = document.getElementById('settingsRichCreatorNotes');
@@ -839,6 +846,14 @@ function setupSettingsModal() {
             updateDatacatSessionStatus();
         }
         
+        if (httpProxyUrlInput) {
+            httpProxyUrlInput.value = getSetting('httpProxyUrl') || '';
+            // Checked against what is *stored*, not what is typed: on open those
+            // are the same thing, and the stored value is what the server is
+            // actually using right now.
+            updateProxyStatus(null);
+        }
+
         const minScore = getSetting('duplicateMinScore') || 35;
         minScoreSlider.value = minScore;
         minScoreValue.textContent = parseInt(minScore) >= 120 ? 'Exact' : minScore;
@@ -1223,17 +1238,21 @@ function setupSettingsModal() {
 
     const doSaveSettings = () => {
         const newHighlightColor = highlightColorInput ? highlightColorInput.value : DEFAULT_SETTINGS.highlightColor;
+        // Read before setSettings overwrites it, so a changed proxy can be
+        // verified below without re-testing one that did not change.
+        const previousProxyUrl = getSetting('httpProxyUrl') || '';
         
         setSettings({
             chubToken: chubTokenInput.value || null,
             chubRememberToken: rememberTokenCheckbox.checked,
-            pygmalionEmail: pygmalionEmailInput ? (pygmalionEmailInput.value || null) : null,
-            pygmalionPassword: pygmalionPasswordInput ? (pygmalionPasswordInput.value || null) : null,
-            pygmalionRememberCredentials: pygmalionRememberCredsCheckbox ? pygmalionRememberCredsCheckbox.checked : false,
-            ctCookie: ctCookieInput ? (ctCookieInput.value?.trim() || null) : null,
-            wyvernEmail: wyvernEmailInput ? (wyvernEmailInput.value || null) : null,
-            wyvernPassword: wyvernPasswordInput ? (wyvernPasswordInput.value || null) : null,
-            wyvernRememberCredentials: wyvernRememberCredsCheckbox ? wyvernRememberCredsCheckbox.checked : false,
+            // The Pygmalion, Wyvern and CharacterTavern credential fields were
+            // removed with their providers (web/ trim, providers 9 -> 2), but
+            // these lines survived and referenced identifiers that no longer
+            // exist anywhere. `x ? x.value : null` is only null-safe for a
+            // *declared* variable -- an undeclared one is a ReferenceError, so
+            // every Save Settings threw here and silently saved nothing at all.
+            // setSettings does an Object.assign, so dropping these keys leaves
+            // whatever DEFAULT_SETTINGS holds for them untouched.
             duplicateMinScore: parseInt(minScoreSlider.value),
             possibleMatchMinScore: possibleMatchScoreSlider ? parseInt(possibleMatchScoreSlider.value) : 65,
             importDirectDownloads: importDirectDownloadsCheckbox ? importDirectDownloadsCheckbox.checked : false,
@@ -1246,6 +1265,9 @@ function setupSettingsModal() {
             defaultSort: defaultSortSelect.value,
             defaultFilterPreset: defaultFilterPresetSelect ? defaultFilterPresetSelect.value : '',
             groupFavoritesFirst: groupFavoritesFirstCheckbox ? groupFavoritesFirstCheckbox.checked : false,
+            // Empty string -> null so "cleared" and "never set" are the same
+            // thing on disk; the server treats both as "connect directly".
+            httpProxyUrl: httpProxyUrlInput ? (httpProxyUrlInput.value.trim() || null) : null,
             richCreatorNotes: richCreatorNotesCheckbox.checked,
             expandCreatorNotes: expandCreatorNotesCheckbox ? expandCreatorNotesCheckbox.checked : false,
             displayNamePreference: displayNamePreferenceSelect ? displayNamePreferenceSelect.value : 'card',
@@ -1332,6 +1354,15 @@ function setupSettingsModal() {
         if (sortSelect) sortSelect.value = defaultSortSelect.value;
         
         showToast('Settings saved', 'success');
+
+        // A proxy that does not work is worth hearing about immediately rather
+        // than discovering when a media run silently fetches nothing. Tested by
+        // value, not by reading it back: the settings write is debounced.
+        const currentProxyUrl = httpProxyUrlInput ? httpProxyUrlInput.value.trim() : '';
+        if (currentProxyUrl !== previousProxyUrl) {
+            verifyProxyAfterSave(currentProxyUrl);
+        }
+
         closeModal();
         
         performSearch();
@@ -1384,13 +1415,9 @@ function setupSettingsModal() {
         // Reset form UI to defaults
         chubTokenInput.value = '';
         rememberTokenCheckbox.checked = false;
-        if (pygmalionEmailInput) pygmalionEmailInput.value = '';
-        if (pygmalionPasswordInput) pygmalionPasswordInput.value = '';
-        if (pygmalionRememberCredsCheckbox) pygmalionRememberCredsCheckbox.checked = false;
-        if (ctCookieInput) ctCookieInput.value = '';
-        if (wyvernEmailInput) wyvernEmailInput.value = '';
-        if (wyvernPasswordInput) wyvernPasswordInput.value = '';
-        if (wyvernRememberCredsCheckbox) wyvernRememberCredsCheckbox.checked = false;
+        // Same removed-provider fields as in doSaveSettings above; `if (x)` does
+        // not guard an undeclared identifier either, so Restore Defaults threw
+        // here for the same reason.
         minScoreSlider.value = DEFAULT_SETTINGS.duplicateMinScore;
         minScoreValue.textContent = String(DEFAULT_SETTINGS.duplicateMinScore);
         if (possibleMatchScoreSlider) {
@@ -1413,6 +1440,7 @@ function setupSettingsModal() {
         if (groupFavoritesFirstCheckbox) {
             groupFavoritesFirstCheckbox.checked = DEFAULT_SETTINGS.groupFavoritesFirst;
         }
+        if (httpProxyUrlInput) httpProxyUrlInput.value = DEFAULT_SETTINGS.httpProxyUrl || '';
         richCreatorNotesCheckbox.checked = DEFAULT_SETTINGS.richCreatorNotes;
         if (expandCreatorNotesCheckbox) expandCreatorNotesCheckbox.checked = DEFAULT_SETTINGS.expandCreatorNotes;
         if (displayNamePreferenceSelect) displayNamePreferenceSelect.value = DEFAULT_SETTINGS.displayNamePreference;
@@ -1491,24 +1519,12 @@ function setupSettingsModal() {
         
         // Save defaults to storage (preserving tokens/credentials)
         const preserveChub = getSetting('chubRememberToken') ? getSetting('chubToken') : null;
-        const preservePyg = getSetting('pygmalionRememberCredentials');
-        const preserveWyv = getSetting('wyvernRememberCredentials');
         setSettings({
             ...DEFAULT_SETTINGS,
             chubToken: preserveChub,
-            pygmalionEmail: preservePyg ? getSetting('pygmalionEmail') : null,
-            pygmalionPassword: preservePyg ? getSetting('pygmalionPassword') : null,
-            pygmalionToken: preservePyg ? getSetting('pygmalionToken') : null,
-            wyvernEmail: preserveWyv ? getSetting('wyvernEmail') : null,
-            wyvernPassword: preserveWyv ? getSetting('wyvernPassword') : null,
-            wyvernToken: preserveWyv ? getSetting('wyvernToken') : null,
-            wyvernRefreshToken: preserveWyv ? getSetting('wyvernRefreshToken') : null,
-            wyvernUid: preserveWyv ? getSetting('wyvernUid') : null,
             datacatToken: getSetting('datacatToken') || null,
             datacatJanitoraiToken: getSetting('datacatJanitoraiToken') || null,
             datacatJanitoraiRefreshToken: getSetting('datacatJanitoraiRefreshToken') || null,
-            saucepanToken: getSetting('saucepanToken') || null,
-            ctCookie: getSetting('ctCookie') || null,
             janitoraiToken: getSetting('janitoraiToken') || null,
             janitoraiRefreshToken: getSetting('janitoraiRefreshToken') || null,
             janitoraiEmail: getSetting('janitoraiEmail') || null,
@@ -1533,15 +1549,78 @@ function setupSettingsModal() {
         showToast('Settings restored to defaults', 'success');
     };
 
-    // Session Validation - CharacterTavern
-    // A textarea cannot be type="password", so this credential masks via .cl-masked-field.
+    /**
+     * Ask the server whether its outbound proxy is working, and paint the badge.
+     *
+     * @param {string|null} overrideUrl Test this URL instead of the stored one.
+     *   Passed after a save because the settings write is debounced 400ms and
+     *   fire-and-forget (see archive-api.js flushSettings) -- reading the stored
+     *   value straight after a save would race that timer and sometimes report
+     *   on the *previous* proxy. Null reads whatever is stored.
+     */
+    async function updateProxyStatus(overrideUrl) {
+        if (!proxyStatusBadge) return;
+        const paint = (cls, text, detail) => {
+            proxyStatusBadge.className = `settings-status-badge ${cls}`;
+            proxyStatusBadge.innerHTML = `<i class="fa-solid fa-circle"></i> ${text}`;
+            if (proxyStatusDetail && detail) proxyStatusDetail.textContent = detail;
+        };
+        paint('inactive', 'Checking...');
+        let data;
+        try {
+            const qs = overrideUrl === null ? '' : `?url=${encodeURIComponent(overrideUrl)}`;
+            const resp = await fetch(`/api/v1/proxy/status${qs}`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            data = await resp.json();
+        } catch (e) {
+            paint('error', 'Check failed', `Could not reach the archive server: ${e.message}`);
+            return;
+        }
+        const seenAs = data.direct_ip ? ` Direct connection looks like ${data.direct_ip}.` : '';
+        if (data.state === 'unset') {
+            paint('inactive', 'Direct (no proxy)', `Fetching without a proxy.${seenAs}`);
+        } else if (data.state === 'ok') {
+            paint('active', `Connected · ${data.proxy_ip}`,
+                `The proxy is carrying traffic: it reports ${data.proxy_ip}.${seenAs} ${data.latency_ms}ms.`);
+        } else if (data.state === 'bypassed') {
+            // Not an error and not a success: reachable, but the outside world
+            // sees the same address either way, so nothing is being hidden.
+            paint('warn', `Same IP · ${data.proxy_ip}`,
+                `The proxy answered but reports the same address as a direct connection (${data.proxy_ip}), so traffic may not be routing through it.`);
+        } else {
+            paint('error', 'Unreachable', `${data.url || 'The proxy'} could not be used: ${data.error || 'unknown error'}`);
+        }
+    }
 
+    /**
+     * The post-save check. Reports through a toast rather than the badge,
+     * because the settings modal has closed by the time this resolves.
+     */
+    async function verifyProxyAfterSave(url) {
+        try {
+            const qs = `?url=${encodeURIComponent(url)}`;
+            const data = await (await fetch(`/api/v1/proxy/status${qs}`)).json();
+            if (data.state === 'ok') {
+                showToast(`Proxy connected - external IP ${data.proxy_ip}`, 'success');
+            } else if (data.state === 'bypassed') {
+                showToast(`Proxy reachable but not changing your IP (${data.proxy_ip})`, 'warning');
+            } else if (data.state === 'unset') {
+                showToast('Proxy cleared - fetching directly', 'success');
+            } else {
+                showToast(`Proxy unreachable: ${data.error || 'unknown error'}`, 'error');
+            }
+        } catch (e) {
+            showToast(`Could not verify the proxy: ${e.message}`, 'error');
+        }
+    }
 
-    // Session Validation - Pygmalion
-    const validatePygmalionBtn = document.getElementById('validatePygmalionBtn');
-    
-    // Session Validation - Wyvern
-    const validateWyvernBtn = document.getElementById('validateWyvernBtn');
+    if (testProxyBtn) {
+        // Tests what is typed, not what is stored, so a URL can be checked
+        // before committing it.
+        testProxyBtn.addEventListener('click', () => {
+            updateProxyStatus(httpProxyUrlInput ? httpProxyUrlInput.value.trim() : '');
+        });
+    }
 
     // DataCat session management
     function updateDatacatSessionStatus() {
@@ -1668,82 +1747,6 @@ function setupSettingsModal() {
             }
         };
     }
-
-    // ---- Saucepan Account (native extraction) ----
-    // Token persistence lives in window.saucepanLogin/saucepanSetToken/
-    // saucepanClearSession (saucepan-provider.js); handlers here only drive the UI.
-
-    const toggleSaucepanPasswordVisibility = document.getElementById('toggleSaucepanPasswordVisibility');
-
-
-    const saveSaucepanTokenBtn = document.getElementById('saveSaucepanTokenBtn');
-    if (saveSaucepanTokenBtn) {
-        saveSaucepanTokenBtn.onclick = async () => {
-            const pasted = (saucepanTokenInput?.value || '').trim();
-            if (!pasted) {
-                showToast('Paste a Saucepan token first', 'warning');
-                return;
-            }
-            if (!window.saucepanSetToken) {
-                showToast('Saucepan module not ready', 'error');
-                return;
-            }
-            const original = saveSaucepanTokenBtn.innerHTML;
-            saveSaucepanTokenBtn.disabled = true;
-            saveSaucepanTokenBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
-            try {
-                const result = await window.saucepanSetToken(pasted);
-                if (result?.ok) {
-                    showToast('Saucepan token saved', 'success');
-                } else {
-                    showToast(result?.error || 'Failed to save token', 'warning');
-                }
-            } catch (err) {
-                showToast(`Save error: ${err.message}`, 'error');
-            } finally {
-                saveSaucepanTokenBtn.disabled = false;
-                saveSaucepanTokenBtn.innerHTML = original;
-            }
-        };
-    }
-
-    const validateSaucepanBtn = document.getElementById('validateSaucepanBtn');
-    if (validateSaucepanBtn) {
-        validateSaucepanBtn.onclick = async (e) => {
-            e.preventDefault();
-            if (!window.saucepanValidateSession) {
-                showToast('Saucepan module not ready', 'error');
-                return;
-            }
-            const originalHtml = validateSaucepanBtn.innerHTML;
-            validateSaucepanBtn.classList.remove('success', 'error');
-            validateSaucepanBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-            validateSaucepanBtn.disabled = true;
-            try {
-                const result = await window.saucepanValidateSession();
-                if (result?.valid) {
-                    validateSaucepanBtn.classList.add('success');
-                    validateSaucepanBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
-                    showToast('Saucepan token is valid!', 'success');
-                } else {
-                    validateSaucepanBtn.classList.add('error');
-                    validateSaucepanBtn.innerHTML = '<i class="fa-solid fa-times"></i>';
-                    showToast(`Saucepan token invalid: ${result?.reason || 'unknown'}`, 'error');
-                }
-            } catch (err) {
-                validateSaucepanBtn.classList.add('error');
-                validateSaucepanBtn.innerHTML = '<i class="fa-solid fa-exclamation"></i>';
-                showToast(`Validation error: ${err.message}`, 'error');
-            } finally {
-                validateSaucepanBtn.disabled = false;
-                setTimeout(() => {
-                    validateSaucepanBtn.classList.remove('success', 'error');
-                    validateSaucepanBtn.innerHTML = originalHtml;
-                }, 3000);
-            }
-        };
-    }
-
 
     // ---- DataCat's JanitorAI Login (session cookie; unlocks Hampter pagination) ----
     // Its own session, not the provider's; refresh lives in datacat-provider (window.datacatJanitorai*).

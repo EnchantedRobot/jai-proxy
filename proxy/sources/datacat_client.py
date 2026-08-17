@@ -24,6 +24,7 @@ from typing import Any
 import httpx
 
 from proxy.config import ROOT, settings
+from proxy.runtime import net
 
 logger = logging.getLogger(__name__)
 
@@ -125,10 +126,7 @@ class DatacatImageResolver:
         persist: bool = True,
         env_path: Path | None = None,
     ) -> None:
-        self._owns_client = client is None
-        self._client = client or httpx.Client(
-            timeout=15.0, headers=_HEADERS, proxy=settings.http_proxy or None
-        )
+        self._clients = net.SyncClientHolder(client, timeout=15.0, headers=_HEADERS)
         self._session_token: str | None = settings.datacat_session_token or None
         self._persist = persist
         self._env_path = env_path or (ROOT / ".env")
@@ -137,7 +135,7 @@ class DatacatImageResolver:
         if self._session_token:
             return self._session_token
         resp = _request(
-            self._client,
+            self._clients.get(),
             "POST",
             f"{DATACAT_API_BASE}/api/liberator/identify",
             json={"deviceToken": str(uuid.uuid4())},
@@ -161,7 +159,7 @@ class DatacatImageResolver:
 
     def _fetch_character(self, character_id: str, token: str) -> httpx.Response | None:
         return _request(
-            self._client,
+            self._clients.get(),
             "GET",
             f"{DATACAT_API_BASE}/api/characters/{character_id}",
             headers={"X-Session-Token": token},
@@ -194,8 +192,7 @@ class DatacatImageResolver:
         return _original_avatar_url(data.get("character") or {})
 
     def close(self) -> None:
-        if self._owns_client:
-            self._client.close()
+        self._clients.close()
 
 
 # ---------------------------------------------------------------------------
@@ -243,10 +240,7 @@ class DatacatSession:
     should inherit."""
 
     def __init__(self, client: httpx.AsyncClient | None = None) -> None:
-        self._owns_client = client is None
-        self._client = client or httpx.AsyncClient(
-            timeout=15.0, headers=_HEADERS, proxy=settings.http_proxy or None
-        )
+        self._clients = net.AsyncClientHolder(client, timeout=15.0, headers=_HEADERS)
         self._token: str | None = None
 
     @property
@@ -260,7 +254,7 @@ class DatacatSession:
         self._token = None
 
     async def _test_token(self, token: str) -> httpx.Response:
-        return await self._client.get(
+        return await (await self._clients.get()).get(
             f"{DATACAT_API_BASE}/api/characters/recent-public",
             params={"limit": 1, "offset": 0, "summary": 1, "minTotalTokens": 889},
             headers={"X-Session-Token": token},
@@ -280,7 +274,7 @@ class DatacatSession:
             self._token = None
 
         try:
-            resp = await self._client.post(
+            resp = await (await self._clients.get()).post(
                 f"{DATACAT_API_BASE}/api/liberator/identify",
                 json={"deviceToken": str(uuid.uuid4())},
             )
@@ -328,7 +322,8 @@ class DatacatSession:
         if query:
             url = f"{url}?{query}"
         try:
-            return await self._client.get(url, headers={"X-Session-Token": self._token})
+            client = await self._clients.get()
+            return await client.get(url, headers={"X-Session-Token": self._token})
         except httpx.HTTPError as exc:
             raise DatacatSessionError(502, f"Failed to reach DataCat: {exc}") from exc
 
@@ -336,7 +331,7 @@ class DatacatSession:
         """A logged-in, non-background public session id datacat's extraction
         endpoint wants when the result should land on the public feed."""
         try:
-            resp = await self._client.get(
+            resp = await (await self._clients.get()).get(
                 f"{DATACAT_API_BASE}/api/users", headers={"X-Session-Token": self._token}
             )
         except httpx.HTTPError:
@@ -415,7 +410,7 @@ class DatacatSession:
             }
 
         try:
-            resp = await self._client.post(
+            resp = await (await self._clients.get()).post(
                 endpoint,
                 json=body,
                 headers={"X-Session-Token": self._token, "X-Request-Id": request_id},
@@ -429,5 +424,4 @@ class DatacatSession:
         return resp.status_code, data
 
     async def close(self) -> None:
-        if self._owns_client:
-            await self._client.aclose()
+        await self._clients.aclose()
