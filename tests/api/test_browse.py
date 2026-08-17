@@ -8,6 +8,8 @@ broken browse grid there, with nothing in between to catch it.
 
 from __future__ import annotations
 
+import os
+
 from tests.conftest import card_png, jai_extensions
 
 
@@ -86,8 +88,15 @@ def test_sorting_by_added_uses_acquisition_time_not_the_files_mtime(client, popu
         card_png("Zoe", extensions=extensions)
     )
     # Every *other* card looks freshly written, so mtime and linkedAt disagree.
-    for name in ("Abbie_0d162f5f.png", "Bella_11112222.png", "Cleo_33334444.png"):
-        (populated_archive["characters"] / name).touch()
+    # Stamped rather than touched: Linux takes mtimes from the coarse clock, so
+    # four writes in a row can share one timestamp, and the tie-break (filename,
+    # reversed along with the sort) would hand `-modified` to Zoe anyway.
+    zoe_mtime = (populated_archive["characters"] / "Zoe_99990000.png").stat().st_mtime
+    for offset, name in enumerate(
+        ("Abbie_0d162f5f.png", "Bella_11112222.png", "Cleo_33334444.png"), start=1
+    ):
+        path = populated_archive["characters"] / name
+        os.utime(path, (zoe_mtime + offset, zoe_mtime + offset))
     client.post("/api/v1/refresh")
 
     assert _names(client.get("/api/v1/characters?sort=-added").json())[0] == "Zoe"
