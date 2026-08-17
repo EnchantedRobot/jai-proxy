@@ -8162,15 +8162,6 @@ html:not(.cl-mobile) .settings-row[data-platform="mobile"] { display: none !impo
     font-size: var(--font-4xs);
 }
 
-/* A textarea cannot be type="password", so the one credential that lives in one (the
-   CharacterTavern session cookie) is masked this way instead. The unprefixed property is not
-   in any shipping engine yet; it is listed so this stops being prefix-only for free later.
-   Worst case on an engine supporting neither is the previous behaviour, plaintext. */
-.cl-masked-field:not(.revealed) {
-    -webkit-text-security: disc;
-    text-security: disc;
-}
-
 /* Badge plus its action buttons on one baseline. Without this the inline-flex badge and the
    inline-block buttons sit on different baselines and the row looks broken. */
 #janitoraiManagedStatusRow {

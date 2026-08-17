@@ -1519,24 +1519,12 @@ function setupSettingsModal() {
         
         // Save defaults to storage (preserving tokens/credentials)
         const preserveChub = getSetting('chubRememberToken') ? getSetting('chubToken') : null;
-        const preservePyg = getSetting('pygmalionRememberCredentials');
-        const preserveWyv = getSetting('wyvernRememberCredentials');
         setSettings({
             ...DEFAULT_SETTINGS,
             chubToken: preserveChub,
-            pygmalionEmail: preservePyg ? getSetting('pygmalionEmail') : null,
-            pygmalionPassword: preservePyg ? getSetting('pygmalionPassword') : null,
-            pygmalionToken: preservePyg ? getSetting('pygmalionToken') : null,
-            wyvernEmail: preserveWyv ? getSetting('wyvernEmail') : null,
-            wyvernPassword: preserveWyv ? getSetting('wyvernPassword') : null,
-            wyvernToken: preserveWyv ? getSetting('wyvernToken') : null,
-            wyvernRefreshToken: preserveWyv ? getSetting('wyvernRefreshToken') : null,
-            wyvernUid: preserveWyv ? getSetting('wyvernUid') : null,
             datacatToken: getSetting('datacatToken') || null,
             datacatJanitoraiToken: getSetting('datacatJanitoraiToken') || null,
             datacatJanitoraiRefreshToken: getSetting('datacatJanitoraiRefreshToken') || null,
-            saucepanToken: getSetting('saucepanToken') || null,
-            ctCookie: getSetting('ctCookie') || null,
             janitoraiToken: getSetting('janitoraiToken') || null,
             janitoraiRefreshToken: getSetting('janitoraiRefreshToken') || null,
             janitoraiEmail: getSetting('janitoraiEmail') || null,
@@ -1560,16 +1548,6 @@ function setupSettingsModal() {
         
         showToast('Settings restored to defaults', 'success');
     };
-
-    // Session Validation - CharacterTavern
-    // A textarea cannot be type="password", so this credential masks via .cl-masked-field.
-
-
-    // Session Validation - Pygmalion
-    const validatePygmalionBtn = document.getElementById('validatePygmalionBtn');
-    
-    // Session Validation - Wyvern
-    const validateWyvernBtn = document.getElementById('validateWyvernBtn');
 
     /**
      * Ask the server whether its outbound proxy is working, and paint the badge.
@@ -1769,82 +1747,6 @@ function setupSettingsModal() {
             }
         };
     }
-
-    // ---- Saucepan Account (native extraction) ----
-    // Token persistence lives in window.saucepanLogin/saucepanSetToken/
-    // saucepanClearSession (saucepan-provider.js); handlers here only drive the UI.
-
-    const toggleSaucepanPasswordVisibility = document.getElementById('toggleSaucepanPasswordVisibility');
-
-
-    const saveSaucepanTokenBtn = document.getElementById('saveSaucepanTokenBtn');
-    if (saveSaucepanTokenBtn) {
-        saveSaucepanTokenBtn.onclick = async () => {
-            const pasted = (saucepanTokenInput?.value || '').trim();
-            if (!pasted) {
-                showToast('Paste a Saucepan token first', 'warning');
-                return;
-            }
-            if (!window.saucepanSetToken) {
-                showToast('Saucepan module not ready', 'error');
-                return;
-            }
-            const original = saveSaucepanTokenBtn.innerHTML;
-            saveSaucepanTokenBtn.disabled = true;
-            saveSaucepanTokenBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
-            try {
-                const result = await window.saucepanSetToken(pasted);
-                if (result?.ok) {
-                    showToast('Saucepan token saved', 'success');
-                } else {
-                    showToast(result?.error || 'Failed to save token', 'warning');
-                }
-            } catch (err) {
-                showToast(`Save error: ${err.message}`, 'error');
-            } finally {
-                saveSaucepanTokenBtn.disabled = false;
-                saveSaucepanTokenBtn.innerHTML = original;
-            }
-        };
-    }
-
-    const validateSaucepanBtn = document.getElementById('validateSaucepanBtn');
-    if (validateSaucepanBtn) {
-        validateSaucepanBtn.onclick = async (e) => {
-            e.preventDefault();
-            if (!window.saucepanValidateSession) {
-                showToast('Saucepan module not ready', 'error');
-                return;
-            }
-            const originalHtml = validateSaucepanBtn.innerHTML;
-            validateSaucepanBtn.classList.remove('success', 'error');
-            validateSaucepanBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-            validateSaucepanBtn.disabled = true;
-            try {
-                const result = await window.saucepanValidateSession();
-                if (result?.valid) {
-                    validateSaucepanBtn.classList.add('success');
-                    validateSaucepanBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
-                    showToast('Saucepan token is valid!', 'success');
-                } else {
-                    validateSaucepanBtn.classList.add('error');
-                    validateSaucepanBtn.innerHTML = '<i class="fa-solid fa-times"></i>';
-                    showToast(`Saucepan token invalid: ${result?.reason || 'unknown'}`, 'error');
-                }
-            } catch (err) {
-                validateSaucepanBtn.classList.add('error');
-                validateSaucepanBtn.innerHTML = '<i class="fa-solid fa-exclamation"></i>';
-                showToast(`Validation error: ${err.message}`, 'error');
-            } finally {
-                validateSaucepanBtn.disabled = false;
-                setTimeout(() => {
-                    validateSaucepanBtn.classList.remove('success', 'error');
-                    validateSaucepanBtn.innerHTML = originalHtml;
-                }, 3000);
-            }
-        };
-    }
-
 
     // ---- DataCat's JanitorAI Login (session cookie; unlocks Hampter pagination) ----
     // Its own session, not the provider's; refresh lives in datacat-provider (window.datacatJanitorai*).

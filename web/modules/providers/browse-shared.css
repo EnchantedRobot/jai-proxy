@@ -136,8 +136,6 @@
 }
 
 .chub-view-btn,
-.pyg-view-btn,
-.wyvern-view-btn,
 .datacat-view-btn {
     padding: 8px 14px;
     background: transparent;
@@ -155,16 +153,12 @@
 }
 
 .chub-view-btn:hover,
-.pyg-view-btn:hover,
-.wyvern-view-btn:hover,
 .datacat-view-btn:hover {
     color: var(--text-primary);
     background: rgba(255, 255, 255, 0.05);
 }
 
 .chub-view-btn.active,
-.pyg-view-btn.active,
-.wyvern-view-btn.active,
 .datacat-view-btn.active {
     background: var(--accent);
     color: var(--accent-text);
@@ -172,8 +166,6 @@
 }
 
 .chub-view-btn i,
-.pyg-view-btn i,
-.wyvern-view-btn i,
 .datacat-view-btn i {
     font-size: var(--font-sm);
 }
@@ -187,10 +179,7 @@
 }
 
 [data-select-id="chubDiscoveryPreset"],
-[data-select-id="chubTimelineSortHeader"],
-[data-select-id="pygFollowingSortSelect"],
-[data-select-id="botbooruSortPreset"],
-[data-select-id="botbooruTimelineSortHeader"] {
+[data-select-id="chubTimelineSortHeader"] {
     transition: opacity 0.15s ease, visibility 0.15s ease;
 }
 
@@ -213,9 +202,7 @@
 }
 
 
-[data-select-id="chubTimelineSortHeader"],
-[data-select-id="pygFollowingSortSelect"],
-[data-select-id="botbooruTimelineSortHeader"] {
+[data-select-id="chubTimelineSortHeader"] {
     position: absolute;
     top: 0;
     left: 0;
@@ -269,7 +256,7 @@
     gap: var(--space-sm);
 }
 
-/* Heart-red follow button shared by every author/uploader banner (chub, wyvern, botbooru) */
+/* Heart-red follow button shared by every author/uploader banner (chub, datacat) */
 .browse-author-follow-btn {
     background: linear-gradient(135deg, rgba(var(--cl-error-bright-rgb), 0.2), rgba(var(--cl-error-bright-darker-rgb), 0.2));
     border: 1px solid rgba(var(--cl-error-bright-rgb), 0.4);
@@ -721,8 +708,6 @@
 .online-filters {
     gap: var(--space-sm-md);
 }
-
-/* Pygmalion Login - plugin status & auth status */
 
 /* ChubAI Character Preview Modal */
 .browse-char-modal {
@@ -1334,7 +1319,7 @@ body.collapse-all-browse-sections
     gap: var(--space-sm-md);
 }
 
-/* Gallery thumbnail grid (Wyvern preview modal) */
+/* Gallery thumbnail grid (chub/datacat preview modal) */
 .browse-gallery-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
@@ -2179,8 +2164,6 @@ html.cl-mobile .filter-area.online-filters .chub-view-toggle {
     gap: var(--space-2xs);
 }
 html.cl-mobile .filter-area.online-filters .chub-view-btn,
-html.cl-mobile .filter-area.online-filters .pyg-view-btn,
-html.cl-mobile .filter-area.online-filters .wyvern-view-btn,
 html.cl-mobile .filter-area.online-filters .datacat-view-btn {
     font-size: var(--font-2xs);
     padding: 4px 7px;

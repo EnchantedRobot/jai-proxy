@@ -9,16 +9,6 @@ const DEFAULT_SETTINGS = {
     // ---- Credentials & Auth ----
     chubToken: null,
     chubRememberToken: true,
-    pygmalionEmail: null,
-    pygmalionPassword: null,
-    pygmalionToken: null,
-    pygmalionRememberCredentials: true,
-    wyvernEmail: null,
-    wyvernPassword: null,
-    wyvernToken: null,
-    wyvernRefreshToken: null,
-    wyvernUid: null,
-    wyvernRememberCredentials: true,
     datacatToken: null,
     datacatPublicFeed: false,
     datacatReextractOnUpdate: false,
@@ -26,7 +16,6 @@ const DEFAULT_SETTINGS = {
     // shared pair breaks whichever provider refreshes second.
     datacatJanitoraiToken: null,
     datacatJanitoraiRefreshToken: null,
-    saucepanToken: null,
     janitoraiToken: null,
     janitoraiRefreshToken: null,
     // Kept so a lapsed session can be renewed without hunting for the password again.
@@ -37,7 +26,6 @@ const DEFAULT_SETTINGS = {
     janitoraiBrowserMode: 'managed',
     janitoraiNsfw: false,
     janitoraiExtractOnUpdate: false,
-    ctCookie: null,
 
     // ---- Network ----
     // The outbound proxy the *server* routes its own fetches through -- media
@@ -50,12 +38,7 @@ const DEFAULT_SETTINGS = {
     // ---- NSFW Toggles ----
     chubNsfw: false,
     jannyNsfw: false,
-    pygmalionNsfw: false,
-    wyvernNsfw: false,
-    ctNsfw: false,
     datacatNsfw: false,
-    saucepanNsfw: false,
-    saucepanHideExtreme: false,
 
     // ---- Search & Sort ----
     defaultSort: 'name_asc',
@@ -106,7 +89,6 @@ const DEFAULT_SETTINGS = {
     customCSSMode: 'raw',
     exportAsLinks: false,
     showProviderTagline: true,
-    showWyvernTagline: true,
     allowRichTagline: false,
     displayNamePreference: 'card',
     displayNameOverrideEnabled: true,
