@@ -119,23 +119,28 @@ def test_a_thumbnail_is_generated_on_miss_and_cached(client, gallery_dir, popula
     assert resp.status_code == 200
     assert len(resp.content) < len(real_jpeg((1600, 1200)))
 
-    cached = populated_archive["thumbs"] / "gallery" / "Abbie_kzbYR2QbpncC" / "big.jpg_384.jpg"
-    assert cached.is_file(), "the CharacterLibrary cache layout, so 3,446 inherited folders still hit"
+    cached = populated_archive["thumbs"] / "gallery" / "Abbie_kzbYR2QbpncC" / "big.jpg_288.webp"
+    assert cached.is_file(), "CharacterLibrary's cache layout, with WebP's own extension"
     assert client.get(url).content == resp.content
 
 
-def test_a_gallery_thumbnail_is_fitted_not_cropped(client, gallery_dir):
-    """A card avatar is cover-cropped to the grid's 2:3 tile. A gallery holds
-    every aspect ratio there is, and cropping a wide illustration to a square is
-    destroying the picture to make a tile."""
+def test_a_gallery_thumbnail_is_cover_cropped_to_the_square_tile(client, gallery_dir):
+    """The tile it lands in is `aspect-ratio: 1` with `object-fit: cover`, so a
+    fitted thumb would just be cropped again by the browser -- shipping an edge
+    that is decoded and thrown away, and sizing the image off its long edge when
+    the tile renders from its short one."""
     (gallery_dir / "wide.jpg").write_bytes(real_jpeg((1600, 400)))
 
     resp = client.get("/api/v1/galleries/Abbie_kzbYR2QbpncC/files/wide.jpg/thumb?size=384")
     image = Image.open(io.BytesIO(resp.content))
-    assert image.size == (384, 96)
+    assert image.size == (384, 384)
+    assert image.format == "WEBP"
 
 
 def test_an_image_smaller_than_the_box_is_not_upscaled(client, gallery_dir):
+    """No upscaling, even though the box is a square now: a 100x60 sprite gets a
+    100x60 thumb rather than a blurry 384x384 one larger than the image it
+    stands in for. The tile's own `object-fit: cover` finishes the job."""
     (gallery_dir / "tiny.jpg").write_bytes(real_jpeg((100, 60)))
 
     resp = client.get("/api/v1/galleries/Abbie_kzbYR2QbpncC/files/tiny.jpg/thumb?size=384")

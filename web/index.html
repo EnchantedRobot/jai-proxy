@@ -1298,15 +1298,15 @@ https://jannyai.com/characters/uuid_slug
                             <div class="settings-group-title"><i class="fa-solid fa-image"></i> Grid Card Thumbnails</div>
                             <div class="settings-row">
                                 <label>
-                                    <input type="checkbox" id="settingsUseGridThumbnails"> Use thumbnails in characters view
+                                    <input type="checkbox" id="settingsUseGridThumbnails" checked> Use thumbnails in characters view
                                 </label>
-                                <span class="settings-hint">Serve smaller images for grid cards. Helps mobile (decode cost drops sharply, fewer empty frames on fast scroll). Detail modal + gallery keep full resolution. Applies to mobile only by default; see desktop option below.</span>
+                                <span class="settings-hint">Serve smaller images for grid cards. Off, every tile loads the entire card PNG &mdash; 788 KB on average, embedded character data and all &mdash; so one screenful is around 32 MB. Detail modal + gallery keep full resolution.</span>
                             </div>
                             <div class="settings-row" id="settingsGridThumbDesktopRow" style="padding-left: 24px;">
                                 <label>
-                                    <input type="checkbox" id="settingsGridThumbDesktop"> Also use on desktop
+                                    <input type="checkbox" id="settingsGridThumbDesktop" checked> Also use on desktop
                                 </label>
-                                <span class="settings-hint">Off (default): thumbnails on mobile only. On: thumbnails everywhere. Desktop has plenty of decode budget, so the win is mostly bandwidth on large libraries.</span>
+                                <span class="settings-hint">On (default): thumbnails everywhere. Off: mobile only, and desktop goes back to full card PNGs.</span>
                             </div>
                             <div id="settingsGridThumbHiResFields">
                                 <div class="settings-row" id="settingsGridThumbHiResRow" style="padding-left: 24px;">
@@ -1318,12 +1318,12 @@ https://jannyai.com/characters/uuid_slug
                                 <div class="settings-row" id="settingsGridThumbSizeRow" style="padding-left: 24px;">
                                     <label for="settingsGridThumbSize">Thumbnail size:</label>
                                     <select id="settingsGridThumbSize" class="glass-select">
-                                        <option value="384" data-icon="fa-solid fa-image">Small (384px wide)</option>
-                                        <option value="512" data-icon="fa-solid fa-image" selected>Medium (512px wide)</option>
-                                        <option value="640" data-icon="fa-solid fa-image">Large (640px wide)</option>
-                                        <option value="768" data-icon="fa-solid fa-image">Extra Large (768px wide)</option>
+                                        <option value="384" data-icon="fa-solid fa-image">Small (384px tall)</option>
+                                        <option value="512" data-icon="fa-solid fa-image">Medium (512px tall)</option>
+                                        <option value="640" data-icon="fa-solid fa-image" selected>Large (640px tall)</option>
+                                        <option value="768" data-icon="fa-solid fa-image">Extra Large (768px tall)</option>
                                     </select>
-                                    <span class="settings-hint">Larger = sharper on high-DPR screens, more decode cost. 512 is a good baseline.</span>
+                                    <span class="settings-hint">The tile is about 330px tall, so 640 is pixel-exact on a 2x-DPR screen (~34 KB per card). Smaller sizes look soft on retina; larger ones cost decode time for pixels the tile cannot show.</span>
                                 </div>
                             </div>
                         </div>

@@ -733,7 +733,12 @@ async function fetchCharacterImages(charOrName) {
 
 
 const GALLERY_PAGE_SIZE = 100;
-const GALLERY_THUMB_SIZE = 384;
+// Matches `thumbs.GALLERY_THUMB_SIZE`, and sized off what `.sprite-item`
+// actually renders: a `minmax(120px, 1fr)` square tile, so ~120-160 CSS px even
+// on an ultrawide, wanting ~2x that on a retina display. The server cover-crops
+// to this exact square, so these are the pixels the tile draws -- no edge is
+// fetched only to be cropped away by `object-fit: cover`.
+const GALLERY_THUMB_SIZE = 288;
 const GALLERY_THUMB_CONCURRENCY = 6;
 const GALLERY_PREWARM_CONCURRENCY = 4;
 const PREWARM_EXTENSIONS = /\.(png|jpe?g|webp)$/i;

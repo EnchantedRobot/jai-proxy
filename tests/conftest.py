@@ -30,7 +30,10 @@ from proxy.config import settings
 def card_png(
     name: str = "Test",
     *,
-    size: tuple[int, int] = (64, 96),
+    # 2:3, and comfortably larger than any thumbnail tier -- real cards are, and
+    # the thumbnailer never upscales, so a fixture smaller than a thumb box would
+    # make every geometry assertion in the suite test the fixture instead.
+    size: tuple[int, int] = (384, 576),
     colour: tuple[int, int, int, int] = (120, 80, 200, 255),
     **fields: Any,
 ) -> bytes:

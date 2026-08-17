@@ -355,6 +355,10 @@ def test_prune_thumbs_drops_orphans_and_keeps_live_ones(client, populated_archiv
 
     thumb_dir = populated_archive["thumbs"] / "gallery" / folder
     thumb_dir.mkdir(parents=True, exist_ok=True)
+    (thumb_dir / f"{live_name}_288.webp").write_bytes(b"webp")
+    (thumb_dir / "ghost.png_288.webp").write_bytes(b"webp")
+    # The pre-WebP encoding, which the cache is still full of. A pruner that only
+    # recognises the current format abandons the files it exists to clean.
     (thumb_dir / f"{live_name}_384.jpg").write_bytes(b"jpg")
     (thumb_dir / "ghost.png_384.jpg").write_bytes(b"jpg")
 
@@ -362,8 +366,10 @@ def test_prune_thumbs_drops_orphans_and_keeps_live_ones(client, populated_archiv
     assert resp.status_code == 200
     body = resp.json()
     assert body["folder"] == folder
-    assert body["removed"] == 1
+    assert body["removed"] == 2
+    assert (thumb_dir / f"{live_name}_288.webp").is_file()
     assert (thumb_dir / f"{live_name}_384.jpg").is_file()
+    assert not (thumb_dir / "ghost.png_288.webp").is_file()
     assert not (thumb_dir / "ghost.png_384.jpg").is_file()
 
 

@@ -1000,3 +1000,150 @@ async def test_download_batch_empty_item_list_yields_nothing(gallery_dir, thumbn
             thumbnail_store=thumbnail_store,
         ))
     assert outcomes == []
+
+
+# --------------------------------------------------------------------------
+# Image-only policy: audio and video are refused at both doors
+# (UNSUPPORTED_EXT_RE on the URL suffix, sniffed type in `finish_item`).
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://cdn.example.com/theme.mp3",
+        "https://cdn.example.com/voice.WAV",
+        "https://cdn.example.com/clip.webm",
+        "https://cdn.example.com/scene.mp4",
+        "https://cdn.example.com/song.m4a",
+        "https://cdn.example.com/track.flac",
+        # The suffix is on the path, so a query string must not hide it.
+        "https://cdn.example.com/theme.mp3?token=abc123",
+        "https://cdn.example.com/theme.mp3#t=30",
+    ],
+)
+def test_unsupported_url_reason_refuses_audio_and_video(url):
+    assert media_writer.unsupported_url_reason(url) is not None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://cdn.example.com/art.png",
+        "https://cdn.example.com/art.webp",
+        "https://cdn.example.com/art.gif",
+        "https://cdn.example.com/art.jpeg",
+        "https://cdn.example.com/art.svg",
+        # A dot in the *query* is not a suffix: this is an image.
+        "https://cdn.example.com/art.png?format=mp4",
+        # Extensionless CDN links stay eligible -- step 5b judges them instead.
+        "https://cdn.example.com/9f8a7b6c",
+    ],
+)
+def test_unsupported_url_reason_allows_images(url):
+    assert media_writer.unsupported_url_reason(url) is None
+
+
+@pytest.mark.asyncio
+async def test_download_item_audio_url_never_touches_the_network(gallery_dir, thumbnail_store):
+    """The suffix gate is the cheap one: a creator's 14MB embedded soundtrack
+    must cost zero bytes, not a fetch followed by a discard."""
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, content=b"ID3" + b"\x00" * 64)
+
+    manifest = media_manifest.empty_manifest()
+    ledger: dict = {}
+    index_state = media_writer.GalleryIndex.build(gallery_dir)
+
+    async with _client_for(handler) as client:
+        outcome = await media_writer.download_item(
+            client,
+            gallery_dir,
+            "gallery",
+            url="https://cdn.example.com/soundtrack.mp3",
+            filename_hint=None,
+            prefix="localized_media",
+            index=1,
+            index_state=index_state,
+            manifest=manifest,
+            ledger=ledger,
+            thumbnail_store=thumbnail_store,
+        )
+
+    assert outcome.status == "skipped"
+    assert outcome.permanent is True
+    assert "not an image" in (outcome.reason or "")
+    assert calls == []
+    assert list(gallery_dir.iterdir()) == []
+    # Nothing persisted: the verdict is a pure function of the URL, so a policy
+    # change later needs no manifest or ledger unwinding.
+    assert manifest["dead"] == {}
+    assert ledger == {}
+
+
+def test_finish_item_refuses_audio_bytes_from_an_innocent_url(gallery_dir, thumbnail_store):
+    """Step 5b, the backstop: the URL claimed `.png`, the bytes are an MP3."""
+    manifest = media_manifest.empty_manifest()
+    ledger: dict = {}
+    index_state = media_writer.GalleryIndex.build(gallery_dir)
+
+    outcome = media_writer.finish_item(
+        gallery_dir,
+        "gallery",
+        url="https://cdn.example.com/cover.png",
+        filename_hint=None,
+        prefix="localized_media",
+        index=1,
+        index_state=index_state,
+        manifest=manifest,
+        ledger=ledger,
+        body=b"ID3" + b"\x00" * 64,
+        content_type="image/png",
+        thumbnail_store=thumbnail_store,
+    )
+
+    assert outcome.status == "skipped"
+    assert outcome.permanent is True
+    assert "not an image" in (outcome.reason or "")
+    assert list(gallery_dir.iterdir()) == []
+    # This one *is* persisted in both ledgers -- the URL carries no hint, so
+    # without a record every run would re-fetch the bytes to re-reject them.
+    assert "https://cdn.example.com/cover.png" in manifest["dead"]
+    assert media_manifest.is_dead(ledger, "https://cdn.example.com/cover.png")
+
+
+def test_finish_item_refuses_video_bytes(gallery_dir, thumbnail_store):
+    manifest = media_manifest.empty_manifest()
+    ledger: dict = {}
+    outcome = media_writer.finish_item(
+        gallery_dir,
+        "gallery",
+        url="https://cdn.example.com/asset",
+        filename_hint=None,
+        prefix="localized_media",
+        index=1,
+        index_state=media_writer.GalleryIndex.build(gallery_dir),
+        manifest=manifest,
+        ledger=ledger,
+        body=b"\x1a\x45\xdf\xa3" + b"\x00" * 32,
+        content_type=None,
+        thumbnail_store=thumbnail_store,
+    )
+    assert outcome.status == "skipped"
+    assert outcome.permanent is True
+    assert list(gallery_dir.iterdir()) == []
+
+
+def test_gallery_index_ignores_leftover_audio_and_video(gallery_dir):
+    """MEDIA_EXT_RE is images-only now, so a stray mp3 that predates the policy
+    is not indexed as gallery media."""
+    (gallery_dir / "localized_media_1_song.mp3").write_bytes(b"ID3" + b"\x00" * 16)
+    (gallery_dir / "localized_media_2_clip.webm").write_bytes(b"\x1a\x45\xdf\xa3")
+    (gallery_dir / "localized_media_3_art.webp").write_bytes(_png_bytes())
+
+    index_state = media_writer.GalleryIndex.build(gallery_dir)
+
+    assert index_state._names == ["localized_media_3_art.webp"]

@@ -63,12 +63,12 @@ def test_media_type_of_a_missing_file_is_generic(store):
 
 def test_generates_on_miss_at_the_inherited_geometry(store):
     """A generated thumb has to sit beside 3,823 inherited ones without the grid
-    showing two sizes."""
+    showing two sizes -- the geometry is inherited, the encoding is not."""
     thumb = store.avatar("Abbie_0d162f5f.png")
     assert thumb is not None
-    assert thumb.media_type == "image/jpeg"
+    assert thumb.media_type == "image/webp"
     image = Image.open(thumb.path)
-    assert image.format == "JPEG"
+    assert image.format == "WEBP"
     assert image.size == thumbs.THUMB_SIZE
     # Cached under the card's own filename -- the key the inherited cache uses.
     assert thumb.path.name == "Abbie_0d162f5f.png"
@@ -90,7 +90,7 @@ def test_wide_source_is_cover_cropped_not_squashed(archive_dirs):
     """Cover-crop, so a landscape avatar comes out as a portrait tile with its
     aspect intact rather than horizontally squeezed."""
     characters = archive_dirs["characters"]
-    (characters / "Wide_1.png").write_bytes(card_png("Wide", size=(400, 100)))
+    (characters / "Wide_1.png").write_bytes(card_png("Wide", size=(400, 200)))
     store = thumbs.ThumbnailStore(archive_dirs["thumbs"], characters)
     thumb = store.generate_avatar("Wide_1.png")
     assert Image.open(thumb.path).size == thumbs.THUMB_SIZE
@@ -120,7 +120,7 @@ def test_generate_overwrites_so_it_doubles_as_repair(store):
     path.write_bytes(b"corrupt")
     assert store.avatar("Abbie_0d162f5f.png").media_type == "application/octet-stream"
     thumb = store.generate_avatar("Abbie_0d162f5f.png")
-    assert thumb.media_type == "image/jpeg"
+    assert thumb.media_type == "image/webp"
 
 
 def test_generate_can_be_declined(store):

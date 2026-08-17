@@ -24,12 +24,19 @@ names the thumb after the card and never revisits the extension. Deriving a
 client are entitled not to, so the media type here is always read from the file's
 magic number and never from its name.
 
-Thumbs generated on a miss keep both halves of that convention -- the card's
-filename and JPEG bytes -- rather than "fixing" the extension. A cache where one
-file in 240 is addressed differently from the rest is a worse bug than an
-inaccurate extension that is never trusted anyway, and the sniff makes the
-inaccuracy harmless. The cache stays drop-in compatible with SillyTavern's in
-both directions.
+Avatar thumbs generated on a miss keep the card's filename rather than "fixing"
+the extension. A cache where one file in 240 is addressed differently from the
+rest is a worse bug than an inaccurate extension that is never trusted anyway,
+and the sniff makes the inaccuracy harmless.
+
+What they no longer keep is the JPEG: everything generated here is WebP now,
+roughly half the bytes at matched quality. That is a one-way door on drop-in
+SillyTavern compatibility, and taken deliberately -- host compatibility is
+already out of scope. It needs no migration either, precisely because of the
+sniff: inherited JPEGs and generated WebP coexist in a directory and both serve
+correctly. Only the *gallery* cache carries the new format in its filenames
+(`_<size>.webp`), because its geometry changed at the same time and its old
+files are being purged rather than kept.
 
 The whole directory is a cache: deleting it costs one regeneration pass, never
 data.
@@ -58,16 +65,31 @@ logger = logging.getLogger("jai_proxy.archive.thumbs")
 # chosen. Raising it means regenerating the whole cache and throwing away the
 # 99.6% head start, which is a separate decision from getting the grid working.
 THUMB_SIZE = (96, 144)
-# CharacterLibrary's gallery-thumb edge, likewise fixed by the 3,446 inherited
-# folders rather than chosen: their files are named `<image>_384.jpg`.
-GALLERY_THUMB_SIZE = 384
+# The gallery-thumb edge. Was 384 to match CharacterLibrary's inherited folders;
+# now sized to what the grid actually renders -- see `_render_thumb` on why the
+# geometry changed with it.
+GALLERY_THUMB_SIZE = 288
 # What `gallery(...)` can actually render. A `.gif` thumbnails to its first frame,
 # which is what a grid wants; video and audio get no thumb at all rather than a
 # placeholder the client would have to recognise. Shared between the API (which
 # extension gets a `thumb_url`) and `scripts/sync_thumbs.py --galleries` (which
 # extension gets pre-rendered).
 THUMBABLE_EXTS = frozenset((".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"))
-_JPEG_QUALITY = 90
+
+# Every thumb this module *generates* is WebP. At the sizes a thumb cache deals
+# in it is roughly half the bytes of the JPEG it replaces at matched quality
+# (measured over 60 real gallery images: 14.9 KB vs 31.8 KB) for ~15% more
+# encode time, which a write-once cache does not care about. Nothing has to be
+# migrated for this: the media type is sniffed from the file's magic number
+# rather than its name, so an inherited JPEG and a generated WebP can sit in the
+# same directory and both be served correctly.
+_THUMB_FORMAT = "WEBP"
+_THUMB_EXT = ".webp"
+_WEBP_QUALITY = 80
+# The extensions a *gallery* thumb file can carry: what we write now, plus the
+# JPEG the inherited cache is full of. Pruning has to recognise both or it stops
+# recognising its own files and leaves them behind forever.
+_GALLERY_THUMB_EXTS = (_THUMB_EXT, ".jpg")
 
 _MAGIC: tuple[tuple[bytes, str], ...] = (
     (b"\xff\xd8\xff", "image/jpeg"),
@@ -142,14 +164,16 @@ class ThumbnailStore:
         return self.root / f"avatar_{size}" / filename
 
     def gallery_path(self, folder: str, filename: str, size: int = GALLERY_THUMB_SIZE) -> Path:
-        """Where a gallery image's thumb lives: `<folder>/<file>_<size>.jpg`.
+        """Where a gallery image's thumb lives: `<folder>/<file>_<size>.webp`.
 
-        CharacterLibrary's `cl_thumbs` convention, kept verbatim -- the size is
-        in the *name* rather than a subdirectory, so one folder holds every size
-        ever requested for its images. 3,446 folders came across on this scheme
-        and renaming them would throw away 780 MB of already-rendered thumbs.
+        CharacterLibrary's `cl_thumbs` layout, kept -- the size is in the *name*
+        rather than a subdirectory, so one folder holds every size ever
+        requested for its images. Only the extension moved, because the bytes
+        are WebP now and a `.jpg` holding WebP would be the same
+        extension-is-a-lie trap the avatar cache already carries; there is no
+        reason to inherit that deliberately when starting a fresh geometry.
         """
-        return self.gallery_dir / folder / f"{filename}_{size}.jpg"
+        return self.gallery_dir / folder / f"{filename}_{size}{_THUMB_EXT}"
 
     def gallery(
         self, source: Path, folder: str, filename: str, size: int = GALLERY_THUMB_SIZE
@@ -168,10 +192,12 @@ class ThumbnailStore:
         self, source: Path, folder: str, filename: str, size: int = GALLERY_THUMB_SIZE
     ) -> ThumbFile | None:
         """Render one gallery image's thumb and cache it. Returns None for
-        anything Pillow cannot open -- a gallery holds video and audio too, and
-        those are the caller's problem to present, not this one's to guess at."""
+        anything Pillow cannot open -- galleries are images-only now
+        (`writer.UNSUPPORTED_EXT_RE`), but an svg or a truncated file still
+        can't be rendered, and that is the caller's problem to present rather
+        than this one's to guess at."""
         try:
-            data = _render_thumb(source.read_bytes(), size=(size, size), cover=False)
+            data = _render_thumb(source.read_bytes(), size=(size, size))
         except (OSError, ValueError, TypeError, Image.DecompressionBombError) as exc:
             logger.info("thumbs: cannot render gallery image %s/%s: %s", folder, filename, exc)
             return None
@@ -250,13 +276,15 @@ class ThumbnailStore:
             shutil.rmtree(directory, ignore_errors=True)
             return 1
         removed = 0
-        # `<image>_<size>.jpg`, so one image has as many thumbs as sizes asked for.
-        for candidate in directory.glob(f"{glob.escape(filename)}_*.jpg"):
-            try:
-                candidate.unlink()
-                removed += 1
-            except OSError:
-                continue
+        # `<image>_<size>.<ext>`, so one image has as many thumbs as sizes asked
+        # for -- and, across the format change, as extensions too.
+        for extension in _GALLERY_THUMB_EXTS:
+            for candidate in directory.glob(f"{glob.escape(filename)}_*{extension}"):
+                try:
+                    candidate.unlink()
+                    removed += 1
+                except OSError:
+                    continue
         return removed
 
     def prune_gallery(self, folder: str, live_filenames: set[str]) -> int:
@@ -297,12 +325,17 @@ class ThumbnailStore:
         return [p for p in entries if p.is_file() and p.name not in known]
 
 
-_GALLERY_THUMB_RE = re.compile(r"^(?P<name>.+)_(?P<size>\d+)\.jpg$")
+_GALLERY_THUMB_RE = re.compile(
+    r"^(?P<name>.+)_(?P<size>\d+)(?P<ext>%s)$"
+    % "|".join(re.escape(extension) for extension in _GALLERY_THUMB_EXTS)
+)
 
 
 def _gallery_thumb_source_name(thumb_filename: str) -> str | None:
-    """The source image a gallery thumb file name (`<image>_<size>.jpg`) was
-    rendered from, or None for anything that isn't one of ours."""
+    """The source image a gallery thumb file name (`<image>_<size>.<ext>`) was
+    rendered from, or None for anything that isn't one of ours. Both the WebP
+    written now and the inherited JPEG count as ours -- a pruner that only knows
+    the current format silently abandons the cache it is meant to be cleaning."""
     match = _GALLERY_THUMB_RE.match(thumb_filename)
     return match.group("name") if match else None
 
@@ -320,20 +353,22 @@ def _avatar_box(size: int | None) -> tuple[int, int]:
     return (max(1, round(size * width / height)), size)
 
 
-def _render_thumb(
-    source: bytes, *, size: tuple[int, int] = THUMB_SIZE, cover: bool = True
-) -> bytes:
-    """An image's pixels as a small JPEG.
+def _render_thumb(source: bytes, *, size: tuple[int, int] = THUMB_SIZE) -> bytes:
+    """An image's pixels as a small WebP, cover-cropped to fill `size` exactly.
 
-    Two callers, two geometries. A *card* avatar is cover-cropped to a fixed 2:3
-    tile (`cover=True`): the grid is uniform, the source is already a portrait,
-    and scaling to fill then trimming the overflow loses less of the subject than
-    padding would. A *gallery* image is fitted inside a square instead
-    (`cover=False`) -- galleries hold every aspect ratio there is, and cropping a
-    wide illustration to a square is destroying the picture to make a tile.
-
-    Either way this matches what the inherited caches already contain, so a
-    generated thumb is indistinguishable from an inherited one beside it.
+    Both callers cover-crop, because both consumers do. A *card* avatar fills a
+    2:3 grid tile; a *gallery* image fills a square one (`.sprite-item` is
+    `aspect-ratio: 1` with `object-fit: cover`). Gallery thumbs used to be
+    *fitted* inside a square box instead, on the reasoning that galleries hold
+    every aspect ratio and cropping a wide illustration to a square destroys the
+    picture. True in general, but it was the wrong trade here: the browser then
+    cover-cropped the result anyway, so the preserved edge was decoded and
+    discarded, and -- worse -- the box was sized on the image's *long* edge while
+    the tile renders from its *short* one. A 2:3 portrait fitted into 384 came
+    out 256 wide and looked soft in a 150px tile at 2x DPR while shipping a third
+    of its bytes into a crop. Cropping here instead makes the delivered pixels
+    exactly the rendered pixels. The thumb is a worse picture and a better
+    thumbnail; the full image is one click away.
 
     For a card the text chunks are irrelevant here -- only the pixels matter --
     but they are why the source is large, and why `Image.open` on a 1.2 MB card
@@ -341,8 +376,10 @@ def _render_thumb(
     """
     image = Image.open(io.BytesIO(source))
     image.load()
-    # JPEG has no alpha. Flatten onto white rather than dropping the channel, so a
+    # Flatten onto white rather than dropping the alpha channel, so a
     # transparent-background avatar comes out white-backed instead of black.
+    # WebP could carry the alpha, but the tiles it lands in have their own
+    # background and a half-transparent thumb reads as a rendering bug.
     if image.mode in ("RGBA", "LA", "P"):
         image = image.convert("RGBA")
         flattened = Image.new("RGB", image.size, (255, 255, 255))
@@ -353,24 +390,27 @@ def _render_thumb(
 
     target_w, target_h = size
     src_w, src_h = image.size
-    # Cover fills the box and overflows; contain fits inside it. `min` also means
-    # a gallery image smaller than the box is left alone rather than upscaled
-    # into a blur.
-    scale = max(target_w / src_w, target_h / src_h) if cover else min(1.0, min(target_w / src_w, target_h / src_h))
+    # Fill the box and overflow, then trim the overflow off -- but never upscale.
+    # A gallery holding a 64px sprite should get a 64px thumb, not a blurry 288px
+    # one that is bigger than the image it stands in for; the tile's own
+    # `object-fit: cover` finishes the job for anything that lands short.
+    scale = min(1.0, max(target_w / src_w, target_h / src_h))
     resized = image.resize(
         (max(1, round(src_w * scale)), max(1, round(src_h * scale))),
         Image.LANCZOS,
     )
-    if cover:
-        left = (resized.width - target_w) // 2
-        # Bias the vertical crop upward: on a portrait avatar the face is above
-        # centre, and a centred crop of a tall image is the classic way to serve
-        # a grid full of torsos.
-        top = (resized.height - target_h) // 3
-        resized = resized.crop((left, top, left + target_w, top + target_h))
+    target_w = min(target_w, resized.width)
+    target_h = min(target_h, resized.height)
+    left = (resized.width - target_w) // 2
+    # Bias the vertical crop upward: on a portrait avatar the face is above
+    # centre, and a centred crop of a tall image is the classic way to serve
+    # a grid full of torsos. Gallery art is mostly portrait too, so it wants the
+    # same bias.
+    top = (resized.height - target_h) // 3
+    resized = resized.crop((left, top, left + target_w, top + target_h))
 
     buffer = io.BytesIO()
-    resized.save(buffer, "JPEG", quality=_JPEG_QUALITY, optimize=True, progressive=True)
+    resized.save(buffer, _THUMB_FORMAT, quality=_WEBP_QUALITY)
     return buffer.getvalue()
 
 

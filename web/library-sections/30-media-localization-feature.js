@@ -240,12 +240,27 @@ async function downloadEmbeddedMediaForCharacter(cardId, mediaUrls, options = {}
     return downloadViaServerRoute(cardId, items, prefix, phase, { onLog, onProgress, shouldAbort, abortSignal });
 }
 
+// Images only, mirroring the server's UNSUPPORTED_EXT_RE (proxy/media/writer.py).
+// Discovery has to filter too, not just the writer: the markdown and <img>
+// patterns below capture whatever URL they find regardless of suffix, so
+// without this an mp3 linked as ![](x.mp3) would still be proposed, fetched,
+// and only then refused -- a round trip per file per run.
+const UNSUPPORTED_MEDIA_EXT = /\.(mp3|wav|ogg|opus|m4a|m4b|flac|aac|mid|midi|mp4|webm|mov|m4v|mkv|avi|flv)$/i;
+
+function isArchivableMediaUrl(url) {
+    try {
+        return !UNSUPPORTED_MEDIA_EXT.test(new URL(url, location.href).pathname);
+    } catch {
+        return !UNSUPPORTED_MEDIA_EXT.test(String(url).split(/[?#]/)[0]);
+    }
+}
+
 /**
- * Extract image/media URLs from text content
+ * Extract image URLs from text content
  */
 function extractMediaUrls(text) {
     if (!text) return [];
-    
+
     const urls = [];
     
     // Match ![](url) markdown - allow one level of balanced parens in the path so
@@ -268,16 +283,11 @@ function extractMediaUrls(text) {
         }
     }
     
-    // Match <audio src="url"> and <source src="url"> HTML format
-    const audioPattern = /<(?:audio|source)[^>]+src=["']([^"']+)["'][^>]*>/g;
-    while ((match = audioPattern.exec(text)) !== null) {
-        if (match[1].startsWith('http')) {
-            urls.push(match[1]);
-        }
-    }
-    
+    // No <audio>/<source> branch on purpose: it existed only to harvest audio,
+    // which the archive no longer stores (see UNSUPPORTED_MEDIA_EXT).
+
     // Match CSS url() patterns: background-image: url('...'), content: url("..."), etc.
-    const cssUrlPattern = /url\(["']?(https?:\/\/[^"')\s]+\.(?:png|jpg|jpeg|gif|webp|svg|mp4|webm|mov|mp3|wav|ogg|m4a))["']?\)/gi;
+    const cssUrlPattern = /url\(["']?(https?:\/\/[^"')\s]+\.(?:png|jpg|jpeg|gif|webp|svg))["']?\)/gi;
     while ((match = cssUrlPattern.exec(text)) !== null) {
         urls.push(match[1]);
     }
@@ -290,12 +300,12 @@ function extractMediaUrls(text) {
     // media never downloaded and the fake URLs landed in the dead ledger.
     // The paren-bearing URLs that are real (postimg's "(1).png") arrive through
     // the markdown branch above, which balances them deliberately.
-    const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`\[\]()]+\.(?:png|jpg|jpeg|gif|webp|svg|mp4|webm|mov|mp3|wav|ogg|m4a)(?:\/[^\s<>"'{}|\\^`\[\]()]+)?)/gi;
+    const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`\[\]()]+\.(?:png|jpg|jpeg|gif|webp|svg)(?:\/[^\s<>"'{}|\\^`\[\]()]+)?)/gi;
     while ((match = urlPattern.exec(text)) !== null) {
         urls.push(match[1]);
     }
 
-    const unique = [...new Set(urls)];
+    const unique = [...new Set(urls)].filter(isArchivableMediaUrl);
     // a proper prefix of a longer capture continuing with / is a truncated twin the raw pattern makes of ext-mid-path urls
     return unique.filter(u => !unique.some(o => o !== u && o.startsWith(u) && o[u.length] === '/'));
 }

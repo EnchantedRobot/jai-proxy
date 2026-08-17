@@ -323,10 +323,10 @@ def test_download_name_survives_non_ascii(client, populated_archive):
     assert "filename*=UTF-8''Am%C3%A9lie_1.png" in disposition
 
 
-def test_thumb_is_generated_and_served_as_jpeg(client, populated_archive):
+def test_thumb_is_generated_and_served_as_webp(client, populated_archive):
     response = client.get("/api/v1/characters/Abbie_0d162f5f.png/thumb")
     assert response.status_code == 200
-    assert response.headers["content-type"] == "image/jpeg"
+    assert response.headers["content-type"] == "image/webp"
     assert response.headers["cache-control"] == "public, max-age=86400"
     card_bytes = (populated_archive["characters"] / "Abbie_0d162f5f.png").stat().st_size
     assert len(response.content) < card_bytes

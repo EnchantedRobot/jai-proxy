@@ -111,10 +111,17 @@ const DEFAULT_SETTINGS = {
     mobileBrowseQuickImport: true,
     mobileSwipeGestures: true,
     mobileHaptics: true,
-    useGridThumbnails: false,
-    gridThumbnailsDesktop: false,
+    // On by default. Off, the grid puts the *whole card PNG* in every tile --
+    // 788 KB average, embedded character JSON and all, for a ~220px tile, so a
+    // full viewport is ~32 MB. The hi-res tier below is ~34 KB and still
+    // pixel-exact at 2x DPR.
+    useGridThumbnails: true,
+    gridThumbnailsDesktop: true,
     gridThumbnailsHiRes: true,
-    gridThumbnailSize: 512,
+    // Tile height in device pixels. The tile is `minmax(200px, 1fr)` at 2:3, so
+    // ~330 CSS px tall, wanting ~660 on a retina display; 640 is the tier that
+    // covers that. 512 -- the old default -- is visibly soft at 2x.
+    gridThumbnailSize: 640,
     enableCharDetailNav: true,
 
     // ---- Provider Config ----

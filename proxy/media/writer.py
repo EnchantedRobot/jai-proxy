@@ -16,8 +16,13 @@ than saved as a broken image.
 
 **WebP happens once, at intake, for stills only.** png/jpeg/bmp and
 single-frame gif/webp are re-encoded (`quality=82, method=4`); animated
-gif/webp, svg, audio and video pass through untouched -- see §4 and §6 of the
-plan for why animated formats are deliberately out of scope here.
+gif/webp and svg pass through untouched -- see §4 and §6 of the plan for why
+animated formats are deliberately out of scope here.
+
+**Images only.** Audio and video are refused, not stored: see
+`UNSUPPORTED_EXT_RE` for why (nothing downstream can use them) and the two
+places that enforce it (`download_item` step 0b on the URL suffix,
+`finish_item` step 5b on the sniffed type).
 
 **Dedupe is a local `scandir` and some SHA-256 reads, not an HTTP round
 trip** -- the entire point of moving the fetch server-side (§3 "Dedup is a
@@ -87,8 +92,9 @@ MIME_TO_EXT: dict[str, str] = {
     "audio/x-m4a": "m4a",
 }
 
-# Still-image types converted to WebP at intake (§4). Anything else --
-# animated gif/webp, svg, audio, video -- is stored exactly as sniffed.
+# Still-image types converted to WebP at intake (§4). Anything else that gets
+# this far -- animated gif/webp, svg -- is stored exactly as sniffed. Audio and
+# video never reach here; step 5b refuses them first.
 _WEBP_CONVERTIBLE_TYPES = {"image/png", "image/jpeg", "image/bmp", "image/gif", "image/webp"}
 
 _WEBP_QUALITY = 82
@@ -102,7 +108,33 @@ _WEBP_METHOD = 4
 # genuinely is "come back later".
 PERMANENT_HTTP = frozenset({400, 401, 402, 403, 404, 410, 451})
 
-MEDIA_EXT_RE = re.compile(r"\.(png|jpg|jpeg|webp|gif|bmp|svg|avif|mp3|wav|ogg|m4a|flac|aac|mp4|webm|mov)$", re.I)
+MEDIA_EXT_RE = re.compile(r"\.(png|jpg|jpeg|webp|gif|bmp|svg|avif)$", re.I)
+
+# Images only, by policy. The archive's whole output is V3 PNG cards and
+# gallery folders for SillyTavern, and ST has no surface that plays a gallery
+# mp3; its expression feature wants static png/webp sprites, which a webm
+# cannot drive. The corpus proved the point -- 87 audio files (570MB, one
+# character alone holding 143MB of mp3) and 16 video files (28MB), zero of
+# them usable downstream. So audio and video are refused rather than stored
+# and ignored, at both doors: by URL suffix before any bytes move, and by
+# sniffed type in `finish_item` for the URLs whose suffix lies or is absent.
+UNSUPPORTED_EXT_RE = re.compile(r"\.(mp3|wav|ogg|opus|m4a|m4b|flac|aac|mid|midi|mp4|webm|mov|m4v|mkv|avi|flv)$", re.I)
+
+
+def unsupported_url_reason(url: str) -> str | None:
+    """Why this URL is refused on its suffix alone, or None to let it through.
+
+    Matched against the *path* only: a query string routinely carries its own
+    dots (`?v=1.2`) and a CDN signature can end in anything, so matching the
+    whole URL would both miss `a.mp3?token=x` and misjudge `a.png?fmt=mp4`.
+    Nothing is persisted for this skip -- it is a pure function of the URL, so
+    re-deciding it next run costs nothing and a policy change needs no
+    unwinding of manifests.
+    """
+    match = UNSUPPORTED_EXT_RE.search(urlsplit(url).path)
+    if not match:
+        return None
+    return f"{match.group(1).lower()} is not an image (audio/video not archived)"
 
 
 @dataclass(frozen=True, slots=True)
@@ -542,6 +574,17 @@ def finish_item(
             return DownloadOutcome("skipped", url, reason=sniff.reason)
         return DownloadOutcome("error", url, reason=sniff.reason, permanent=False)
 
+    # 5b. Image-only policy, for the URLs the suffix gate could not judge:
+    # extensionless CDN links, `?download=1` redirects, an `.png` that is
+    # really an mp4. Unlike the suffix gate this one is recorded permanently in
+    # both ledgers, because the URL carries no hint -- without that, every run
+    # would re-fetch the same 14MB mp3 in order to throw it away again.
+    if not (sniff.media_type or "").startswith("image/"):
+        reason = f"{sniff.media_type or 'unknown'} is not an image (audio/video not archived)"
+        media_manifest.record_failure(ledger, url, permanent=True, status=None, message=reason)
+        media_manifest.record_dead(manifest, url, reason)
+        return DownloadOutcome("skipped", url, reason=reason, permanent=True)
+
     media_manifest.record_success(ledger, url)
 
     # 6. Normalize to WebP (stills only).
@@ -598,6 +641,14 @@ async def download_item(
     already = manifest_hit(manifest, index_state, url)
     if already:
         return DownloadOutcome("skipped", url, file=already, reason="already downloaded")
+
+    # 0b. Image-only policy (see `UNSUPPORTED_EXT_RE`). Ahead of the guard and
+    # the ledgers because it is the cheapest check there is and the one most
+    # likely to fire on a creator's embedded soundtrack: a 14MB mp3 refused
+    # here costs nothing, whereas the sniff backstop has to fetch it first.
+    unsupported = unsupported_url_reason(url)
+    if unsupported:
+        return DownloadOutcome("skipped", url, reason=unsupported, permanent=True)
 
     # 3. Per-gallery dead ledger -- already known gone for this character.
     dead_here = manifest.get("dead", {}).get(url)
