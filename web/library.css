@@ -438,7 +438,10 @@ input[type='range'] {
 }
 
 body {
-    font-family: 'Noto Sans', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    /* System font stack — no webfont is bundled. 'Noto Sans' stays late in the
+       list because it's the default UI face on most Linux desktops (and what
+       this app used to ship), so those users see no change at all. */
+    font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
     background-color: var(--bg-primary);
     background-image:
         radial-gradient(circle at 10% 20%, rgba(var(--accent-rgb), 0.05) 0%, transparent 20%),
