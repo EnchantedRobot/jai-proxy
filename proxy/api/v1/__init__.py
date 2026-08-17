@@ -18,10 +18,11 @@ one router here, in the order they were registered when this was a single module
 from fastapi import APIRouter
 
 from proxy.api.v1 import _shared  # noqa: F401  -- re-exported for tests and the server's startup hook
-from proxy.api.v1 import characters, galleries, media, system
+from proxy.api.v1 import characters, galleries, media, network, system
 
 router = APIRouter(prefix=_shared.PREFIX, tags=["archive"])
 router.include_router(characters.router)
 router.include_router(system.router)
 router.include_router(galleries.router)
 router.include_router(media.router)
+router.include_router(network.router)

@@ -268,25 +268,25 @@ let _browseErrorDelegateWired = false;
 function gatherEnvInfo() {
     if (!_envInfoPromise) {
         _envInfoPromise = (async () => {
-            const [manifest, helper, st, corsProxy] = await Promise.all([
+            const [manifest, helper, outbound, corsProxy] = await Promise.all([
                 fetch('../manifest.json', { cache: 'no-cache' }).then(r => r.json()).catch(() => null),
                 (async () => {
                     try { return await (await CoreAPI.apiRequest(`${DC_SESSION_API_BASE}/health`)).json(); } catch { return null; }
                 })(),
-                fetch('/version').then(r => r.json()).catch(() => null),
-                // Probing with our own origin trips ST's circular-request check (400) when the
-                // proxy is enabled, so nothing leaves the server; disabled answers a 404 + text.
-                fetch(`/proxy/${proxyEncode(location.origin)}`).then(async r => {
-                    if (r.status !== 404) return true;
-                    const t = await r.text().catch(() => '');
-                    return t.includes('CORS proxy is disabled') ? false : true;
-                }).catch(() => null),
+                // Was SillyTavern's /version. There is no SillyTavern; what actually
+                // shapes a browse failure now is whether the server's own fetches are
+                // going through an outbound proxy, so the report says that instead.
+                fetch('/api/v1/proxy/status').then(r => r.json()).catch(() => null),
+                // Probing with our own origin: the passthrough's SSRF guard refuses a
+                // loopback target with a 400, which is a *working* route answering. Only
+                // a 404 means no route at all. See proxy/api/cors_proxy.py.
+                fetch(`/proxy/${proxyEncode(location.origin)}`).then(r => r.status !== 404).catch(() => null),
             ]);
             return {
                 cl: manifest?.version || 'unknown',
                 helper: helper?.ok ? `v${helper.version}` : 'absent',
                 basicAuth: helper?.ok ? !!helper.basicAuth : null,
-                st: st?.pkgVersion || 'unknown',
+                outbound: outbound ? (outbound.configured ? `${outbound.state} via ${outbound.url}` : 'direct') : 'unknown',
                 corsProxy,
             };
         })();
@@ -308,7 +308,7 @@ async function buildBrowseErrorReport(c) {
     if (err.status != null) lines.push(`http: ${err.status}`);
     if (err.bodySnippet) lines.push(`body: ${err.bodySnippet}`);
     if (flags) lines.push(`settings: ${flags}`);
-    lines.push(`datacat: ${env.helper} | ST: ${env.st}`);
+    lines.push(`datacat: ${env.helper} | outbound: ${env.outbound}`);
     lines.push(`env: corsProxy=${onOff(env.corsProxy)} | basicAuth=${onOff(env.basicAuth)} | lazyLoad=${onOff(CoreAPI.isStShallowMode())} | mode=${isMobileMode() ? 'mobile' : 'desktop'} | online=${onOff(navigator.onLine)}`);
     lines.push(`ua: ${navigator.userAgent}`);
     return lines.join('\n');

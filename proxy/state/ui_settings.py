@@ -24,6 +24,17 @@ mapping onto SillyTavern's `extension_settings` shape belongs to the client-side
 adapter (`web/archive-api.js`), the same seam every other ST-ism lives behind.
 Keeping the server ignorant is what stops `settings.json` from re-growing a
 SillyTavern shape the archive would then have to honour forever.
+
+THE ONE EXCEPTION
+`proxy.runtime.net` reads exactly one key out of this blob -- `httpProxyUrl`,
+the outbound proxy every server-initiated fetch routes through. It is read
+defensively (a missing key, a wrong type, a damaged file all degrade to "no
+proxy") and never written back from the server side. The alternative was a
+second configuration surface with its own file, endpoint and settings panel for
+a single string, which costs more than the coupling does.
+
+That is the whole exception. Nothing else in the server may read this file: one
+key is a documented seam, two is the beginning of a schema.
 """
 
 from __future__ import annotations

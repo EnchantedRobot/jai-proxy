@@ -39,6 +39,14 @@ const DEFAULT_SETTINGS = {
     janitoraiExtractOnUpdate: false,
     ctCookie: null,
 
+    // ---- Network ----
+    // The outbound proxy the *server* routes its own fetches through -- media
+    // downloads, card avatars, the DataCat session, and the /proxy passthrough
+    // this UI falls back to when a provider refuses a direct request. Read by
+    // proxy/runtime/net.py; null or empty means connect directly. The
+    // JAI_PROXY_HTTP_PROXY environment variable is the fallback when unset.
+    httpProxyUrl: null,
+
     // ---- NSFW Toggles ----
     chubNsfw: false,
     jannyNsfw: false,

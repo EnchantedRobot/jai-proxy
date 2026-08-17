@@ -39,11 +39,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-import httpx
 
 from proxy.archive import thumbs
 from proxy.media import manifest as media_manifest, writer as media_writer
 from proxy.config import settings
+from proxy.runtime import net
 
 logger = logging.getLogger("jai_proxy.media.jobs")
 
@@ -182,8 +182,8 @@ class JobStore:
         # Same scheme the synchronous route uses: a millisecond timestamp as
         # the starting file index, unique across runs with no persistent counter.
         start_index = int(time.time() * 1000)
-        async with httpx.AsyncClient(
-            timeout=30.0, proxy=settings.http_proxy or None, headers={"User-Agent": "Mozilla/5.0"}
+        async with net.async_client(
+            timeout=30.0, headers={"User-Agent": "Mozilla/5.0"}
         ) as client:
             batch = media_writer.download_batch(
                 client,

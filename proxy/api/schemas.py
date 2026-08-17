@@ -466,3 +466,31 @@ class MediaJobStatusOut(BaseModel):
     next_cursor: int = 0
     reason: str | None = None
     bytes: int | None = None
+
+
+class ProxyStatusOut(BaseModel):
+    """`GET /proxy/status` -- is the configured outbound proxy actually carrying
+    traffic, and what does the outside world see us as.
+
+    `state` is what the UI's dot colours off:
+
+    * `unset`     -- no proxy configured; grey. `direct_ip` is still filled in.
+    * `ok`        -- the proxy leg worked and returned a *different* IP from the
+                     direct leg; green. This is the only state that proves the
+                     proxy is carrying traffic rather than merely existing.
+    * `bypassed`  -- both legs worked and returned the same IP; amber. Either
+                     the proxy is transparently forwarding from this same
+                     address, or something is not routing through it.
+    * `error`     -- the proxy leg failed; red, with `error` set.
+
+    `url` is redacted -- the password is replaced with `***` before it leaves
+    the server, since this response goes to a browser and into log lines.
+    """
+
+    configured: bool
+    url: str | None = None
+    state: Literal["unset", "ok", "bypassed", "error"]
+    proxy_ip: str | None = None
+    direct_ip: str | None = None
+    latency_ms: int | None = None
+    error: str | None = None

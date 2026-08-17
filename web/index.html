@@ -1103,6 +1103,25 @@ https://jannyai.com/characters/uuid_slug
                         </div>
 
                         <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-network-wired"></i> Outbound Proxy</div>
+                            <div class="settings-row">
+                                <label for="settingsHttpProxyUrl">Proxy URL:</label>
+                                <div class="settings-input-group">
+                                    <input type="text" id="settingsHttpProxyUrl" class="glass-input" placeholder="http://host:port" autocomplete="off" spellcheck="false">
+                                </div>
+                                <span class="settings-hint">Routes everything this server fetches from the internet: media downloads, card avatars, the DataCat session, and the passthrough the Online tab falls back to when a provider refuses a direct request. Leave empty to connect directly. Takes effect on save &mdash; no restart.</span>
+                            </div>
+                            <div class="settings-row" id="proxyStatusRow">
+                                <label>Status:</label>
+                                <div class="settings-input-group">
+                                    <span id="proxyStatusBadge" class="settings-status-badge inactive"><i class="fa-solid fa-circle"></i> Not checked</span>
+                                    <button id="testProxyBtn" class="glass-btn" type="button"><i class="fa-solid fa-rotate"></i> Test</button>
+                                </div>
+                                <span class="settings-hint" id="proxyStatusDetail">Green only when the proxy reports a different external IP than a direct connection &mdash; that is what proves traffic is actually going through it.</span>
+                            </div>
+                        </div>
+
+                        <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-palette"></i> Theme &amp; Layout</div>
                             <div class="settings-row" id="themeCustomizerBtnRow" style="display:none;">
                                 <button id="openThemeCustomizerBtn" class="settings-action-btn primary"><i class="fa-solid fa-sliders"></i> Open UI Token Customizer</button>

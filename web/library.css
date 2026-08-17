@@ -8187,6 +8187,17 @@ html:not(.cl-mobile) .settings-row[data-platform="mobile"] { display: none !impo
     color: var(--text-muted);
     background: rgba(255, 255, 255, 0.05);
 }
+/* Two more states for the outbound-proxy check, which has an outcome the
+   active/inactive pair can't express: reachable but not actually changing our
+   external address (amber), versus configured and unreachable (red). */
+.settings-status-badge.warn {
+    color: var(--cl-warning);
+    background: rgba(var(--cl-warning-rgb), 0.1);
+}
+.settings-status-badge.error {
+    color: var(--cl-error);
+    background: rgba(var(--cl-error-rgb), 0.1);
+}
 
 /* @canonical settings-provider-badge */
 .settings-provider-badge {

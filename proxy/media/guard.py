@@ -210,6 +210,29 @@ class UnsafeAddressError(Exception):
     pass
 
 
+def preflight_dns(url: str) -> str | None:
+    """A reason string if the URL's host resolves only to blocked addresses or
+    doesn't resolve at all, else None. Not a full pin against TOCTOU (see this
+    module's docstring) -- a best-effort check run immediately before the
+    request, closing the common DNS-rebinding case without the complexity of
+    pinning the resolved IP through TLS SNI.
+
+    Lives here rather than beside either caller because both server-side
+    fetchers -- the media downloader and the browser's CORS passthrough -- must
+    run exactly this check, and a security check with two implementations is a
+    security check with one of them out of date.
+    """
+    parsed = urlsplit(url)
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        resolve_safe_addresses(parsed.hostname or "", port)
+    except UnsafeAddressError as exc:
+        return str(exc)
+    except socket.gaierror as exc:
+        return f"DNS resolution failed: {exc}"
+    return None
+
+
 def check_content_length(declared: int | None, max_bytes: int = MAX_MEDIA_BYTES) -> None:
     """Port of the `Content-Length` pre-check in `readBodyWithCap` (30-…:840-843)."""
     if declared is not None and declared > max_bytes:
