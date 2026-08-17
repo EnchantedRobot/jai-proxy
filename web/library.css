@@ -9710,6 +9710,28 @@ html.cl-initial-loading .mobile-fab {
     border-color: var(--cl-error-bright, #ff6464);
 }
 
+/* The generated userscript. Same monospace treatment as the raw-card editor,
+   but sized to the settings panel rather than the viewport: the script is
+   ~60 KB, so this is a scrollable window onto it, not a place to read it. */
+/* Which of the two tag fields is which, once a placeholder is gone. */
+.userscript-tag-label {
+    flex: 0 0 64px;
+    align-self: center;
+    font-size: var(--font-sm);
+    color: var(--text-secondary);
+}
+
+.userscript-output {
+    width: 100%;
+    height: 320px;
+    margin-top: var(--space-sm-md, 8px);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: var(--font-sm);
+    white-space: pre;
+    overflow: auto;
+    resize: vertical;
+}
+
 /* ==================== INFO TAB (Developer) ==================== */
 
 .info-tab-header {

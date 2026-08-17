@@ -10,15 +10,16 @@ to answer `/characters/edit-attribute` would relocate the compatibility burden
 rather than end it; the translation lives in `web/archive-api.js`, on the client,
 in one deletable file.
 
-The routes are grouped by resource across `characters`, `galleries`, `media` and
-`system`; anything two of them need lives in `_shared`. They are assembled onto
+The routes are grouped by resource across `characters`, `galleries`, `media`,
+`system`, `network` and `userscripts`; anything two of them need lives in
+`_shared`. They are assembled onto
 one router here, in the order they were registered when this was a single module.
 """
 
 from fastapi import APIRouter
 
 from proxy.api.v1 import _shared  # noqa: F401  -- re-exported for tests and the server's startup hook
-from proxy.api.v1 import characters, galleries, media, network, system
+from proxy.api.v1 import characters, galleries, media, network, system, userscripts
 
 router = APIRouter(prefix=_shared.PREFIX, tags=["archive"])
 router.include_router(characters.router)
@@ -26,3 +27,4 @@ router.include_router(system.router)
 router.include_router(galleries.router)
 router.include_router(media.router)
 router.include_router(network.router)
+router.include_router(userscripts.router)

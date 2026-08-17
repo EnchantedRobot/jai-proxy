@@ -22,11 +22,18 @@ proxy/pngquant
 # a developer's .env may set an ARCHIVE_DIR override.
 .env
 
-# The image is the server only; tests, scripts and the userscript sources stay
-# on the host (see README, "What is in the image").
+# The image is the server only; tests, scripts and docs stay on the host (see
+# README, "What is in the image").
+#
+# The userscript *sources* are the exception: the server compiles a configured
+# bridge from them for Settings -> Userscripts (proxy/userscripts.py), which is
+# the only install path a container user has. Only src_jai/ and src_saucepan/
+# are COPYd in, so the tests and the checked-in bundles below never ship.
 tests/
 scripts/
-userscript/
+userscript/tests/
+userscript/package.json
+userscript/*.user.js
 docs/
 example.json
 

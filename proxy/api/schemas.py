@@ -494,3 +494,41 @@ class ProxyStatusOut(BaseModel):
     direct_ip: str | None = None
     latency_ms: int | None = None
     error: str | None = None
+
+
+class UserscriptSpecOut(BaseModel):
+    """One installable bridge, as the settings UI's picker sees it."""
+
+    key: str = Field(description="`jai` or `saucepan` -- the path segment the generate call takes.")
+    label: str
+    site: str = Field(description="The site the script runs on, e.g. `janitorai.com`.")
+    filename: str = Field(description="Suggested filename, and the name Tampermonkey shows.")
+    description: str
+    supports_tag_filter: bool = Field(
+        description="Whether BULK_TAG_FILTER applies -- only the bridge that has a bulk sweep."
+    )
+
+
+class UserscriptRequest(BaseModel):
+    """What to bake into a generated bridge.
+
+    `server_url` is the *fallback* the script compiles in; Tampermonkey storage
+    (`GM_setValue("serverUrl", ...)`) still overrides it at runtime. Omit it to
+    keep the source default (127.0.0.1:8000).
+
+    The two tag lists are omitted rather than empty to mean "leave the source
+    defaults alone" -- an empty `include` is a real setting (export every card).
+    """
+
+    server_url: str | None = None
+    include_tags: list[str] | None = None
+    exclude_tags: list[str] | None = None
+
+
+class UserscriptOut(BaseModel):
+    """A compiled bridge, as text. Nothing is written to disk."""
+
+    key: str
+    filename: str
+    source: str
+    bytes: int

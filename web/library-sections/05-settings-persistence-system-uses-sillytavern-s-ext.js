@@ -35,6 +35,16 @@ const DEFAULT_SETTINGS = {
     // JAI_PROXY_HTTP_PROXY environment variable is the fallback when unset.
     httpProxyUrl: null,
 
+    // ---- Userscript Generator ----
+    // What Settings -> Userscripts last generated (web/lib/userscript-generator.js).
+    // Written only by that panel, through setSettings, so the main Save Settings
+    // button neither reads nor overwrites them. A null server URL means "never
+    // generated one" -- the panel then offers this page's own origin.
+    userscriptKey: 'jai',
+    userscriptServerUrl: null,
+    userscriptIncludeTags: [],
+    userscriptExcludeTags: [],
+
     // ---- NSFW Toggles ----
     chubNsfw: false,
     jannyNsfw: false,
