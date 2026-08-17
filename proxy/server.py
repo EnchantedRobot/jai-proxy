@@ -165,9 +165,14 @@ def _preflight() -> list[str]:
     the uid -- see docs/DEPLOY.md.
     """
     problems: list[str] = []
-    unwritable: list[Path] = [path for path, _ in STARTUP_DIR_ERRORS]
+    unwritable: list[Path] = []
 
+    # Deduplicated by path: the same directory is attempted twice when a store
+    # in proxy.deps re-ensures one config.py already tried (captures, lorecache).
     for path, exc in STARTUP_DIR_ERRORS:
+        if path in unwritable:
+            continue
+        unwritable.append(path)
         problems.append(f"could not create {path}: {exc.strerror or exc}")
 
     for path in REQUIRED_DIRS:
