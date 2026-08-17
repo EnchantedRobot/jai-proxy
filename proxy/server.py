@@ -11,7 +11,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import sys
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
@@ -27,7 +29,7 @@ from proxy.api.capture import router as capture_router
 from proxy.api.chat import router as chat_router
 from proxy.api.datacat import router as datacat_router
 from proxy.api.v1 import _shared as v1_shared
-from proxy.config import ROOT, settings
+from proxy.config import REQUIRED_DIRS, ROOT, STARTUP_DIR_ERRORS, settings
 from proxy.runtime import dashboard as dashboard_mod
 
 logger = logging.getLogger("jai_proxy.server")
@@ -137,6 +139,73 @@ else:  # pragma: no cover -- only in a checkout with the frontend removed
     logger.warning("web/ is missing at %s; the browser UI will not be served", WEB_DIR)
 
 
+def _owner_of(path: Path) -> tuple[Path, int, int] | None:
+    """Who owns the nearest *existing* ancestor of `path`, or None.
+
+    The nearest existing one because a path we could not create is by
+    definition absent -- what the operator needs to see is who owns the
+    directory the creation was attempted in.
+    """
+    for candidate in (path, *path.parents):
+        try:
+            info = candidate.stat()
+        except OSError:
+            continue
+        return candidate, info.st_uid, info.st_gid
+    return None
+
+
+def _preflight() -> list[str]:
+    """Problems with the data mount, as lines to print. Empty means all good.
+
+    This is the failure a remote deployment actually hits: `data/` is a bind
+    mount, and on unraid its host directory is owned by `nobody:users` (99:100)
+    while the image's default user is uid 1000. Without this the symptom is a
+    PermissionError traceback from an import, which names neither the mount nor
+    the uid -- see docs/DEPLOY.md.
+    """
+    problems: list[str] = []
+    unwritable: list[Path] = [path for path, _ in STARTUP_DIR_ERRORS]
+
+    for path, exc in STARTUP_DIR_ERRORS:
+        problems.append(f"could not create {path}: {exc.strerror or exc}")
+
+    for path in REQUIRED_DIRS:
+        if path in unwritable or not path.is_dir():
+            continue
+        # An actual write, not os.access: access() answers from the permission
+        # bits alone and reports success on a read-only mount.
+        probe = path / ".jai-proxy-write-test"
+        try:
+            probe.touch()
+            probe.unlink()
+        except OSError as exc:
+            problems.append(f"cannot write to {path}: {exc.strerror or exc}")
+            unwritable.append(path)
+
+    if problems:
+        # Deduplicated by owner: these directories are normally all inside one
+        # bind mount, so without this every failure repeats the same
+        # "owned by uid=99 gid=100" and buries the one fact that matters.
+        owners: dict[tuple[int, int], Path] = {}
+        for path in unwritable:
+            if found := _owner_of(path):
+                owner_path, uid, gid = found
+                owners.setdefault((uid, gid), owner_path)
+        problems.append(
+            f"the server runs as uid={os.getuid()} gid={os.getgid()}; "
+            + "; ".join(
+                f"{owner_path} is owned by uid={uid} gid={gid}"
+                for (uid, gid), owner_path in owners.items()
+            )
+        )
+        problems.append(
+            "in a container, chown the host directory behind the /app/data mount "
+            "to that uid/gid, or set PUID/PGID to the directory's owner"
+        )
+    return problems
+
+
 def _stats_line() -> str:
     return (
         f"{deps.capture_store.count} captures · "
@@ -152,6 +221,14 @@ def _serve() -> None:
 
 
 def main() -> None:
+    # Before anything else, and before the dashboard takes over the terminal:
+    # an unusable data mount is fatal, and the message has to be readable.
+    if problems := _preflight():
+        print("jai-proxy cannot start -- the data directory is not usable:", file=sys.stderr)
+        for line in problems:
+            print(f"  {line}", file=sys.stderr)
+        raise SystemExit(1)
+
     # The handle lives on the dashboard module rather than being a global here,
     # so the route module that reports into it (proxy/api/build.py) can read it
     # without importing this one -- see the note beside its definition.

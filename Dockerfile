@@ -24,6 +24,13 @@ RUN uv sync --frozen --no-dev --no-install-project
 # --- runtime -----------------------------------------------------------------
 FROM python:3.13-slim-bookworm
 
+# image.source is what links the published package to this repository on GHCR:
+# without it the package shows up in the org with no repo, no README and no
+# provenance, and it cannot inherit the repository's visibility.
+LABEL org.opencontainers.image.source="https://github.com/EnchantedRobot/jai-proxy" \
+      org.opencontainers.image.description="Character archive: browses, builds and serves SillyTavern V3 character cards." \
+      org.opencontainers.image.licenses="NOASSERTION"
+
 # pngquant compresses card avatars before they are embedded. The vendored
 # binary next to proxy/ is a macOS Mach-O one and is excluded by .dockerignore,
 # so PngWriter's PATH fallback picks up this one.
@@ -48,6 +55,13 @@ ENV PATH="/app/.venv/bin:${PATH}" \
 
 # proxy/config.py creates its directories at import time; /app/data is normally
 # a mount, but pre-creating it keeps a mountless `docker run` from failing.
+#
+# uid 1000 is only the DEFAULT. The image must also run under an arbitrary uid
+# (`--user 99:100`, which is what unraid's nobody:users appdata needs), so the
+# invariant is: everything under /app stays world-readable -- and /app/.venv
+# world-executable -- and nothing is written outside /app/data at runtime. COPY
+# leaves 755/644, so chown alone does not break that; do not add a `chmod go-r`
+# or move any writable path out of /app/data without revisiting this.
 RUN mkdir -p /app/data && chown -R app:app /app
 USER app
 

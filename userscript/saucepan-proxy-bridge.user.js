@@ -1,15 +1,24 @@
 // ==UserScript==
 // @name         saucepan-proxy bridge
 // @namespace    https://github.com/EnchantedRobot/jai-proxy
-// @version      0.8.0
+// @version      0.9.0
 // @description  Thin bridge: exports a Saucepan companion as a V3 card PNG via Saucepan's clean JSON API (no DOM scraping) and shows a local jai-proxy connection pill. Card assembly lives server-side.
 // @match        https://saucepan.ai/*
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
+// @grant        GM_setValue
+// @grant        GM_getValue
 // @connect      saucepan.ai
 // @connect      127.0.0.1
 // @connect      localhost
+// @connect      *
 // ==/UserScript==
+//
+// `@connect *` is there because the server no longer has to be on this machine
+// (see docs/DEPLOY.md): its URL is read from Tampermonkey storage at runtime,
+// so the host it points at cannot be declared here at compile time, and without
+// a matching @connect Tampermonkey blocks the request outright. The loopback
+// entries above stay for the default case.
 //
 // SOURCE LAYOUT — this file is COMPILED. Do not edit saucepan-proxy-bridge.user.js
 // by hand; edit userscript/src_saucepan/*.js and run `make compile` (see
@@ -27,7 +36,20 @@
   // be a 1200-line in-page DOM scraper; it now lives server-side in
   // proxy/saucepan_fragments.py + saucepan_mapper.py + cardbuilder.py.)
   // ---------------------------------------------------------------------------
-  const SERVER = "http://127.0.0.1:8000";
+  // Where the jai-proxy server is. Persisted in Tampermonkey storage rather
+  // than compiled in, because it may now be a container on another machine
+  // (docs/DEPLOY.md). To repoint the bridge, run this once in the console on
+  // saucepan.ai — no recompile, no reinstall:
+  //
+  //   GM_setValue("serverUrl", "http://192.168.1.50:8000")
+  //
+  // and reload. Clearing it falls back to the local default below. Plain http
+  // to a LAN address works from HTTPS saucepan: every call goes out through
+  // GM_xmlhttpRequest (see client-server.js), which is exempt from the page's
+  // mixed-content and CSP rules.
+  const DEFAULT_SERVER = "http://127.0.0.1:8000";
+  // Trailing slashes stripped: every call is SERVER + "/some/path".
+  const SERVER = String(GM_getValue("serverUrl", "") || DEFAULT_SERVER).replace(/\/+$/, "");
   const SAUCEPAN_ORIGIN = "https://saucepan.ai";
 
   const TAG = "[saucepan-export]";

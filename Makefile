@@ -1,4 +1,4 @@
-.PHONY: compile test test-js run docker-build docker-up import gallery-ids check names thumbs settings-import
+.PHONY: compile test test-js run docker-build docker-up docker-pull docker-up-prod import gallery-ids check names thumbs settings-import
 
 # Every target reads .env (see .env.template) via proxy/config.py -- most
 # importantly JAI_PROXY_ARCHIVE_DIR, the cards folder they all read and write.
@@ -31,6 +31,16 @@ docker-build:
 
 docker-up:
 	docker compose up -d
+
+# The published image instead of a local build -- what a server runs. Defaults
+# in compose.prod.yaml target unraid (/mnt/user/appdata/jai-proxy, uid 99:100);
+# see docs/DEPLOY.md. Useful on the Mac too, to check what :latest actually
+# does before the server pulls it.
+docker-pull:
+	docker compose -f compose.prod.yaml pull
+
+docker-up-prod:
+	docker compose -f compose.prod.yaml up -d
 
 # Bulk-import card PNGs from ./import into the cards folder -- datacat, JannyAI
 # and Chub.ai exports are auto-detected (see scripts/import_cards.py). Cards

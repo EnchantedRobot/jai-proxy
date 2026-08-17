@@ -123,8 +123,30 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-settings.archive_dir.mkdir(parents=True, exist_ok=True)
-settings.galleries_dir.mkdir(parents=True, exist_ok=True)
-settings.thumbs_dir.mkdir(parents=True, exist_ok=True)
-settings.captures_dir.mkdir(parents=True, exist_ok=True)
-settings.lorebook_cache_dir.mkdir(parents=True, exist_ok=True)
+
+# The directories every consumer -- the server, the scripts, the test suite --
+# assumes already exist, created here at import time.
+#
+# A container is the one place creating them can fail: `data/` is a bind mount,
+# and the host directory may be owned by a uid the container does not run as.
+# Raising here would surface as a bare PermissionError traceback out of an
+# `import`, naming neither the mount nor the uid -- so failures are collected
+# instead and reported by proxy.server's startup preflight, which can say which
+# path, which uid, and who owns it.
+STARTUP_DIR_ERRORS: list[tuple[Path, OSError]] = []
+
+# Also the set the preflight checks for writability: existing is not enough,
+# since mkdir(exist_ok=True) happily succeeds on a directory we cannot write to.
+REQUIRED_DIRS: tuple[Path, ...] = (
+    settings.archive_dir,
+    settings.galleries_dir,
+    settings.thumbs_dir,
+    settings.captures_dir,
+    settings.lorebook_cache_dir,
+)
+
+for _required in REQUIRED_DIRS:
+    try:
+        _required.mkdir(parents=True, exist_ok=True)
+    except OSError as _exc:
+        STARTUP_DIR_ERRORS.append((_required, _exc))

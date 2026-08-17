@@ -36,12 +36,36 @@ everything writable already defaults under `data/` — the archive, galleries,
 thumbnail cache, `settings.json` and the server's working state — so that single
 bind mount is the whole of the container's state, and `JAI_PROXY_HOST=0.0.0.0`
 is the only variable it needs. Nothing is architecture-specific, so it builds
-natively on arm64 and amd64 alike.
+natively on arm64 and amd64 alike (the *published* image is amd64 only — see
+below — because the deployment target is a NAS and development runs from
+source).
 
-⚠️ **Port 8000 is not negotiable and SillyTavern's stock port is also 8000.** The
-userscripts hardcode `http://127.0.0.1:8000` (`userscript/src_jai/client-server.js`,
-`src_saucepan/config.js`), so publishing on anything else breaks export. If
-SillyTavern is running, `docker compose up` fails to bind — stop it or move it.
+⚠️ **SillyTavern's stock port is also 8000**, so `docker compose up` fails to
+bind while it is running — stop it, or publish the archive on another host port.
+The container itself always listens on 8000; the userscripts read the server's
+address from Tampermonkey storage (`serverUrl`), so the host port is free to
+move as long as you set the same one there.
+
+### Remote (unraid)
+
+Pushing to `main` publishes `ghcr.io/enchantedrobot/jai-proxy` — `linux/amd64`,
+`:latest` plus `:sha-<short>` (`.github/workflows/publish.yml`). A server pulls
+that image rather than building:
+
+```bash
+make docker-pull      # docker compose -f compose.prod.yaml pull
+make docker-up-prod
+```
+
+`compose.prod.yaml` and `unraid-template.xml` are the two ways to run it there;
+both default to `/mnt/user/appdata/jai-proxy` for the mount and uid `99:100`
+(unraid's `nobody:users`) for the process. Acquisition keeps working against a
+remote archive with no TLS — the userscripts reach it through
+`GM_xmlhttpRequest`, which is exempt from the page's mixed-content rules.
+
+**[docs/DEPLOY.md](docs/DEPLOY.md)** is the runbook: publishing, making the GHCR
+package public, seeding the mount, and repointing the userscripts. Note that the
+archive has **no authentication** — keep it on the LAN.
 
 The maintenance scripts (`make import` / `check` / `names` / `thumbs` /
 `gallery-ids`) stay on the host and run against the same `./data`. They are not
