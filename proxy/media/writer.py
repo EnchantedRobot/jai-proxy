@@ -94,8 +94,13 @@ _WEBP_CONVERTIBLE_TYPES = {"image/png", "image/jpeg", "image/bmp", "image/gif", 
 _WEBP_QUALITY = 82
 _WEBP_METHOD = 4
 
-# Verbatim PERMANENT_HTTP (media-dedup.js:56).
-PERMANENT_HTTP = frozenset({400, 404, 410, 451})
+# 401/402/403 are ours, not media-dedup.js's: an access refusal doesn't
+# change on retry the way a 429 or a 5xx does. Credentials we don't have
+# aren't credentials we'll acquire, and a host that pulled an image behind
+# auth (preview.redd.it without its signature, Cloudflare on chub.ai) is not
+# going to hand it back on attempt four. 429 stays transient -- that one
+# genuinely is "come back later".
+PERMANENT_HTTP = frozenset({400, 401, 402, 403, 404, 410, 451})
 
 MEDIA_EXT_RE = re.compile(r"\.(png|jpg|jpeg|webp|gif|bmp|svg|avif|mp3|wav|ogg|m4a|flac|aac|mp4|webm|mov)$", re.I)
 

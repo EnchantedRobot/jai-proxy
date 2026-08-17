@@ -129,6 +129,12 @@ const DEFAULT_SETTINGS = {
     // ---- Versions ----
     autoSnapshotOnEdit: true,
     maxAutoBackups: 10,
+
+    // Tag dictionary edits, stored as a delta against the shipped base (see
+    // web/modules/tag-dictionary.js and web/vendor/tag-tools/tag-delta.js).
+    // Only the user's moves are persisted, so a re-vendored base dictionary keeps
+    // flowing through for everything they haven't touched.
+    tagDictionaryDelta: { overrides: {}, blanks: {} },
 };
 
 // Debug logging helper - only logs when debug mode is enabled

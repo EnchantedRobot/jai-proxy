@@ -1,18 +1,20 @@
 /* =========================================================
-   Tag Manager Module Styles
+   Tag Manager Module Styles (Phase 5B editor)
+
+   Port of SillyTavern-Character-Tools/style.css's ctm-* rules (the category
+   tree, chips, buckets, bulk bar, chip menu), re-themed against this app's
+   tokens (see web/library.css:255-287) and kept under the ctm- prefix so the
+   port stays diffable against upstream. The .tm-* rules are this app's own
+   stat-tile/status/empty-state chrome, kept because they're still used
+   inside the summary block.
    ========================================================= */
 
 .tm-status {
     background: rgba(0, 0, 0, 0.2);
     border-radius: var(--radius-lg);
     padding: 12px;
-    color: var(--cl-text-secondary);
+    color: var(--text-secondary);
     font-style: italic;
-    margin-bottom: 16px;
-}
-
-.tm-status.hidden {
-    display: none;
 }
 
 .tm-summary {
@@ -22,7 +24,7 @@
     background: rgba(0, 0, 0, 0.2);
     border-radius: var(--radius-lg);
     padding: 14px;
-    margin-bottom: 20px;
+    margin-bottom: 10px;
 }
 
 .tm-stat {
@@ -35,102 +37,262 @@
 .tm-stat-num {
     font-size: var(--font-xl);
     font-weight: 700;
-    color: var(--cl-text-primary);
+    color: var(--text-primary);
 }
 
 .tm-stat-label {
     font-size: var(--font-xs);
-    color: var(--cl-text-secondary);
+    color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.03em;
 }
 
-.tm-section {
-    margin-bottom: 20px;
+/* =========================================================
+   Ported from upstream ui-editor.js / style.css (ctm-* rules)
+   ========================================================= */
+
+.ctm-summary { margin-bottom: 14px; }
+.ctm-counts { font-size: var(--font-sm); color: var(--text-secondary); margin-top: 4px; }
+.ctm-hint { font-size: var(--font-xs); color: var(--text-faint); margin-top: 6px; font-style: italic; }
+.ctm-link { cursor: pointer; color: var(--accent); }
+.ctm-link:hover { text-decoration: underline; }
+
+/* ── Table ─────────────────────────────────────────────────────── */
+.ctm-table-wrap {
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    overflow-x: auto;
 }
 
-.tm-section:last-of-type {
-    margin-bottom: 0;
-}
-
-.tm-section-title {
+.ctm-table { width: 100%; border-collapse: collapse; font-size: var(--font-sm); }
+.ctm-table thead th {
+    position: sticky;
+    top: 0;
+    background: rgba(0, 0, 0, 0.3);
+    text-align: left;
+    padding: 8px 10px;
     font-weight: 600;
-    margin-bottom: 10px;
-    color: var(--cl-text-primary);
-    font-size: var(--font-base);
+}
+.ctm-table tbody td {
+    padding: 8px 10px;
+    border-top: 1px solid var(--glass-border);
+    vertical-align: middle;
+}
+.ctm-col-count { width: 56px; text-align: right; }
+.ctm-col-dismiss { width: 28px; text-align: center; }
+.ctm-row-dismiss {
+    cursor: pointer;
+    opacity: 0.3;
+    font-size: var(--font-xs);
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+.ctm-row-dismiss:hover { opacity: 1; color: var(--cl-error); background: rgba(var(--cl-error-rgb), 0.12); }
+.ctm-row--muted { opacity: 0.4; }
+
+.ctm-canonical { width: 100%; min-width: 120px; }
+
+.ctm-variants { display: flex; flex-wrap: wrap; gap: 4px; }
+.ctm-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: var(--font-xs);
+}
+.ctm-chip-count { opacity: 0.6; font-size: var(--font-3xs); }
+.ctm-chip-label { cursor: pointer; }
+.ctm-chip-label:hover { text-decoration: underline; }
+.ctm-chip-x {
+    cursor: pointer;
+    opacity: 0.45;
+    font-size: var(--font-3xs);
+    margin-left: 2px;
+    padding: 0 1px;
+}
+.ctm-chip-x:hover { opacity: 1; color: var(--cl-error); }
+
+/* ── Category accordions ───────────────────────────────────────── */
+.ctm-categories { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+
+.ctm-category {
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
 }
 
-.tm-groups,
-.tm-flat {
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: var(--radius-lg);
-    padding: 12px;
-    min-height: 40px;
-}
-
-.tm-flat {
+.ctm-category-header {
     display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-xs-sm);
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    background: rgba(0, 0, 0, 0.25);
+    cursor: pointer;
+    font-weight: 600;
+    font-size: var(--font-xs);
+    list-style: none;
+    user-select: none;
+}
+.ctm-category-header::-webkit-details-marker { display: none; }
+.ctm-category-header::before {
+    content: '▸';
+    font-size: var(--font-3xs);
+    opacity: 0.5;
+    transition: transform 0.15s;
+    flex-shrink: 0;
+}
+details[open] > .ctm-category-header::before { transform: rotate(90deg); }
+
+.ctm-category-name { flex: 1; }
+.ctm-category-count { font-size: var(--font-3xs); opacity: 0.45; font-weight: normal; }
+.ctm-category--clean .ctm-category-name { color: var(--cl-success-pale); }
+
+.ctm-category .ctm-table-wrap {
+    border: none;
+    border-radius: 0;
+    border-top: 1px solid var(--glass-border);
 }
 
-.tm-group {
-    margin-bottom: 12px;
+/* ── Chip move menu ────────────────────────────────────────────── */
+.ctm-chip-menu {
+    position: fixed;
+    z-index: 10001;
+    min-width: 200px;
+    max-width: 320px;
+    background: var(--cl-glass-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
-
-.tm-group:last-child {
-    margin-bottom: 0;
+.ctm-chip-menu-filter {
+    width: 100%;
+    font-size: var(--font-xs);
+    margin-bottom: 2px;
 }
+.ctm-chip-menu-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+.ctm-chip-menu-divider {
+    height: 1px;
+    background: var(--glass-border);
+    margin: 2px 0;
+}
+.ctm-chip-menu-item {
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: var(--font-xs);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ctm-chip-menu-item:hover { background: rgba(255, 255, 255, 0.12); }
+.ctm-chip-menu-item-fixed { opacity: 0.8; }
+.ctm-chip-menu-empty { padding: 5px 10px; font-size: var(--font-xs); opacity: 0.5; }
 
-.tm-group-label {
-    font-size: var(--font-sm);
-    color: var(--cl-text-secondary);
+/* ── Excluded (Unassigned / Removed) strip ────────────────────────── */
+.ctm-excluded { margin-top: 14px; }
+.ctm-excluded-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     margin-bottom: 6px;
 }
-
-.tm-group-pills {
+.ctm-excluded-header { font-size: var(--font-xs); font-weight: 600; opacity: 0.85; }
+.ctm-excluded-toggle { font-size: var(--font-xs); }
+.ctm-excluded-empty { font-size: var(--font-xs); opacity: 0.5; }
+.ctm-excluded-filter { width: 100%; margin-bottom: 8px; }
+.ctm-excluded-strip {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-xs-sm);
+    gap: 4px;
+    max-height: 180px;
+    overflow-y: auto;
+    padding: 2px;
 }
-
-.tm-empty {
-    color: var(--cl-text-secondary);
-    font-style: italic;
-    font-size: var(--font-md);
+.ctm-chip-selected {
+    outline: 2px solid var(--accent);
+    background: rgba(var(--accent-rgb), 0.18);
 }
-
-.tm-count {
-    font-size: var(--font-sm);
-    opacity: 0.7;
+.ctm-chip-excluded { opacity: 0.85; }
+.ctm-chip-removed {
+    background: rgba(var(--cl-error-rgb), 0.15);
+    outline: 1px solid rgba(var(--cl-error-rgb), 0.5);
 }
+.ctm-bucket-removed .ctm-excluded-header { color: var(--cl-error); }
 
-.tm-hint {
+/* ── Bulk action bar ───────────────────────────────────────────── */
+.ctm-bulk-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 6px 8px;
+    margin-bottom: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--glass-border);
     font-size: var(--font-xs);
-    color: var(--cl-text-secondary);
-    margin-top: 8px;
-    font-style: italic;
-    opacity: 0.8;
 }
+.ctm-bulk-count { font-weight: 600; white-space: nowrap; }
+.ctm-bulk-move-wrap { position: relative; flex: 1; min-width: 140px; }
+.ctm-bulk-filter { width: 100%; }
+.ctm-bulk-group-list {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    background: var(--cl-glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 0 0 6px 6px;
+    max-height: 180px;
+    overflow-y: auto;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+.ctm-bulk-group-item {
+    padding: 5px 10px;
+    font-size: var(--font-xs);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ctm-bulk-group-item:hover { background: rgba(255, 255, 255, 0.12); }
+.ctm-bulk-clear { white-space: nowrap; }
+.ctm-bulk-btn {
+    cursor: pointer;
+    white-space: nowrap;
+    padding: 4px 10px;
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--glass-border);
+    font-size: var(--font-xs);
+}
+.ctm-bulk-btn:hover { background: rgba(255, 255, 255, 0.16); }
 
-/* Tag pill coloring -- reuses the .cl-tag base, colored by what would happen */
-.tm-tag-canonical {
-    opacity: 0.6;
+/* Glob match rules from the shipped dictionary. Inert by design: they are
+   rules, not tags, so they carry no count and offer no move/remove affordance. */
+.ctm-chip-rule {
+    background: rgba(255, 196, 0, 0.13);
+    border: 1px dashed rgba(255, 196, 0, 0.5);
+    font-family: var(--monoFontFamily, monospace);
+    cursor: help;
 }
-
-.tm-tag-variant {
-    background: rgba(255, 165, 0, 0.18);
-    border-color: rgba(255, 165, 0, 0.4);
-}
-
-.tm-tag-unassigned {
-    opacity: 0.75;
-}
-
-.tm-tag-removed {
-    background: rgba(220, 53, 69, 0.18);
-    border-color: rgba(220, 53, 69, 0.4);
-}
+.ctm-chip-rule-icon { opacity: 0.7; font-size: var(--font-3xs); }
+.ctm-chip-rule-label { opacity: 0.9; }
+/* A tag pulled in by a rule rather than by a literal alias. */
+.ctm-chip-viarule { box-shadow: inset 0 -2px 0 rgba(255, 196, 0, 0.45); }
 
 /* =========================================================
    Mobile-mode overrides (html.cl-mobile)
@@ -140,12 +302,20 @@ html.cl-mobile .tm-summary {
     padding: 10px;
 }
 
-html.cl-mobile .tm-groups,
-html.cl-mobile .tm-flat {
-    padding: 10px;
-}
-
 html.cl-mobile #tagManagerModal .cl-modal-close {
     padding: 8px 12px;
     font-size: var(--font-xl);
+}
+
+html.cl-mobile .ctm-table-wrap {
+    overflow-x: auto;
+}
+
+html.cl-mobile .ctm-variants {
+    max-width: 60vw;
+}
+
+html.cl-mobile .ctm-bulk-bar {
+    flex-direction: column;
+    align-items: stretch;
 }

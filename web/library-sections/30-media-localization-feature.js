@@ -64,9 +64,9 @@ const DOWNLOAD_FN_TIMEOUT_MS = 60000;
  * @returns {Promise<{success: number, skipped: number, errors: number, aborted: boolean}>}
  */
 async function downloadViaServerRoute(cardId, items, prefix, phase, options = {}) {
-    const { onLog, onProgress, shouldAbort, abortSignal } = options;
+    const { onLog, onProgress, shouldAbort, abortSignal, force } = options;
 
-    if (!items || items.length === 0) {
+    if ((!items || items.length === 0) && !force) {
         return { success: 0, skipped: 0, errors: 0, aborted: false };
     }
 

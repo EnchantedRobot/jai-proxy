@@ -106,10 +106,6 @@ async function downloadCharacterMedia(character, folderName, options = {}) {
     const hasProviderGallery = phaseAllowed('providerGallery') && includeProviderGallery && galleryProvider;
     const hasExtGallery = phaseAllowed('extGallery') && includeExtGalleries && galleryPageUrls.length > 0;
 
-    if (!hasEmbedded && !hasLorebook && !hasProviderGallery && !hasExtGallery) {
-        return result;
-    }
-
     // The card's own archive id -- every phase below downloads through the
     // server route, which resolves the gallery folder from this itself
     // (docs/PHASE_3C_PLAN.md §3), so it's what the phases need, not folderName.
@@ -188,7 +184,23 @@ async function downloadCharacterMedia(character, folderName, options = {}) {
     }
 
     if (isAborted()) result.aborted = true;
-    return sumTotals(result);
+    sumTotals(result);
+
+    // A phase can be "attempted" (hasEmbedded/hasProviderGallery/etc. true
+    // going in) yet still turn up nothing once it actually looks -- a linked
+    // provider whose gallery has zero images, or an external gallery page
+    // that extracts to no images. Each of those phase helpers early-returns
+    // 0/0/0 without ever calling the server (same shape as the all-phases-
+    // empty case above), so no manifest run gets recorded and the card is
+    // rescanned forever without ever reaching "complete". If literally
+    // nothing happened across every phase, force one empty batch through so
+    // a clean run gets written.
+    const totals = result.totals;
+    if (!result.aborted && cardId && totals.success === 0 && totals.skipped === 0 && totals.errors === 0) {
+        await downloadViaServerRoute(cardId, [], 'localized_media', 'embedded', { shouldAbort, abortSignal: signal, force: true }).catch(() => {});
+    }
+
+    return result;
 }
 
 function sumTotals(result) {

@@ -207,12 +207,12 @@ def test_classify_failure_blocked_is_permanent():
     assert media_writer.classify_failure(blocked=True, status=None, message="") is True
 
 
-@pytest.mark.parametrize("status", [400, 404, 410, 451])
+@pytest.mark.parametrize("status", [400, 401, 402, 403, 404, 410, 451])
 def test_classify_failure_permanent_statuses(status):
     assert media_writer.classify_failure(blocked=False, status=status, message="") is True
 
 
-@pytest.mark.parametrize("status", [401, 403, 429, 500, 502, 503])
+@pytest.mark.parametrize("status", [408, 429, 500, 502, 503])
 def test_classify_failure_transient_statuses(status):
     assert media_writer.classify_failure(blocked=False, status=status, message="") is False
 

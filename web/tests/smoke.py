@@ -146,6 +146,20 @@ def drive(page, result):
             "() => (window.ProviderRegistry?.getAllProviders() || [])"
             ".map(p => p.id).sort()")
 
+        # --- tag manager modal (Phase 5B editor) ---
+        page.click("#moreOptionsBtn")
+        page.wait_for_timeout(400)
+        page.click("#tagManagerBtn")
+        page.wait_for_timeout(2500)
+        result["tag_manager_categories"] = page.eval_on_selector_all(
+            ".ctm-category", "els => els.length")
+        cat = page.query_selector(".ctm-category summary")
+        if cat:
+            cat.click()
+            page.wait_for_timeout(400)
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
+
 
 if __name__ == "__main__":
     sys.exit(main())
