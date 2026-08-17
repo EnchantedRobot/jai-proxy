@@ -1,0 +1,329 @@
+/**
+ * Module Loader for SillyTavern Character Library
+ *
+ * Two-tier initialization:
+ *   Tier 1 - Loaded immediately (critical for Characters grid / detail modal)
+ *   Tier 2 - Lazily loaded on first use via proxy stubs
+ */
+
+import ProviderRegistry from './providers/provider-registry.js';
+import CoreAPI from './core-api.js';
+
+
+// ========================================
+// CSS LOADER
+// ========================================
+
+/* Cache-buster for everything this file pulls in at runtime.
+ *
+ * The <script> tags in index.html each carry their own ?v=, but a bare
+ * bare dynamic-import specifier does NOT inherit the importing module's query
+ * string -- the URL is byte-identical forever, so the browser is free to pin
+ * it and never ask again. Because these are fetched *after* navigation, a hard
+ * reload does not touch them either: the entire lazy tree (both providers,
+ * tag-manager, batch-*, the extractors) went on serving pre-edit code while
+ * index.html and library.css updated normally.
+ *
+ * Bump this ONE number whenever anything under web/modules/ changes.
+ */
+const MODULE_VERSION = 81;
+
+function versioned(path) {
+    const url = new URL(path, import.meta.url);
+    url.searchParams.set('v', MODULE_VERSION);
+    return url.href;
+}
+
+/** Dynamic import that actually re-fetches after an edit. Use instead of bare import(). */
+function importModule(path) {
+    return import(versioned(path));
+}
+
+function loadModuleCSS(path) {
+    return new Promise((resolve) => {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = versioned(path);
+        link.onload = resolve;
+        link.onerror = resolve;
+        document.head.appendChild(link);
+    });
+}
+
+
+// ========================================
+// MODULE REGISTRY
+// ========================================
+
+const ModuleLoader = {
+    modules: {},
+    _lazyLoaders: {},
+    _lazyPromises: {},
+    initialized: false,
+
+    register(name, module) {
+        this.modules[name] = module;
+        delete this._lazyLoaders[name];
+        window.debugLog?.(`[ModuleLoader] Registered module: ${name}`);
+    },
+
+    async initAll(dependencies) {
+        for (const [name, module] of Object.entries(this.modules)) {
+            try {
+                if (module.init && !module._mlInitDone) {
+                    await module.init(dependencies);
+                    module._mlInitDone = true;
+                    window.debugLog?.(`[ModuleLoader] Initialized module: ${name}`);
+                }
+            } catch (err) {
+                console.error(`[ModuleLoader] Failed to initialize module: ${name}`, err);
+            }
+        }
+        this.initialized = true;
+    },
+
+    get(name) {
+        if (this.modules[name]) return this.modules[name];
+        if (this._lazyLoaders[name]) return this._createLazyProxy(name);
+        return null;
+    },
+
+    async ensureLoaded(name) {
+        if (this.modules[name]) return this.modules[name];
+        const loader = this._lazyLoaders[name];
+        if (loader) {
+            await loader();
+            return this.modules[name];
+        }
+        return null;
+    },
+
+    _registerLazy(name, loadFn) {
+        this._lazyLoaders[name] = () => {
+            if (!this._lazyPromises[name]) {
+                this._lazyPromises[name] = loadFn().catch(err => {
+                    console.error(`[ModuleLoader] Lazy load of '${name}' failed:`, err);
+                    delete this._lazyPromises[name];
+                    throw err;
+                });
+            }
+            return this._lazyPromises[name];
+        };
+    },
+
+    /**
+     * Returns a Proxy whose property accesses produce async stub functions.
+     * Callers like:
+     *     const mod = CoreAPI.getModule('batch-tagging');
+     *     if (mod?.openModal) { mod.openModal(); }
+     * transparently trigger the lazy import on first method call.
+     */
+    _createLazyProxy(name) {
+        const self = this;
+        return new Proxy({}, {
+            get(target, prop) {
+                if (prop === 'then' || prop === Symbol.toPrimitive || prop === Symbol.toStringTag) {
+                    return undefined;
+                }
+                return function (...args) {
+                    return self.ensureLoaded(name).then(mod => {
+                        if (mod && typeof mod[prop] === 'function') {
+                            return mod[prop](...args);
+                        }
+                    });
+                };
+            }
+        });
+    }
+};
+
+
+// ========================================
+// INITIALIZATION
+// ========================================
+
+async function initModuleSystem() {
+    window.debugLog?.('[ModuleLoader] Initializing module system...');
+
+    const dependencies = {};
+
+    // ============================
+    // TIER 1 - Immediate modules
+    // ============================
+
+    try {
+        const multiSelectModule = await importModule('./multi-select.js');
+        loadModuleCSS('./multi-select.css');
+        ModuleLoader.register('multi-select', multiSelectModule.default);
+    } catch (err) {
+        console.warn('[ModuleLoader] Could not load multi-select module:', err);
+    }
+
+    try {
+        const contextMenuModule = await importModule('./context-menu.js');
+        loadModuleCSS('./context-menu.css');
+        ModuleLoader.register('context-menu', contextMenuModule.default);
+    } catch (err) {
+        console.warn('[ModuleLoader] Could not load context-menu module:', err);
+    }
+
+    try {
+        const galleryViewerModule = await importModule('./gallery-viewer.js');
+        loadModuleCSS('./gallery-viewer.css');
+        ModuleLoader.register('gallery-viewer', galleryViewerModule.default);
+
+        window.openGalleryViewerWithImages = galleryViewerModule.openViewerWithImages;
+        window.closeGalleryViewer = galleryViewerModule.closeViewer;
+    } catch (err) {
+        console.warn('[ModuleLoader] Could not load gallery-viewer module:', err);
+    }
+
+    try {
+        loadModuleCSS('./media-download-queue.css');
+        const mediaQueueModule = await importModule('./media-download-queue.js');
+        ModuleLoader.register('media-download-queue', mediaQueueModule.default);
+
+        window.enqueueMediaDownloadJob = mediaQueueModule.enqueueJob;
+        window.mediaDownloadQueueOnCharDeleted = mediaQueueModule.onCharacterDeleted;
+    } catch (err) {
+        console.warn('[ModuleLoader] Could not load media-download-queue module:', err);
+    }
+
+    // Gallery Extractors - lazy-loaded on first use to save memory
+    // All call sites guard with typeof window.extractGalleryImages === 'function'
+    let _extractorsLoaded = false;
+    async function ensureExtractorsLoaded() {
+        if (_extractorsLoaded) return;
+        _extractorsLoaded = true;
+        try {
+            const { findCharacterGalleryUrls, extractGalleryImages, identifyGallerySources } = await importModule('./gallery-extractors/extractor-registry.js');
+            await Promise.all([
+                importModule('./gallery-extractors/imgchest.js'),
+                importModule('./gallery-extractors/imgbb.js'),
+                importModule('./gallery-extractors/gdrive.js'),
+                importModule('./gallery-extractors/catbox.js'),
+                importModule('./gallery-extractors/mega.js'),
+                importModule('./gallery-extractors/postimg.js'),
+                importModule('./gallery-extractors/imgbox.js')
+            ]);
+            window.findCharacterGalleryUrls = findCharacterGalleryUrls;
+            window.extractGalleryImages = extractGalleryImages;
+            window.identifyGallerySources = identifyGallerySources;
+            window.debugLog?.('[ModuleLoader] Gallery extractors loaded (on demand)');
+        } catch (err) {
+            _extractorsLoaded = false;
+            console.warn('[ModuleLoader] Could not load gallery extractors:', err);
+        }
+    }
+    window.ensureExtractorsLoaded = ensureExtractorsLoaded;
+
+    // Providers - must be Tier 1 because ProviderRegistry is queried
+    // during character grid rendering (link indicators, taglines, etc.)
+    loadModuleCSS('./providers/browse-shared.css');
+    loadModuleCSS('./providers/chub/chub-browse.css');
+    loadModuleCSS('./providers/datacat/datacat-browse.css');
+    {
+        const providerImports = [
+            { name: 'chub', load: () => importModule('./providers/chub/chub-provider.js') },
+            { name: 'datacat', load: () => importModule('./providers/datacat/datacat-provider.js') },
+        ];
+        const results = await Promise.allSettled(providerImports.map(p => p.load()));
+        for (let i = 0; i < results.length; i++) {
+            if (results[i].status === 'fulfilled') {
+                ProviderRegistry.registerProvider(results[i].value.default);
+            } else {
+                console.warn(`[ModuleLoader] Failed to load ${providerImports[i].name} provider:`, results[i].reason);
+            }
+        }
+        try {
+            await ProviderRegistry.initProviders(CoreAPI);
+        } catch (err) {
+            console.warn('[ModuleLoader] Provider initialization error:', err);
+        }
+        window.ProviderRegistry = ProviderRegistry;
+        window.closeActiveBrowseDropdowns = ProviderRegistry.closeActiveBrowseDropdowns;
+        window.debugLog?.(`[ModuleLoader] Providers registered and initialized (${ProviderRegistry.getAllProviders().length}/${providerImports.length})`);
+    }
+
+    // ============================
+    // TIER 2 - Lazy modules
+    // ============================
+
+    setupLazyBatchTagging();
+    setupLazyBatchTransfer();
+    setupLazyTagManager();
+
+    // Initialize all Tier 1 modules
+    await ModuleLoader.initAll(dependencies);
+
+    window.debugLog?.('[ModuleLoader] Module system ready');
+}
+
+
+// ========================================
+// LAZY: BATCH TAGGING
+// ========================================
+
+function setupLazyBatchTagging() {
+    ModuleLoader._registerLazy('batch-tagging', async () => {
+        const mod = await importModule('./batch-tagging.js');
+        loadModuleCSS('./batch-tagging.css');
+        ModuleLoader.register('batch-tagging', mod.default);
+        await mod.default.init({});
+        mod.default._mlInitDone = true;
+        window.debugLog?.('[ModuleLoader] Lazy-loaded batch-tagging');
+    });
+}
+
+
+// ========================================
+// LAZY: BATCH TRANSFER (bundle export/import)
+// ========================================
+
+function setupLazyBatchTransfer() {
+    ModuleLoader._registerLazy('batch-transfer', async () => {
+        const mod = await importModule('./batch-transfer.js');
+        loadModuleCSS('./batch-transfer.css');
+        ModuleLoader.register('batch-transfer', mod.default);
+        await mod.default.init({});
+        mod.default._mlInitDone = true;
+        window.debugLog?.('[ModuleLoader] Lazy-loaded batch-transfer');
+    });
+
+    // library.js's import modal routes dropped .zip bundles here
+    window.openBatchImportReview = (...args) =>
+        ModuleLoader.ensureLoaded('batch-transfer').then(mod => mod?.openImportReview?.(...args));
+}
+
+
+// ========================================
+// LAZY: TAG MANAGER (Phase 5 tag consolidation)
+// ========================================
+
+function setupLazyTagManager() {
+    ModuleLoader._registerLazy('tag-manager', async () => {
+        const mod = await importModule('./tag-manager.js');
+        loadModuleCSS('./tag-manager.css');
+        ModuleLoader.register('tag-manager', mod.default);
+        await mod.default.init({});
+        mod.default._mlInitDone = true;
+        window.debugLog?.('[ModuleLoader] Lazy-loaded tag-manager');
+    });
+
+    document.getElementById('tagManagerBtn')?.addEventListener('click', () => {
+        ModuleLoader.ensureLoaded('tag-manager').then(mod => mod?.openModal());
+    });
+}
+
+
+// ========================================
+// EXPOSE & BOOTSTRAP
+// ========================================
+
+window.ModuleLoader = ModuleLoader;
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initModuleSystem);
+} else {
+    setTimeout(initModuleSystem, 100);
+}

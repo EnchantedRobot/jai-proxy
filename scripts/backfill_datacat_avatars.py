@@ -13,7 +13,7 @@ scripts/import_cards.py). A card qualifies when:
 For each qualifying card, extensions.jai.id (the JanitorAI character id
 stamped at import time -- the same value `--fetch-datacat-images` would have
 passed to the resolver) is looked up through datacat.run's own API (see
-proxy/datacat_api.py) and, if found, prepended to creator_notes exactly the
+proxy/datacat_client.py) and, if found, prepended to creator_notes exactly the
 way CardBuilder.build does for a fresh import -- `![{name}]({avatar_url})\n\n`
 -- then re-embedded in place. Re-embedding goes through pngtools.embed_card,
 the same mechanism scripts/check_cards.py --repair uses, so only the tEXt
@@ -38,13 +38,13 @@ import argparse
 import re
 from pathlib import Path
 
-from proxy import pngtools
+from proxy.cards import pngtools
 from proxy.config import settings
-from proxy.datacat_api import DatacatImageResolver
+from proxy.sources.datacat_client import DatacatImageResolver
 
 # A card is "already stamped" when creator_notes opens with a markdown image
 # link to one of the untouched source CDNs -- the exact shape CardBuilder
-# produces (see proxy/cardbuilder.py's `if avatar_url:` block). Datacat's own
+# produces (see proxy/cards/builder.py's `if avatar_url:` block). Datacat's own
 # re-hosted media.datacat.run links don't count -- those are pre-existing
 # in-body images, not the stamp this script is checking for.
 _STAMPED_RE = re.compile(r"^!\[[^\]]*\]\(https://(?:ella\.janitorai\.com|cdn\.saucepan\.ai)/")
@@ -61,7 +61,7 @@ def _already_stamped(notes: str) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--cards-dir", type=Path, default=settings.output_dir)
+    parser.add_argument("--cards-dir", type=Path, default=settings.archive_dir)
     parser.add_argument("--repair", action="store_true", help="rewrite fixable cards in place (pixels preserved)")
     parser.add_argument("--limit", type=int, default=50, help="max cards to list per section (0 = all)")
     args = parser.parse_args()

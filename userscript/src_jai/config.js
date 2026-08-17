@@ -1,4 +1,29 @@
   // ---------------------------------------------------------------------------
+  // Where the jai-proxy server is.
+  //
+  // Persisted in Tampermonkey storage rather than compiled in, because the
+  // server may now be a container on another machine (docs/DEPLOY.md) and the
+  // address of that machine is not knowable here. To repoint the bridge, run
+  // this once in the console on janitorai.com — no recompile, no reinstall:
+  //
+  //   GM_setValue("serverUrl", "http://192.168.1.50:8000")
+  //
+  // and reload. Clearing it falls back to the local default below.
+  //
+  // Plain http to a LAN address works from HTTPS JanitorAI: every call goes out
+  // through GM_xmlhttpRequest (see client-server.js), which runs in the
+  // extension context and is exempt from the page's mixed-content and CSP
+  // rules. Nothing here needs TLS.
+  //
+  // ⚠ Whatever you set here must ALSO be the base URL you type into
+  // JanitorAI's custom-provider settings: looksLikeModelsProbe (bootstrap.js)
+  // recognises the /models probe with `url.startsWith(SERVER)`, so a mismatch
+  // silently stops that probe being intercepted.
+  const DEFAULT_SERVER = "http://127.0.0.1:8000";
+  // Trailing slashes stripped: every call is SERVER + "/some/path".
+  const SERVER = String(GM_getValue("serverUrl", "") || DEFAULT_SERVER).replace(/\/+$/, "");
+
+  // ---------------------------------------------------------------------------
   // User config — hand-edited, not persisted. Controls which cards the BULK
   // "download all open cards" run (creator /profiles/ page) exports. The single
   // ⬇ Export button is NEVER filtered; this only narrows a bulk sweep.

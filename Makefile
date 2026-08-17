@@ -1,7 +1,7 @@
-.PHONY: compile test test-js run import gallery-ids check names
+.PHONY: compile test test-js run docker-build docker-up docker-pull docker-up-prod import gallery-ids check names thumbs settings-import
 
 # Every target reads .env (see .env.template) via proxy/config.py -- most
-# importantly JAI_PROXY_OUTPUT_DIR, the cards folder they all read and write.
+# importantly JAI_PROXY_ARCHIVE_DIR, the cards folder they all read and write.
 
 # Concatenate userscript/src_jai/*.js   -> userscript/jai-proxy-bridge.user.js
 # and userscript/src_saucepan/*.js       -> userscript/saucepan-proxy-bridge.user.js
@@ -13,12 +13,34 @@ compile:
 test:
 	uv run python -m pytest -q
 
-# Run the userscript unit tests (node:test, no deps -- see userscript/tests/)
+# Run the JavaScript unit tests (node:test, no deps). Two trees, run separately
+# because each resolves its fixtures relative to its own directory: the
+# userscripts (userscript/tests/) and the browser's archive adapter
+# (web/tests/).
 test-js:
 	cd userscript && node --test
+	cd web && node --test
 
 run:
 	uv run python -m proxy.server
+
+# The same server in a container: one image, one mount (./data), one port.
+# The targets below still run on the host, against that same ./data.
+docker-build:
+	docker compose build
+
+docker-up:
+	docker compose up -d
+
+# The published image instead of a local build -- what a server runs. Defaults
+# in compose.prod.yaml target unraid (/mnt/user/appdata/jai-proxy, uid 99:100);
+# see docs/DEPLOY.md. Useful on the Mac too, to check what :latest actually
+# does before the server pulls it.
+docker-pull:
+	docker compose -f compose.prod.yaml pull
+
+docker-up-prod:
+	docker compose -f compose.prod.yaml up -d
 
 # Bulk-import card PNGs from ./import into the cards folder -- datacat, JannyAI
 # and Chub.ai exports are auto-detected (see scripts/import_cards.py). Cards
@@ -54,3 +76,21 @@ check:
 # `make names ARGS=--stats` scores them against it.
 names:
 	uv run python scripts/fix_names.py $(ARGS)
+
+# Tidy the browse grid's thumbnail cache (data/cache/thumbs/avatar): render the
+# cards that have no thumb, retire the thumbs whose card is gone, and fix the
+# ones whose name differs from their card's only by case -- macOS resolves those
+# anyway, so they look fine here and would silently miss in a Linux container.
+# The API also generates on miss, so this only ever moves work off first paint.
+# Read-only report by default; `make thumbs ARGS=--apply` writes.
+thumbs:
+	uv run python scripts/sync_thumbs.py $(ARGS)
+
+# Seed data/settings.json from an existing SillyTavern install: lifts the
+# Character Library blob (provider tokens, followed creators, display prefs)
+# out of its settings.json so the standalone browser stops depending on
+# origin-keyed browser storage -- which silently held a copy left behind by
+# SillyTavern itself, since its stock port is also 8000.
+# Read-only report by default; `make settings-import ARGS=--apply` writes.
+settings-import:
+	uv run python scripts/import_st_settings.py $(ARGS)

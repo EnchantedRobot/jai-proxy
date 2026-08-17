@@ -1,0 +1,139 @@
+{
+  "https://files.catbox.moe/2og42i.jpg": {
+    "ok": true
+  },
+  "http://example.com/x.png": {
+    "ok": true
+  },
+  "ftp://example.com/x.png": {
+    "ok": false,
+    "reason": "blocked scheme: ftp:"
+  },
+  "javascript:alert(1)": {
+    "ok": false,
+    "reason": "blocked scheme: javascript:"
+  },
+  "file:///etc/passwd": {
+    "ok": false,
+    "reason": "blocked scheme: file:"
+  },
+  "https://localhost/x.png": {
+    "ok": false,
+    "reason": "blocked hostname: localhost"
+  },
+  "https://LOCALHOST/x.png": {
+    "ok": false,
+    "reason": "blocked hostname: localhost"
+  },
+  "https://127.0.0.1/x.png": {
+    "ok": false,
+    "reason": "blocked private IPv4: 127.0.0.1"
+  },
+  "https://127.1.2.3/x.png": {
+    "ok": false,
+    "reason": "blocked private IPv4: 127.1.2.3"
+  },
+  "https://10.0.0.5/x.png": {
+    "ok": false,
+    "reason": "blocked private IPv4: 10.0.0.5"
+  },
+  "https://172.16.0.1/x.png": {
+    "ok": false,
+    "reason": "blocked private IPv4: 172.16.0.1"
+  },
+  "https://172.15.255.255/x.png": {
+    "ok": true
+  },
+  "https://172.32.0.1/x.png": {
+    "ok": true
+  },
+  "https://192.168.1.1/x.png": {
+    "ok": false,
+    "reason": "blocked private IPv4: 192.168.1.1"
+  },
+  "https://169.254.169.254/x.png": {
+    "ok": false,
+    "reason": "blocked private IPv4: 169.254.169.254"
+  },
+  "https://100.64.0.1/x.png": {
+    "ok": false,
+    "reason": "blocked private IPv4: 100.64.0.1"
+  },
+  "https://100.100.0.1/x.png": {
+    "ok": false,
+    "reason": "blocked private IPv4: 100.100.0.1"
+  },
+  "https://100.127.255.255/x.png": {
+    "ok": false,
+    "reason": "blocked private IPv4: 100.127.255.255"
+  },
+  "https://100.128.0.1/x.png": {
+    "ok": true
+  },
+  "https://224.0.0.1/x.png": {
+    "ok": false,
+    "reason": "blocked private IPv4: 224.0.0.1"
+  },
+  "https://0.0.0.0/x.png": {
+    "ok": false,
+    "reason": "blocked private IPv4: 0.0.0.0"
+  },
+  "https://8.8.8.8/x.png": {
+    "ok": true
+  },
+  "https://foo.local/x.png": {
+    "ok": false,
+    "reason": "blocked hostname suffix: foo.local"
+  },
+  "https://foo.internal/x.png": {
+    "ok": false,
+    "reason": "blocked hostname suffix: foo.internal"
+  },
+  "https://local/x.png": {
+    "ok": false,
+    "reason": "blocked hostname suffix: local"
+  },
+  "https://metadata.google.internal/x.png": {
+    "ok": false,
+    "reason": "blocked hostname: metadata.google.internal"
+  },
+  "https://[::1]/x.png": {
+    "ok": false,
+    "reason": "blocked private IPv6: [::1]"
+  },
+  "https://[::]/x.png": {
+    "ok": false,
+    "reason": "blocked private IPv6: [::]"
+  },
+  "https://[fe80::1]/x.png": {
+    "ok": false,
+    "reason": "blocked private IPv6: [fe80::1]"
+  },
+  "https://[fc00::1]/x.png": {
+    "ok": false,
+    "reason": "blocked private IPv6: [fc00::1]"
+  },
+  "https://[2001:db8::1]/x.png": {
+    "ok": true
+  },
+  "https://[::ffff:127.0.0.1]/x.png": {
+    "ok": true
+  },
+  "https://[::ffff:8.8.8.8]/x.png": {
+    "ok": true
+  },
+  "https://evil.com.attacker.io/x.png": {
+    "ok": true
+  },
+  "not a url": {
+    "ok": false,
+    "reason": "invalid URL"
+  },
+  "https:///x.png": {
+    "ok": true
+  },
+  "https://999.999.999.999/x.png": {
+    "ok": false,
+    "reason": "invalid URL"
+  }
+}

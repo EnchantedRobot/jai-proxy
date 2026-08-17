@@ -3,9 +3,8 @@
 Archives JanitorAI character cards as SillyTavern-compatible **Character Card V3**
 PNGs, for personal use. It captures both **public** cards and **creator-hidden**
 definitions, and saves each as a self-contained PNG (definition + all greetings +
-lorebook + avatar) into the cards folder — `./cards/` by default, or straight
-into SillyTavern's own characters directory (see
-[Configuration](#configuration-env)).
+lorebook + avatar) straight into the archive it also browses and serves —
+`data/characters/` (see [Configuration](#configuration-env)).
 
 ## How it works
 
@@ -21,21 +20,68 @@ change is fixed by editing the server and restarting — no userscript reinstall
 
 Hidden definitions are never served by the API; they only exist in the chat
 **system prompt** sent to the model, and the card's primary greeting only in the
-chat's first message. The server captures both as it relays the chat request to
-a local MLX model, so nothing leaves your machine, and merges them with the JSON
-(alternate greetings, tags, creator notes, avatar) at export.
+chat's first message. The server captures both from the chat request it answers
+itself, so nothing leaves your machine, and merges them with the JSON (alternate
+greetings, tags, creator notes, avatar) at export.
 
-## Setup (macOS)
+## Running it
+
+```bash
+make docker-build     # docker compose build
+make docker-up        # docker compose up -d  -> http://127.0.0.1:8000
+```
+
+One image, one mount (`./data`), one port. The image carries the **server only**:
+everything writable already defaults under `data/` — the archive, galleries,
+thumbnail cache, `settings.json` and the server's working state — so that single
+bind mount is the whole of the container's state, and `JAI_PROXY_HOST=0.0.0.0`
+is the only variable it needs. Nothing is architecture-specific, so it builds
+natively on arm64 and amd64 alike (the *published* image is amd64 only — see
+below — because the deployment target is a NAS and development runs from
+source).
+
+⚠️ **SillyTavern's stock port is also 8000**, so `docker compose up` fails to
+bind while it is running — stop it, or publish the archive on another host port.
+The container itself always listens on 8000; the userscripts read the server's
+address from Tampermonkey storage (`serverUrl`), so the host port is free to
+move as long as you set the same one there.
+
+### Remote (unraid)
+
+Pushing to `main` publishes `ghcr.io/enchantedrobot/jai-proxy` — `linux/amd64`,
+`:latest` plus `:sha-<short>` (`.github/workflows/publish.yml`). A server pulls
+that image rather than building:
+
+```bash
+make docker-pull      # docker compose -f compose.prod.yaml pull
+make docker-up-prod
+```
+
+`compose.prod.yaml` and `unraid-template.xml` are the two ways to run it there;
+both default to `/mnt/user/appdata/jai-proxy` for the mount and uid `99:100`
+(unraid's `nobody:users`) for the process. Acquisition keeps working against a
+remote archive with no TLS — the userscripts reach it through
+`GM_xmlhttpRequest`, which is exempt from the page's mixed-content rules.
+
+**[docs/DEPLOY.md](docs/DEPLOY.md)** is the runbook: publishing, making the GHCR
+package public, seeding the mount, and repointing the userscripts. Note that the
+archive has **no authentication** — keep it on the LAN.
+
+The maintenance scripts (`make import` / `check` / `names` / `thumbs` /
+`gallery-ids`) stay on the host and run against the same `./data`. They are not
+in the image on purpose: they are leftovers from stitching several repos
+together, and the intended flow is *retrieve → cleaned once on the way in →
+archived*, with a clean card exported into SillyTavern when you actually want to
+play it.
+
+For development, run it directly instead:
 
 ```bash
 uv sync
 uv run python -m proxy.server        # serves http://127.0.0.1:8000
 ```
 
-MLX must already be running separately with an OpenAI-compatible endpoint at
-`http://127.0.0.1:8011/v1` and a model loaded (default `Llama-3.2-3B-Instruct-4bit`).
-
-In a terminal the server draws a live dashboard (`proxy/dashboard.py`): a header
+In a terminal the server draws a live dashboard (`proxy/runtime/dashboard.py`): a header
 band with the address, the server log on the left, and every character exported
 this run -- source, name, creator -- on the right. A card that was **already in
 the cards folder** (see [Re-exporting](#re-exporting)) is drawn in yellow and
@@ -59,37 +105,32 @@ The two keys that matter most:
 
 | key | default | what it does |
 | --- | --- | --- |
-| `JAI_PROXY_OUTPUT_DIR` | `./cards` | where cards land |
+| `JAI_PROXY_ARCHIVE_DIR` | `./data/characters` | the archive: what the browse API reads and what a build writes into |
 | `JAI_PROXY_CARD_LAYOUT` | `flat` | `flat` = `<name>_<id8>.png`; `nested` = `<creator>/<name>_<id8>.png` |
 
-**Pointing `JAI_PROXY_OUTPUT_DIR` at SillyTavern's characters folder** (typically
-`…/SillyTavern/data/default-user/characters`) makes SillyTavern the archive
-itself rather than a copy of it: a card you edit there is edited in the archive,
-a card you delete there is gone from the archive, and a newly retrieved card is
-in SillyTavern the moment it's written. There is no sync step because there is
-only one folder. This is what `flat` is for — SillyTavern reads its characters
-folder **non-recursively**, so a `nested` archive is invisible to it. Nothing is
-lost by going flat: the creator stays on the card (`extensions.jai.creatorName`),
-and the `_<id8>` filename fragment keeps names unique across creators.
+A build writes into `ARCHIVE_DIR` directly, so a retrieved card is in the
+archive the moment it's written — one directory, no sync step, no second copy
+to reconcile. `flat` is what keeps that workable: names stay unique across
+creators via the `_<id8>` fragment, and nothing is lost, since the creator is
+on the card (`extensions.jai.creatorName`). To relocate the archive (e.g. in a
+container), mount something else at `data/characters` rather than pointing
+builds at a separate folder — there is no "build elsewhere" knob anymore.
 
-Two things to know if you do share the folder with SillyTavern:
-
-- SillyTavern re-encodes a card's PNG whenever you save an edit to it, so that
-  card loses its pngquant compression (the data — including `extensions.jai`,
-  `gallery_id` and the lorebook — round-trips intact; it seeds its write from
-  the card's original JSON).
-- SillyTavern's explicit **Rename** action renames the file to `<Name>.png`,
-  dropping the `_<id8>` fragment that marks a card as already-acquired. Ordinary
-  saves keep the filename; renames don't. A renamed card can be retrieved again
-  as a duplicate.
-
-Working state (`state/captures`, `state/lorecache`) is deliberately kept out of
-the cards folder, since that folder may not be ours.
+Working state (`data/state/captures`, `data/state/lorecache`) sits beside the
+archive rather than inside it — under the one directory that has to be mounted
+and backed up, so nothing the server writes can land anywhere else.
 
 Install `userscript/jai-proxy-bridge.user.js` in Tampermonkey. In JanitorAI's
 proxy/config settings, set the endpoint to
-`http://127.0.0.1:8000/v1/chat/completions` (any model name — the server
-overrides it with the loaded MLX model).
+`http://127.0.0.1:8000/v1/chat/completions` (any model name — the server answers
+whatever it is called).
+
+Nothing is generated by a model. The chat endpoint exists only because sending a
+message is what makes JanitorAI put the hidden definition in the system prompt;
+the reply is assembled locally from canned roleplay fragments
+(`proxy/runtime/mock_responder.py`) — an action beat, a line of dialogue, and one word
+lifted from what you just said. It is meant to read as a small, distracted model
+so a chat doesn't visibly break mid-capture, and nothing else.
 
 The userscript is **compiled** from small modules under `userscript/src_jai/`.
 After editing any of them, rebuild the single-file bundle with:
@@ -162,7 +203,7 @@ definition or lorebooks — **delete the card file and export it again**.
 
 Hidden cards are matched by character name against accumulated captures, so name
 collisions get likelier as captures pile up. The pill's **CLEAR** link wipes all
-captured system prompts and greetings (`./state/captures/`) and also resets the
+captured system prompts and greetings (`data/state/captures/`) and also resets the
 plugin's own remembered state (last card id / hidden flag). Finished card PNGs
 are not affected.
 
@@ -248,6 +289,88 @@ make gallery-ids              # read-only report: which cards lack an id
 make gallery-ids ARGS=--apply # mint and patch them in (pixels preserved)
 ```
 
+## The archive API (`/api/v1`)
+
+The archive itself lives in `data/` — `characters/` (the cards), `galleries/`
+(their images), `cache/thumbs/` (browse-grid derivatives) — and is served by a
+read-only HTTP contract of its own:
+
+| Endpoint | What it gives you |
+| --- | --- |
+| `GET /api/v1/characters` | list + filter: `q`, `tag` (repeatable, ANDed), `creator`, `source`, `has_lorebook`, `has_gallery`, `health`, `sort`, `limit`/`offset` (`limit=0` = everything) |
+| `GET /api/v1/characters/{filename}` | one card in full — the entire embedded V3 `data`, plus its gallery measured on disk |
+| `GET /api/v1/characters/{filename}/png` | the card file, byte for byte — this is the single-card export |
+| `GET /api/v1/characters/{filename}/thumb` | a ~10 KB derivative, generated on a cache miss |
+| `GET /api/v1/facets` | every tag / creator / source with counts, for the filter UI |
+| `GET /api/v1/stats` | archive and index health, including thumbnail coverage |
+| `POST /api/v1/refresh` | force a rescan (endpoints already refresh themselves) |
+
+Two decisions worth knowing, because both were the alternative being rejected:
+
+**It is deliberately not SillyTavern's `/api` shape.** Answering
+`/characters/edit-attribute` and friends would let CharacterLibrary's frontend be
+vendored with no JavaScript changes at all — and would sign this server up to
+impersonate SillyTavern's internals forever. What is worth keeping is *format*
+compatibility (V3 PNG, the bundle zip, the `gallery_id` convention); none of that
+requires matching anyone else's URLs. See `proxy/api/__init__.py`.
+
+**There is no database.** A full scan — decode every PNG's tEXt chunk, base64,
+JSON — costs ~1.3 s across all 3,839 cards, and the stat sweep that keeps the
+index honest costs 21 ms. So the index is a dict in memory, rebuilt at startup and
+re-validated per request on `(mtime, size)`; the filesystem stays the only source
+of truth. A card acquired, renamed or deleted outside the process appears in the
+grid within one debounce interval with no reindex step (`proxy/archive/catalog.py`).
+
+Cards that fail to parse are recorded rather than skipped — `GET
+/api/v1/characters?health=broken` lists them with the reason, because an archive
+silently dropping the files it cannot read is the failure an archive exists to
+prevent.
+
+### Thumbnails
+
+The grid cannot serve 800 KB originals, but it did not need a thumbnailer either:
+both caches were inherited at cutover (SillyTavern's `thumbnails/avatar`, keyed by
+the exact card filename, and CharacterLibrary's `cl_thumbs`) and covered 99.6% of
+the archive on arrival. `make thumbs` closes the rest:
+
+```bash
+make thumbs               # report: missing, miscased, stale
+make thumbs ARGS=--apply  # render the misses, retire the orphans
+```
+
+**Every inherited avatar thumb is JPEG data behind a `.png` extension** — all
+4,663 of them. The media type is therefore always sniffed from the file's magic
+number and never derived from its name; generated thumbs keep the same convention
+so the cache stays uniform and drop-in compatible in both directions
+(`proxy/archive/thumbs.py`).
+
+## Code layout
+
+```
+proxy/
+  server.py     the app: what gets mounted, in what order, how it is run
+  config.py     settings, read from the environment then .env
+  deps.py       the singletons the route modules share
+  api/          every HTTP surface: /api/v1 (browse + edit, split by resource
+                under v1/), the /build-* acquisition endpoints, the chat
+                endpoints the sites are pointed at, and the wire schemas
+  cards/        the card domain: models, builder, on-disk edits, PNG chunks,
+                naming, galleries, lorebooks, avatars
+  sources/      one module per site a card can come from (janitor, saucepan,
+                chub, datacat, jannyai) plus the chat-prompt parsers
+  text/         cleaning and formatting: macros, HTML→markdown, creator notes,
+                name repair
+  media/        the server-side media pipeline (Phase 3C)
+  archive/      the archive as a collection: the index and the thumbnail cache
+  state/        disk-backed working state: captures, lorebook cache, UI settings
+  runtime/      the terminal dashboard and the canned chat responder
+```
+
+The dependency runs one way and does not cycle: `config` at the bottom, then the
+leaf utilities, then `sources` mapping onto `cards`, then `api` on top. Nothing
+below `api` knows about HTTP, and nothing below `sources` knows which site a card
+came from. `tests/` mirrors this layout directory for directory.
+
 ## Tests
 
 ```bash
@@ -275,12 +398,20 @@ is verified live.
 
 ## Status
 
-`uv run pytest` green (283). Server-side JSON refactor complete; datacat + Chub.ai
+`uv run pytest` green (565). Server-side JSON refactor complete; datacat + Chub.ai
 bulk import live; live end-to-end verification of the userscript export flows is
 pending.
 
-Deliberately out of scope unless a real need surfaces: true token-by-token
-streaming (the server wraps MLX's full reply as a single SSE chunk, which
-JanitorAI accepts fine), and reconstructing lorebook entries from raw prompt
-text (real captures show no structural markers to recover them — lorebooks come
-exclusively via the `/hampter/script` path).
+Mid-migration to a standalone **character archive** that runs beside SillyTavern
+rather than inside it. Landed: `data/` holds the archive (3,839 cards), the
+read-only browse API above, 100% thumbnail coverage, CharacterLibrary's frontend
+vendored into `web/` against that API, bundle `.zip` export, on-disk UI settings
+(`data/settings.json`), the local responder that replaced `mlx_client.py` — the
+MLX upstream was the last thing tying the server to a second macOS-only process
+— and, on top of that, the **container** above: builds land in the archive,
+every writable path folded under `data/`, and the whole thing runs from one
+image with one mount.
+
+Deliberately out of scope unless a real need surfaces: reconstructing lorebook
+entries from raw prompt text (real captures show no structural markers to
+recover them — lorebooks come exclusively via the `/hampter/script` path).

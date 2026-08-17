@@ -1,5 +1,4 @@
-  // The one config knob. Change if the server runs elsewhere.
-  const SERVER = "http://127.0.0.1:8000";
+  // SERVER lives in config.js (persisted, so the server can be remote).
 
   const TAG = "[jai-proxy]";
   const log = (...a) => console.log(TAG, ...a);
@@ -54,7 +53,7 @@
     async build(payload) {
       const { text } = await this._request({
         method: "POST",
-        path: "/build",
+        path: "/build-jai",
         body: payload,
         timeout: 60000,
       });

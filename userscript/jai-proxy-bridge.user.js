@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         jai-proxy bridge
 // @namespace    https://github.com/EnchantedRobot/jai-proxy
-// @version      0.8.0
-// @description  Thin bridge: relays JanitorAI chat completions through a local jai-proxy server (which forwards to local MLX), shows a connection pill, and exports a character as a V3 card PNG via JanitorAI's clean JSON API (no DOM scraping). Card assembly lives server-side.
+// @version      0.9.0
+// @description  Thin bridge: relays JanitorAI chat completions through a local jai-proxy server (which answers them locally), shows a connection pill, and exports a character as a V3 card PNG via JanitorAI's clean JSON API (no DOM scraping). Card assembly lives server-side.
 // @match        https://janitorai.com/*
 // @match        https://www.janitorai.com/*
 // @run-at       document-start
@@ -11,9 +11,16 @@
 // @grant        GM_getValue
 // @connect      127.0.0.1
 // @connect      localhost
+// @connect      *
 // @connect      janitorai.com
 // @connect      ella.janitorai.com
 // ==/UserScript==
+//
+// `@connect *` is there because the server no longer has to be on this machine
+// (see docs/DEPLOY.md): its URL is read from Tampermonkey storage at runtime,
+// so the host it points at cannot be declared here at compile time, and without
+// a matching @connect Tampermonkey blocks the request outright. The loopback
+// entries above stay for the default case.
 //
 // SOURCE LAYOUT — this file is COMPILED. Do not edit jai-proxy-bridge.user.js by
 // hand; edit userscript/src_jai/*.js and run `make compile` (see
@@ -22,6 +29,31 @@
 
 (function () {
   "use strict";
+
+  // ---------------------------------------------------------------------------
+  // Where the jai-proxy server is.
+  //
+  // Persisted in Tampermonkey storage rather than compiled in, because the
+  // server may now be a container on another machine (docs/DEPLOY.md) and the
+  // address of that machine is not knowable here. To repoint the bridge, run
+  // this once in the console on janitorai.com — no recompile, no reinstall:
+  //
+  //   GM_setValue("serverUrl", "http://192.168.1.50:8000")
+  //
+  // and reload. Clearing it falls back to the local default below.
+  //
+  // Plain http to a LAN address works from HTTPS JanitorAI: every call goes out
+  // through GM_xmlhttpRequest (see client-server.js), which runs in the
+  // extension context and is exempt from the page's mixed-content and CSP
+  // rules. Nothing here needs TLS.
+  //
+  // ⚠ Whatever you set here must ALSO be the base URL you type into
+  // JanitorAI's custom-provider settings: looksLikeModelsProbe (bootstrap.js)
+  // recognises the /models probe with `url.startsWith(SERVER)`, so a mismatch
+  // silently stops that probe being intercepted.
+  const DEFAULT_SERVER = "http://127.0.0.1:8000";
+  // Trailing slashes stripped: every call is SERVER + "/some/path".
+  const SERVER = String(GM_getValue("serverUrl", "") || DEFAULT_SERVER).replace(/\/+$/, "");
 
   // ---------------------------------------------------------------------------
   // User config — hand-edited, not persisted. Controls which cards the BULK
@@ -47,8 +79,7 @@
     exclude: ["futa", "futanari", "wlw", "demihumanuser"],
   };
 
-  // The one config knob. Change if the server runs elsewhere.
-  const SERVER = "http://127.0.0.1:8000";
+  // SERVER lives in config.js (persisted, so the server can be remote).
 
   const TAG = "[jai-proxy]";
   const log = (...a) => console.log(TAG, ...a);
@@ -103,7 +134,7 @@
     async build(payload) {
       const { text } = await this._request({
         method: "POST",
-        path: "/build",
+        path: "/build-jai",
         body: payload,
         timeout: 60000,
       });
@@ -697,7 +728,7 @@
 
   // ---------------------------------------------------------------------------
   // Export — the whole card export is now: fetch the character JSON, fetch its
-  // public lorebooks, POST /build. No DOM scraping, no greeting carousel walk.
+  // public lorebooks, POST /build-jai. No DOM scraping, no greeting carousel walk.
   // Hidden cards work the same way: their definition + primary greeting are
   // already captured server-side from the chat relay, and the server merges
   // them with the JSON's alternate greetings / metadata.
@@ -730,7 +761,7 @@
   }
 
   // The reusable core of a card export: resolve the character JSON (unless one
-  // is supplied), fetch its public lorebooks, POST /build. Shared by the single
+  // is supplied), fetch its public lorebooks, POST /build-jai. Shared by the single
   // Export-card button and the bulk "download all open cards" panel. The card
   // name is no longer sent from here — the server derives the real character
   // name from the API JSON (chat_name), so there's nothing to guess or prompt
@@ -815,7 +846,7 @@
   // — it cannot tell open from hidden. Only the per-card /hampter/characters/<id>
   // response carries the real `showdefinition`. So we enumerate ids from the
   // list, then fetch each card to classify + export. Userscript-only; every
-  // open card still goes through the same server /build as the single button.
+  // open card still goes through the same server /build-jai as the single button.
   // ---------------------------------------------------------------------------
   const LIST_PAGE_DELAY_MS = 600;    // between list-endpoint pages
   const CARD_BUILD_DELAY_MS = 1500;  // after exporting an open card (writes a PNG)
@@ -1315,8 +1346,8 @@
   // ---------------------------------------------------------------------------
   // FetchHook — patch window.fetch and XMLHttpRequest at document-start so
   // JanitorAI's chat-completion request is intercepted before its app code ever
-  // runs, relayed through the local server (which forwards to MLX AND captures
-  // the hidden definition + primary greeting). Everything that doesn't look
+  // runs, relayed through the local server (which answers it AND captures the
+  // hidden definition + primary greeting). Everything that doesn't look
   // like a chat-completion / models probe passes through untouched.
   // ---------------------------------------------------------------------------
   function looksLikeChatCompletion(url, bodyText) {

@@ -4,8 +4,11 @@ const assert = require("node:assert/strict");
 const { loadModules, plain } = require("./helpers/load-src");
 
 // GM_xmlhttpRequest is only referenced inside ServerClient._request (never at
-// load time), so client-server.js loads with no globals; `respond` is handed
-// the captured options and decides how the "network" answers.
+// load time), so client-server.js needs nothing else at load; `respond` is
+// handed the captured options and decides how the "network" answers. SERVER is
+// seeded rather than loaded: it lives in config.js now (it is persisted, since
+// the server can be remote), and these tests are about the request shape, not
+// about where it is addressed -- see config.server-url.test.js for that.
 function load(respond) {
   const calls = [];
   const GM_xmlhttpRequest = (opts) => {
@@ -14,6 +17,7 @@ function load(respond) {
   };
   const { ServerClient } = loadModules(["client-server.js"], ["ServerClient"], {
     GM_xmlhttpRequest,
+    SERVER: "http://127.0.0.1:8000",
   });
   return { ServerClient, calls };
 }

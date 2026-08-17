@@ -1,0 +1,468 @@
+"""Response schemas for `/api/v1`.
+
+Separate from `proxy/cards/models.py`, which holds the request/response bodies of the
+capture-and-build endpoints the userscripts talk to. Those are an internal
+protocol between two halves of one tool; these are the archive's public contract,
+consumed by a frontend that is versioned independently, and mixing the two would
+make an incidental change to a build payload look like a breaking API change.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+
+class CardOut(BaseModel):
+    """A card as the browse grid sees it: metadata, counts, and no prose.
+
+    `description_chars` and the `has_*` flags are here instead of the text itself
+    so a list of 3,839 cards stays small enough to send whole -- they answer "is
+    this card substantial?" and "what is missing from it?", which is what a grid
+    and a data-quality pass actually ask.
+    """
+
+    id: str = Field(description="The card's filename on disk, e.g. `Abbie_0d162f5f.png`.")
+    name: str
+    creator: str
+    page_name: str = Field(description="The source page's title blurb, e.g. `Offer You Can't Refuse | Abbie`.")
+    tags: list[str]
+    source_kind: str = Field(description="Which importer wrote it: janitor_core, chub_import, datacat_import, saucepan_core, jannyai_import.")
+    source_url: str
+    card_id: str = Field(description="The source's own id for the character.")
+    fragment: str = Field(description="The `_<id8>` slice of card_id that the filename carries.")
+    gallery_id: str
+    character_version: str
+    greetings: int = Field(description="Primary greeting plus alternates.")
+    lore_entries: int
+    description_chars: int
+    prompt_chars: int = Field(
+        description="Characters across description, personality, scenario, first_mes and system_prompt -- the card's prompt weight. Roughly four characters to a token."
+    )
+    has_creator_notes: bool
+    has_example_dialogue: bool
+    size: int = Field(description="Card PNG size in bytes.")
+    modified: datetime = Field(
+        description="The file's mtime. Says when the card was last *written*, which on this archive is dominated by bulk repair passes -- see `linked_at` for when it arrived."
+    )
+    linked_at: str = Field(
+        default="",
+        description="When this card was acquired, stamped by the importer into `extensions.jai.linkedAt`. Present on every card in the archive and the only trustworthy 'date added': mtimes were flattened by the bulk passes. A raw ISO-8601 string, passed through exactly as the card carries it.",
+    )
+    create_date: str = Field(
+        default="",
+        description="When the card was created, as SillyTavern means it: the root-level `create_date` the card carries, or the earliest provider `linkedAt` it is derived from for a card written before this archive stamped the field. Distinct from `linked_at`, which is `extensions.jai`'s stamp and is rewritten by bulk passes -- this one is stable. Raw ISO-8601, or empty for a card with no provenance at all.",
+    )
+    thumb_url: str
+    png_url: str
+    extensions: dict[str, Any] | None = Field(
+        default=None,
+        description="The card's `data.extensions` verbatim, only when asked for with `include=extensions`. Off by default: it is ~790 bytes a card, which doubles a whole-archive listing.",
+    )
+    error: str | None = Field(
+        default=None,
+        description="Why this card could not be parsed. Null for healthy cards; a card with an error has only its file fields filled in.",
+    )
+
+
+class CardListOut(BaseModel):
+    """A page of cards. `total` is the size of the filtered set, not the archive,
+    so a client can page without asking twice."""
+
+    total: int
+    limit: int
+    offset: int
+    items: list[CardOut]
+
+
+class GalleryOut(BaseModel):
+    """A character's image gallery on disk.
+
+    `folder` is computed from the card's current name plus its gallery_id -- the
+    convention CharacterLibrary uses -- so `exists: false` with a non-empty
+    folder means either no images were ever downloaded or the card was renamed
+    out from under its folder. See `proxy.cards.gallery.folder_name`.
+    """
+
+    gallery_id: str
+    folder: str
+    exists: bool
+    images: int
+    bytes: int
+
+
+class GalleryFileOut(BaseModel):
+    """One file in a gallery folder. `kind` is sniffed from the extension rather
+    than the bytes: a gallery holds images, video and audio side by side, and the
+    client needs to know which element to render before it fetches anything."""
+
+    name: str
+    kind: str = Field(description="image, video, audio, or other.")
+    size: int
+    modified: datetime
+    url: str
+    thumb_url: str | None = Field(
+        default=None,
+        description="Null for files that cannot be thumbnailed -- video, audio, anything Pillow will not open.",
+    )
+
+
+class GalleryFilesOut(BaseModel):
+    folder: str
+    total: int
+    bytes: int
+    items: list[GalleryFileOut]
+
+
+class GalleryFolderOut(BaseModel):
+    """A gallery folder as the orphan sweep sees it: the name on disk, and the
+    card that claims it -- null when nothing does, which is what makes it an
+    orphan. See `scripts/repair_galleries.py`."""
+
+    folder: str
+    card_id: str | None
+
+
+class CardDetailOut(CardOut):
+    """One card in full: the summary plus the entire embedded V3 card.
+
+    `card` is the card's `data` object verbatim, straight off the PNG rather than
+    out of the index -- descriptions, greetings, lorebook, every extension block.
+    Unrewritten on purpose: an archive's detail view should show what is actually
+    embedded, not this server's interpretation of it.
+    """
+
+    spec: str
+    spec_version: str
+    card: dict[str, Any]
+    gallery: GalleryOut
+
+
+class CardWriteIn(BaseModel):
+    """A replacement card body.
+
+    `card` is the V3 `data` object whole -- name, prose, greetings, tags,
+    lorebook, extensions -- not a patch. A client holds the complete card and
+    treats itself as its owner, and a partial update could never express a
+    *cleared* field, which clearing a scenario is. The two extension keys the
+    archive owns (`gallery_id` and `jai`) are carried over when the payload
+    omits them; see `proxy.cards.edit.merge_card`.
+
+    Nothing here is re-sanitized. Intake cleans a card once on the way in; a
+    human typing `{{char}}` into an edit box means it, and rewriting what they
+    just confirmed in a diff would make that diff a lie.
+    """
+
+    card: dict[str, Any] = Field(description="The card's `data` object, complete.")
+
+
+class BulkTagsIn(BaseModel):
+    """A tag change applied across many cards in one pass.
+
+    Bulk because it is one of the archive's five jobs and the only one that is
+    inherently plural: doing it as N single-card writes re-reads and rewrites N
+    PNGs from the client, one round trip each, with no way to report a partial
+    failure coherently.
+    """
+
+    ids: list[str] = Field(description="Card filenames, as `/characters` reports them.")
+    add: list[str] = Field(default=[], description="Tags to add, skipped where already present.")
+    remove: list[str] = Field(default=[], description="Tags to remove, matched case-insensitively.")
+
+
+class BulkTagsOut(BaseModel):
+    """What a bulk tag pass did. `changed` counts cards actually rewritten --
+    a card that already carried every tag being added is `unchanged`, not
+    failed, and is not rewritten just to bump its mtime."""
+
+    changed: int
+    unchanged: int
+    failed: dict[str, str] = Field(
+        default={},
+        description="Card id to the reason it could not be written. Partial success is normal and reported rather than rolled back: the cards that worked stay worked.",
+    )
+
+
+class TagsApplyIn(BaseModel):
+    """A literal, corpus-wide tag rename/removal plan -- the apply half of the
+    tag manager (see docs/PHASE_5_TAGS_PLAN.md). The plan is resolved client-side
+    (vendored JS owns tag-matching semantics; the server makes no decisions of
+    its own here), so every key is an exact string match against a card's tags,
+    applied over every card in the archive rather than a selected subset -- the
+    different job `BulkTagsIn` covers.
+    """
+
+    rename: dict[str, str] = Field(
+        default={}, description="Exact card tag -> exact canonical it becomes."
+    )
+    remove: list[str] = Field(default=[], description="Exact card tags to drop.")
+
+
+class TagsApplyOut(BaseModel):
+    """What a plan apply did. Same partial-success contract as `BulkTagsOut`:
+    no rollback across a corpus-wide rewrite, so what worked stays worked."""
+
+    changed: int
+    unchanged: int
+    failed: dict[str, str] = Field(
+        default={},
+        description="Card id to the reason it could not be written. Partial success is normal and reported rather than rolled back.",
+    )
+
+
+class CardImportOut(BaseModel):
+    """What adopting an uploaded card PNG did.
+
+    `duplicate` is a success, not a failure: a card whose id fragment is already
+    in the archive is left exactly as it is and its filename reported, the same
+    answer the `/build-*` routes give when a click re-acquires something already
+    saved. The caller wanted the card present, and it is.
+    """
+
+    id: str = Field(description="The card's filename in the archive -- its id everywhere in the API.")
+    name: str
+    creator: str = ""
+    source: str = Field(
+        description="Where the card was judged to come from: `archive` for one of our own being re-adopted, else `chub`/`datacat`/`jannyai`/`png`."
+    )
+    duplicate: bool = Field(
+        default=False, description="The fragment was already on disk and nothing was written."
+    )
+    overwritten: bool = Field(
+        default=False, description="An existing card of the same id was replaced in place."
+    )
+    warnings: list[str] = Field(default=[])
+
+
+class DeletedOut(BaseModel):
+    """Where a delete put things. Paths, not booleans, because the whole point
+    of binning rather than unlinking is that someone can go and get it back."""
+
+    id: str
+    card: str = Field(description="Where the card PNG landed under the bin.")
+    gallery: str | None = Field(
+        default=None,
+        description="Where the gallery folder landed, or null when it was kept or was not there.",
+    )
+
+
+class GalleryFileWrittenOut(BaseModel):
+    """One uploaded gallery file. `path` is in SillyTavern's `user/images/...`
+    shape because that is what the frontend's uploaders read back out of the
+    reply and store as a local media path."""
+
+    folder: str
+    name: str
+    size: int
+    path: str
+    url: str
+
+
+class FacetValue(BaseModel):
+    value: str
+    count: int
+
+
+class FacetsOut(BaseModel):
+    """Every value the filters can take, with counts, over the whole archive.
+    Computed on the unfiltered set so a filter UI does not shrink its own
+    options as you use it."""
+
+    tags: list[FacetValue]
+    creators: list[FacetValue]
+    sources: list[FacetValue]
+
+
+class ThumbStatsOut(BaseModel):
+    cached: int = Field(description="Avatar thumbs present in the cache.")
+    missing: int = Field(description="Indexed cards with no thumb yet; generated on first request.")
+    stale: int = Field(description="Thumbs whose card is gone -- prune with scripts/prune_thumbs.py.")
+
+
+class IndexStatsOut(BaseModel):
+    scanned: int
+    parsed: int = Field(description="Cards re-read on the last refresh, i.e. new or changed.")
+    unchanged: int
+    removed: int
+    seconds: float
+
+
+class StatsOut(BaseModel):
+    """The archive at a glance, and the health of the index behind it."""
+
+    cards: int
+    unreadable: int = Field(description="Cards present but unparseable. Listed at /api/v1/characters?health=broken.")
+    bytes: int
+    creators: int
+    tags: int
+    galleries: int = Field(description="Cards whose gallery folder exists on disk.")
+    archive_dir: str
+    thumbs: ThumbStatsOut
+    index: IndexStatsOut
+
+
+class MediaItemIn(BaseModel):
+    """One URL for the media download route to fetch. `filename` is an
+    extractor-supplied real name, when the caller has one -- it beats
+    guessing from the URL, which is worthless for synthetic sources like
+    `mega://folder/handle`."""
+
+    url: str
+    filename: str | None = Field(default=None, description="Extractor-supplied real filename, if known.")
+
+
+class MediaDownloadIn(BaseModel):
+    """`POST /characters/{id}/media` body -- docs/PHASE_3C_PLAN.md §3."""
+
+    items: list[MediaItemIn]
+    prefix: str = Field(
+        default="localized_media",
+        description="Filename prefix and dedupe-priority class: localized_media, lorebook_media, extgallery, or <provider>gallery.",
+    )
+    phase: str = Field(default="embedded", description="Label only, recorded in the manifest's run history.")
+
+
+class MediaManifestFileOut(BaseModel):
+    file: str
+    sha256: str
+    at: str
+    # Recorded by the writer and summed by `GET /media/status`; without it here
+    # the per-card read silently drops a field that is on disk.
+    size: int | None = None
+
+
+class MediaManifestDeadOut(BaseModel):
+    reason: str
+    attempts: int
+    at: str
+
+
+class MediaManifestRunOut(BaseModel):
+    at: str
+    phase: str
+    saved: int
+    skipped: int
+    errors: int
+
+
+class MediaManifestOut(BaseModel):
+    """A gallery's `.media.json`, as-is -- the client renders it directly
+    rather than the server reshaping it into a second view."""
+
+    folder: str
+    files: dict[str, MediaManifestFileOut]
+    dead: dict[str, MediaManifestDeadOut]
+    runs: list[MediaManifestRunOut]
+
+
+class ThumbsPrunedOut(BaseModel):
+    """`POST /galleries/{folder}/thumbs/prune` -- docs/PHASE_3C_PLAN.md §5."""
+
+    folder: str
+    removed: int
+
+
+class MediaStatusEntryOut(BaseModel):
+    """One card's row in `GET /media/status` -- a manifest summary, not the
+    manifest itself (see `MediaManifestOut` for that)."""
+
+    files: int
+    bytes: int
+    complete: bool
+    dead: int
+    last_run: str | None = None
+
+
+class MediaStatusOut(BaseModel):
+    """`GET /media/status` -- docs/PHASE_3C_PLAN.md §3. Cards with no gallery
+    folder or no media run yet are simply absent, not zeroed entries: Bulk
+    Localize treats "missing" and "never downloaded" as the same thing."""
+
+    cards: dict[str, MediaStatusEntryOut]
+
+
+class MediaBytesOut(BaseModel):
+    """`POST /characters/{id}/media/bytes` response -- one item, not a batch,
+    so no NDJSON framing (docs/PHASE_3C_PLAN.md §6, the browser-fetch door for
+    MEGA/Pixiv)."""
+
+    status: Literal["saved", "skipped", "error"]
+    file: str | None = None
+
+
+class MediaHaveIn(BaseModel):
+    """`POST /characters/{id}/media/have` body -- the name-index half of
+    `download_item`, asked ahead of time. Same items/prefix shape as the
+    download routes so a caller can pass the identical list."""
+
+    items: list[MediaItemIn]
+    prefix: str = Field(
+        default="extgallery",
+        description="Filename prefix and dedupe-priority class the caller would save under.",
+    )
+
+
+class MediaHaveOut(BaseModel):
+    """Which of the submitted URLs the gallery already satisfies: `have` maps
+    those URLs to the local filename that covers them. URLs absent from the
+    map still need fetching."""
+
+    have: dict[str, str]
+
+
+class MediaJobSubmitIn(BaseModel):
+    """`POST /media/jobs` body -- the same items/prefix/phase shape as the
+    synchronous `POST /characters/{id}/media`, but queued and run in the
+    background instead of streamed over the request's own connection
+    (docs/PHASE_3C_PLAN.md §7, "3C-2 -- the job runner")."""
+
+    card_id: str
+    items: list[MediaItemIn]
+    prefix: str = Field(
+        default="localized_media",
+        description="Filename prefix and dedupe-priority class: localized_media, lorebook_media, extgallery, or <provider>gallery.",
+    )
+    phase: str = Field(default="embedded", description="Label only, recorded in the manifest's run history.")
+
+
+class MediaJobOut(BaseModel):
+    """`POST /media/jobs` response -- just enough to start polling."""
+
+    job_id: str
+    state: str
+    total: int
+
+
+class MediaJobEventOut(BaseModel):
+    """One finished item, same shape as an NDJSON line from the synchronous route."""
+
+    url: str
+    status: Literal["saved", "skipped", "error"]
+    file: str | None = None
+    reason: str | None = None
+    bytes: int | None = None
+
+
+class MediaJobStatusOut(BaseModel):
+    """`GET /media/jobs/{id}` -- poll this until `state` is `done`, `error`,
+    or `cancelled`. `events` holds only items finished since the caller's
+    last `after` cursor; `next_cursor` is what to pass next time so a poll
+    loop doesn't re-send the whole history every tick."""
+
+    job_id: str
+    card_id: str
+    phase: str
+    prefix: str
+    state: str
+    total: int
+    done: int
+    saved: int
+    skipped: int
+    errors: int
+    error: str | None = None
+    events: list[MediaJobEventOut] = Field(default_factory=list)
+    next_cursor: int = 0
+    reason: str | None = None
+    bytes: int | None = None

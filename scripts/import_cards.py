@@ -3,24 +3,24 @@
 Two kinds of already-embedded PNG export are recognised when dropped into
 `./import`, both re-homed into the configured cards folder as
 `<name>_<id>.png` -- the exact layout and naming the native retriever produces
-(see JAI_PROXY_OUTPUT_DIR / JAI_PROXY_CARD_LAYOUT in .env.template) -- so a
+(see JAI_PROXY_ARCHIVE_DIR / JAI_PROXY_CARD_LAYOUT in .env.template) -- so a
 landed card shows as acquired on the next scan (which keys off the `_<id>`
 filename fragment):
 
   * datacat  -- a JanitorAI card pulled by the closed-source datacat retriever.
     It carries no lorebook, so it's rebuilt through the CardBuilder (macro
     sanitize, creator-notes cleanup) with a fresh datacat_import provenance
-    block. See proxy/datacat_mapper.py.
+    block. See proxy/datacat.py.
   * JannyAI  -- a jannyai.com card export, structurally a twin of datacat
     (definition-only, no lorebook, macros intact), rebuilt the same way with a
-    fresh jannyai_import provenance block. See proxy/jannyai_mapper.py.
+    fresh jannyai_import provenance block. See proxy/jannyai.py.
   * Chub.ai  -- an already-complete chara_card_v3 (its own lorebook + rich
     extensions). It's passed through near-verbatim: macros sanitized,
     creator_notes tamed (layout kept, stylesheet dropped -- see
-    proxy/notes_html.py), tags cleaned, everything else (the whole
+    proxy/text/notes_html.py), tags cleaned, everything else (the whole
     character_book, Chub's own extensions block) preserved as is -- plus a
     fresh `extensions.jai` provenance stamp layered on top, the same one every
-    other source gets. See proxy/chub_mapper.py.
+    other source gets. See proxy/chub.py.
 
 Both share the same tail: avatar normalize + pngquant compression, and a card
 whose id already lives in the cards folder is skipped, never overwritten (the
@@ -32,7 +32,7 @@ upstream has its old `<name>_<id8>.png` pruned so the overwrite can't fork.
 
 `--fetch-datacat-images` (datacat only) turns on one extra, opt-in network
 step: for each datacat card, ask datacat.run's own API (see
-proxy/datacat_api.py) for the untouched original JanitorAI avatar URL, and
+proxy/datacat_client.py) for the untouched original JanitorAI avatar URL, and
 lead creator_notes with it -- mirroring what the native retriever already
 does for its own avatar_url, so SillyTavern-CharacterLibrary's creator-notes
 media scan picks up the full-resolution original as a gallery image even
@@ -41,7 +41,7 @@ stays a pure offline batch otherwise; a card whose original can't be
 recovered (gone from datacat's index, etc.) just imports without the link.
 
 One field is the exception to never-touch: `extensions.gallery_id`, the handle a
-card carries to its stored image gallery (see proxy/gallery.py). A legacy export
+card carries to its stored image gallery (see proxy/cards/gallery.py). A legacy export
 often has one an older on-disk card lacks, so when an import matches an existing
 card (same name + id) the gallery_id is *backfilled* into that card in place --
 pixels and every other field untouched -- rather than the import simply being
@@ -76,11 +76,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from proxy import chub_mapper, datacat_mapper, gallery, jannyai_mapper, pngtools
-from proxy.cardbuilder import CardBuilder, PngWriter, id_fragment
+from proxy.sources import chub, datacat, jannyai
+from proxy.cards import gallery, pngtools
+from proxy.cards.builder import CardBuilder, PngWriter
+from proxy.cards.naming import id_fragment
 from proxy.config import settings
-from proxy.datacat_api import DatacatImageResolver
-from proxy.macros import MacroSanitizer
+from proxy.sources.datacat_client import DatacatImageResolver
+from proxy.text.macros import MacroSanitizer
 
 
 def _utc_now_iso() -> str:
@@ -88,21 +90,21 @@ def _utc_now_iso() -> str:
 
 
 def _datacat_extensions(data: dict, creator: str) -> dict:
-    """Provenance mirroring the native /build extensions, but flagged
+    """Provenance mirroring the native /build-jai extensions, but flagged
     `datacat_import` and carrying datacat's own block so it's always clear a
     card came in via import (and may therefore lack a lorebook). A source
     `gallery_id` is carried over so a fresh import keeps it (Chub passes its
     whole extensions block through, so it keeps gallery_id for free)."""
     extensions = {
         "jai": {
-            "source_url": datacat_mapper.source_url(data),
-            "id": datacat_mapper.card_id(data) or None,
+            "source_url": datacat.source_url(data),
+            "id": datacat.card_id(data) or None,
             "sourceKind": "datacat_import",
             "creatorName": creator,
-            "pageName": datacat_mapper.page_name(data),
+            "pageName": datacat.page_name(data),
             "linkedAt": _utc_now_iso(),
         },
-        "datacat": datacat_mapper.datacat_block(data),
+        "datacat": datacat.datacat_block(data),
     }
     gid = gallery.read_id(data)
     if gid is not None:
@@ -118,13 +120,13 @@ def _import_datacat(
     cid: str,
     image_resolver: DatacatImageResolver | None = None,
 ) -> tuple[Path, list[str]]:
-    profile = datacat_mapper.to_profile_fields(data)
-    greetings = datacat_mapper.greetings(data)
+    profile = datacat.to_profile_fields(data)
+    greetings = datacat.greetings(data)
     avatar_url = image_resolver.resolve(cid) if image_resolver and cid else None
     card, warnings = builder.build(profile, greetings, capture=None, book=None, avatar_url=avatar_url)
     if image_resolver and cid and not avatar_url:
         warnings.append("datacat: original avatar not recovered (no link added)")
-    card.character_version = datacat_mapper.source_url(data) or "jai-proxy"
+    card.character_version = datacat.source_url(data) or "jai-proxy"
     card.extensions = _datacat_extensions(data, profile.creator)
     out = writer.write(card, raw, card_id=cid or None)
     return out, warnings
@@ -136,14 +138,14 @@ def _jannyai_extensions(data: dict, creator: str) -> dict:
     A source `gallery_id` is carried over so a fresh import keeps it."""
     extensions = {
         "jai": {
-            "source_url": jannyai_mapper.source_url(data),
-            "id": jannyai_mapper.card_id(data) or None,
+            "source_url": jannyai.source_url(data),
+            "id": jannyai.card_id(data) or None,
             "sourceKind": "jannyai_import",
             "creatorName": creator,
-            "pageName": jannyai_mapper.page_name(data),
+            "pageName": jannyai.page_name(data),
             "linkedAt": _utc_now_iso(),
         },
-        "jannyai": jannyai_mapper.jannyai_block(data),
+        "jannyai": jannyai.jannyai_block(data),
     }
     gid = gallery.read_id(data)
     if gid is not None:
@@ -154,10 +156,10 @@ def _jannyai_extensions(data: dict, creator: str) -> dict:
 def _import_jannyai(
     builder: CardBuilder, writer: PngWriter, data: dict, raw: bytes, cid: str
 ) -> tuple[Path, list[str]]:
-    profile = jannyai_mapper.to_profile_fields(data)
-    greetings = jannyai_mapper.greetings(data)
+    profile = jannyai.to_profile_fields(data)
+    greetings = jannyai.greetings(data)
     card, warnings = builder.build(profile, greetings, capture=None, book=None)
-    card.character_version = jannyai_mapper.source_url(data) or "jai-proxy"
+    card.character_version = jannyai.source_url(data) or "jai-proxy"
     card.extensions = _jannyai_extensions(data, profile.creator)
     out = writer.write(card, raw, card_id=cid or None)
     return out, warnings
@@ -172,11 +174,11 @@ def _chub_extensions(data: dict) -> dict:
     separate lookup."""
     extensions = dict(data.get("extensions") or {})
     extensions["jai"] = {
-        "source_url": chub_mapper.source_url(data),
-        "id": chub_mapper.card_id(data) or None,
+        "source_url": chub.source_url(data),
+        "id": chub.card_id(data) or None,
         "sourceKind": "chub_import",
-        "creatorName": chub_mapper.creator(data),
-        "pageName": chub_mapper.page_name(data),
+        "creatorName": chub.creator(data),
+        "pageName": chub.page_name(data),
         "linkedAt": _utc_now_iso(),
     }
     return extensions
@@ -189,13 +191,13 @@ def _import_chub(
     # pass the rest (extensions, lorebook) straight through, then embed the raw
     # payload so nothing our card models don't carry gets dropped. An
     # extensions.jai stamp is layered on top of Chub's own extensions block.
-    cleaned, warnings = chub_mapper.clean_card(data, sanitizer)
+    cleaned, warnings = chub.clean_card(data, sanitizer)
     cleaned["extensions"] = _chub_extensions(cleaned)
     out = writer.write_payload(
-        chub_mapper.to_payload(cleaned),
+        chub.to_payload(cleaned),
         raw,
-        creator=chub_mapper.creator(cleaned),
-        name=chub_mapper.name(cleaned),
+        creator=chub.creator(cleaned),
+        name=chub.name(cleaned),
         card_id=cid or None,
     )
     return out, warnings
@@ -222,7 +224,7 @@ def _backfill_gallery_id(path: Path, gallery_id: Any) -> str:
 def _adopt_on_disk_gallery_id(data: dict, card_id: str, cards_dir: Path) -> Any | None:
     """Pin an --overwrite re-import to the gallery_id already in the archive.
 
-    Normal precedence is payload > on-disk (see cardbuilder._stamp_gallery_id),
+    Normal precedence is payload > on-disk (see cards.builder._stamp_gallery_id),
     which is right for a first import. It is wrong for an overwrite: the gallery
     folder in SillyTavern-CharacterLibrary is keyed by the id the on-disk card
     carries, so adopting a re-dumped export's id instead would orphan every
@@ -242,12 +244,12 @@ def _adopt_on_disk_gallery_id(data: dict, card_id: str, cards_dir: Path) -> Any 
 def _classify(data: dict) -> tuple[str, str] | None:
     """(source, card id) for a recognised export, or None if the embedded card
     isn't one we know how to re-home."""
-    if chub_mapper.is_chub(data):
-        return "chub", chub_mapper.card_id(data)
-    if datacat_mapper.is_datacat(data):
-        return "datacat", datacat_mapper.card_id(data)
-    if jannyai_mapper.is_jannyai(data):
-        return "jannyai", jannyai_mapper.card_id(data)
+    if chub.is_chub(data):
+        return "chub", chub.card_id(data)
+    if datacat.is_datacat(data):
+        return "datacat", datacat.card_id(data)
+    if jannyai.is_jannyai(data):
+        return "jannyai", jannyai.card_id(data)
     return None
 
 
@@ -327,7 +329,7 @@ def _stale_siblings(card_id: str, written: Path, cards_dir: Path) -> list[Path]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--import-dir", type=Path, default=Path("import"))
-    parser.add_argument("--cards-dir", type=Path, default=settings.output_dir)
+    parser.add_argument("--cards-dir", type=Path, default=settings.archive_dir)
     parser.add_argument(
         "--no-compress",
         action="store_true",
@@ -369,7 +371,7 @@ def main() -> int:
         help=(
             "for datacat imports, call datacat.run to recover the original avatar "
             "URL and lead creator_notes with it (off by default; the only network "
-            "call this script makes -- see proxy/datacat_api.py)"
+            "call this script makes -- see proxy/datacat_client.py)"
         ),
     )
     args = parser.parse_args()

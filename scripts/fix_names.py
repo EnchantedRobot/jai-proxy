@@ -6,7 +6,7 @@ the model that is its name, and `Narrator` hides whoever the card is really
 about. Neither defect is visible until the roleplay is already going wrong.
 
 This scans the archive (or ./import), classifies each name via
-proxy.name_repair.diagnose, and shows what it would change:
+proxy.text.name_repair.diagnose, and shows what it would change:
 
     uv run python scripts/fix_names.py                  # read-only report
     uv run python scripts/fix_names.py --dir import     # scan a staging folder
@@ -48,10 +48,10 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
-from proxy import pngtools
-from proxy.cardbuilder import _safe_filename, id_fragment
+from proxy.cards import pngtools
+from proxy.cards.naming import id_fragment, safe_filename
 from proxy.config import settings
-from proxy.name_repair import GENERIC, JUNK, OK, TITLE, Candidate, Diagnosis, diagnose
+from proxy.text.name_repair import GENERIC, JUNK, OK, TITLE, Candidate, Diagnosis, diagnose
 
 _VERDICT_ORDER = (GENERIC, TITLE, JUNK)
 _ID_FRAGMENT = re.compile(r"_([A-Za-z0-9]{6,8})$")
@@ -112,9 +112,9 @@ def _already_imported(cards_dir: Path, findings: list) -> list:
     which is what SillyTavern actually reads, is untouched. This has already
     cost one full pass of duplicated work, so it is now called out up front.
     """
-    if cards_dir.resolve() == Path(settings.output_dir).resolve():
+    if cards_dir.resolve() == Path(settings.archive_dir).resolve():
         return []
-    archive = Path(settings.output_dir)
+    archive = Path(settings.archive_dir)
     if not archive.is_dir():
         return []
     known = set()
@@ -163,7 +163,7 @@ def _new_path(path: Path, new_name: str, data: dict) -> Path:
     """`<name>_<id8>.png`, preserving the card's id fragment."""
     fragment = _fragment(path, data)
     suffix = f"_{fragment}" if fragment else ""
-    return path.with_name(f"{_safe_filename(new_name)}{suffix}.png")
+    return path.with_name(f"{safe_filename(new_name)}{suffix}.png")
 
 
 def _apply(path: Path, raw: bytes, envelope: dict, data: dict, new_name: str) -> str | None:
@@ -616,7 +616,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--dir", type=Path, default=settings.output_dir, help="folder to scan")
+    parser.add_argument("--dir", type=Path, default=settings.archive_dir, help="folder to scan")
     parser.add_argument(
         "--verdict",
         choices=_VERDICT_ORDER,
@@ -714,7 +714,7 @@ def main() -> int:
     stale = _already_imported(args.dir, findings)
     if stale:
         print(f"\n!! {len(stale)} of these {len(findings)} card(s) are ALREADY in the archive")
-        print(f"!! ({settings.output_dir}).")
+        print(f"!! ({settings.archive_dir}).")
         print("!! `make import` skips cards it has already taken and leaves the staged PNG")
         print("!! behind, so renaming here edits a dead copy -- SillyTavern reads the archive.")
         print("!! Scan the archive instead:  make names ARGS=--interactive")

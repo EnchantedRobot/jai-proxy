@@ -1,0 +1,73 @@
+<?xml version="1.0"?>
+<!--
+  unraid "Add Container" template. Drop this file into
+  /boot/config/plugins/dockerMan/templates-user/ on the server (or paste the
+  raw URL into the template field), then Docker -> Add Container -> pick
+  "jai-proxy" under User templates.
+
+  compose.prod.yaml is the same deployment expressed for the Docker Compose
+  Manager plugin; use whichever is less annoying on the day. Runbook:
+  docs/DEPLOY.md.
+-->
+<Container version="2">
+  <Name>jai-proxy</Name>
+  <Repository>ghcr.io/enchantedrobot/jai-proxy:latest</Repository>
+  <Registry>https://github.com/EnchantedRobot/jai-proxy/pkgs/container/jai-proxy</Registry>
+  <Project>https://github.com/EnchantedRobot/jai-proxy</Project>
+  <Support>https://github.com/EnchantedRobot/jai-proxy/issues</Support>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <WebUI>http://[IP]:[PORT:8000]/</WebUI>
+  <Category>Tools: MediaApp:Other</Category>
+  <Icon/>
+
+  <!--
+    The image's own user is uid 1000; unraid's appdata is owned by
+    nobody:users. Running as the share's owner avoids chowning the whole
+    archive. Editable under Advanced View if your share differs.
+  -->
+  <ExtraParams>--user 99:100</ExtraParams>
+
+  <Overview>
+    Character Archive: browses, builds and serves SillyTavern V3 character
+    cards. One mount holds everything the container writes -- the archive,
+    galleries, the thumbnail cache, settings.json and server working state.
+
+    NOTE: the archive has no authentication and exposes write endpoints. Keep
+    it on the LAN; do not port-forward it.
+  </Overview>
+
+  <Config
+    Name="WebUI Port"
+    Target="8000"
+    Default="8000"
+    Mode="tcp"
+    Description="Host port for the archive UI and API. The container always listens on 8000; change only the host side. SillyTavern's stock port is also 8000."
+    Type="Port"
+    Display="always"
+    Required="true"
+    Mask="false">8000</Config>
+
+  <Config
+    Name="Data"
+    Target="/app/data"
+    Default="/mnt/user/appdata/jai-proxy"
+    Mode="rw"
+    Description="Everything the container writes: characters/, galleries/, cache/, state/, settings.json. Seed it before first start (docs/DEPLOY.md) and make sure it is owned by the uid in Extra Parameters."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/appdata/jai-proxy</Config>
+
+  <Config
+    Name="Bind address"
+    Target="JAI_PROXY_HOST"
+    Default="0.0.0.0"
+    Description="Must stay 0.0.0.0 -- 127.0.0.1 would only be reachable from inside the container."
+    Type="Variable"
+    Display="advanced"
+    Required="true"
+    Mask="false">0.0.0.0</Config>
+</Container>

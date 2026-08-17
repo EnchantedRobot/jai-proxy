@@ -1,0 +1,39 @@
+# The gate in front of publish.yml: a push to main publishes :latest, so a
+# broken tree should fail here first.
+#
+# Both suites are fast (the Python one is ~10s) and neither needs the archive --
+# tests/conftest.py builds real card PNGs in a tmp directory, so nothing here
+# depends on data/, which is why this can run on a clean runner at all.
+
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      # --frozen: fail if uv.lock disagrees with pyproject.toml rather than
+      # silently resolving something the image will never contain.
+      - run: uv sync --frozen
+      - run: uv run python -m pytest -q
+
+  javascript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # Two trees, run separately: each resolves its fixtures relative to its
+      # own directory (see the test-js target in the Makefile). Zero deps, so
+      # there is nothing to install first.
+      - run: make test-js
