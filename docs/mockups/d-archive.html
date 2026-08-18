@@ -1,0 +1,898 @@
+<meta charset="utf-8">
+<title>Archive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#0f1113; --surface:#16191b; --raised:#1d2124; --hi:#242a2d;
+  --line:#272c30; --line-soft:#1f2427;
+  --text:#e9ebec; --muted:#9aa2a6; --faint:#6b7379;
+  --sage:#57c2a2; --sage-dim:#57c2a21f; --sage-line:#57c2a24d; --sage-deep:#2f7d67;
+  --warn:#d3a44f; --bad:#d97a72;
+  font-family:Figtree,ui-sans-serif,system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;min-width:0}
+html,body{height:100%}
+body{background:var(--ground);color:var(--text);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow:hidden}
+button,input,select{font:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--sage);outline-offset:2px}
+.serif{font-family:"Instrument Serif",Georgia,serif;font-weight:400}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+svg{flex:none}
+
+/* ================= top bar ================= */
+.topbar{position:fixed;top:0;left:0;right:0;height:60px;z-index:40;display:flex;align-items:center;gap:14px;padding:0 18px;
+  background:#0f1113e6;backdrop-filter:blur(14px);border-bottom:1px solid var(--line-soft)}
+.brand{font-family:"Instrument Serif",serif;font-size:21px;display:flex;align-items:center;gap:9px;letter-spacing:.01em}
+.brand i{width:8px;height:8px;border-radius:50%;background:var(--sage);display:block;box-shadow:0 0 12px var(--sage)}
+.nav{display:flex;gap:3px;background:#ffffff0c;border:1px solid #ffffff14;border-radius:999px;padding:3px}
+.nav button{padding:6px 16px;border-radius:999px;font-size:13.5px;color:var(--muted);font-weight:500}
+.nav button:hover{color:var(--text)}
+.nav button.on{background:var(--text);color:#121416;font-weight:600}
+.grow{flex:1}
+.tb-btn{width:35px;height:35px;border-radius:50%;border:1px solid #ffffff12;display:grid;place-items:center;color:var(--muted);position:relative}
+.tb-btn:hover{color:var(--text);border-color:#ffffff2b;background:var(--raised)}
+.tb-btn svg{width:16px;height:16px}
+.tb-btn .dot{position:absolute;top:-3px;right:-3px;min-width:16px;height:16px;padding:0 4px;border-radius:9px;background:var(--sage);color:#08130f;
+  font-size:10px;font-weight:700;display:grid;place-items:center;border:2px solid var(--ground)}
+.searchpill{display:flex;align-items:center;gap:9px;height:35px;padding:0 14px;border-radius:999px;border:1px solid #ffffff12;color:var(--faint);font-size:13.5px;min-width:210px}
+.searchpill:hover{border-color:#ffffff33;color:var(--text)}
+.searchpill svg{width:15px;height:15px}
+.searchpill kbd{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:10.5px;border:1px solid var(--line);border-radius:5px;padding:1px 5px;color:var(--faint)}
+
+/* ================= routes ================= */
+.route{position:absolute;inset:60px 0 0 0;overflow-y:auto;overflow-x:hidden}
+.route.hide{display:none}
+.wrap{max-width:1560px;margin:0 auto;padding:0 20px}
+
+/* ================= section header (sticky) ================= */
+.sechead{position:sticky;top:0;z-index:20;background:#0f1113f2;backdrop-filter:blur(12px);border-bottom:1px solid var(--line-soft)}
+.sechead .in{max-width:1560px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:14px}
+.sechead h1{font-size:19px;font-weight:600;letter-spacing:-.015em;white-space:nowrap}
+.chipbar{display:flex;gap:6px;align-items:center;background:#ffffff08;border:1px solid #ffffff10;border-radius:999px;padding:4px;overflow-x:auto;scrollbar-width:none;flex:0 1 auto;min-width:0}
+.chipbar::-webkit-scrollbar{display:none}
+.chip{flex:none;height:30px;padding:0 14px;border-radius:999px;border:1px solid transparent;color:var(--muted);font-size:13px;display:inline-flex;align-items:center;gap:7px}
+.chip:hover{color:var(--text);background:#ffffff0d}
+.chip.on{background:var(--sage-dim);border-color:var(--sage-line);color:var(--sage)}
+.chip.on.neg{background:#d97a721f;border-color:#d97a724d;color:var(--bad)}
+.chip.add{border:1px dashed #ffffff26;color:var(--faint)}
+.chip.add:hover{border-color:var(--sage-line);color:var(--sage)}
+.chip .x{opacity:.65;font-size:11px}
+.chip .x:hover{opacity:1}
+.sortbtn{flex:none;font-size:13px;color:var(--sage);display:inline-flex;align-items:center;gap:5px;padding:6px 4px}
+.sortbtn:hover{text-decoration:underline}
+.count{font-size:12.5px;color:var(--faint)}
+.ctl{height:32px;padding:0 11px;border-radius:9px;border:1px solid var(--line);display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);white-space:nowrap}
+.ctl:hover{background:var(--raised);color:var(--text);border-color:#3a4145}
+.ctl.on{background:var(--sage-dim);border-color:var(--sage-line);color:var(--sage)}
+.ctl b{color:var(--text);font-weight:600}
+.ctl svg{width:14px;height:14px}
+.ctl .n{background:var(--sage);color:#08130f;border-radius:7px;font-size:11px;font-weight:700;padding:0 5px;min-width:17px;text-align:center}
+.seg{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;height:32px}
+.seg button{padding:0 10px;color:var(--faint);display:grid;place-items:center}
+.seg button.on{background:var(--raised);color:var(--text)}
+.seg svg{width:15px;height:15px}
+.activefilters{max-width:1560px;margin:0 auto;padding:0 20px 11px;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.fchip{height:27px;padding:0 6px 0 10px;border-radius:8px;font-size:12.5px;display:inline-flex;align-items:center;gap:6px;
+  background:var(--sage-dim);border:1px solid var(--sage-line);color:var(--sage)}
+.fchip.neg{background:#d97a721f;border-color:#d97a724d;color:var(--bad)}
+.fchip button{color:inherit;opacity:.7;display:grid;place-items:center;width:16px;height:16px;border-radius:5px}
+.fchip button:hover{opacity:1;background:#ffffff1a}
+.clearall{font-size:12.5px;color:var(--faint)}
+.clearall:hover{color:var(--text)}
+
+/* ================= shelf ================= */
+.shelf{padding:20px 0 4px}
+.shelf-head{display:flex;align-items:center;gap:11px;padding:0 0 11px}
+.shelf-head h2{font-size:14.5px;font-weight:600}
+.shelf-head .sub{font-size:12px;color:var(--faint)}
+.shelf-head .right{margin-left:auto;display:flex;gap:6px;align-items:center}
+.linkbtn{font-size:12.5px;color:var(--sage)}
+.linkbtn.mute{color:var(--faint)}
+.linkbtn:hover{text-decoration:underline}
+.grid.shelfrow{padding:0 0 4px}
+hr.div{border:0;border-top:1px solid var(--line-soft);margin:20px 0 0}
+
+/* ================= grid + cards ================= */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:22px 14px;padding:22px 0 90px}
+.grid.cozy{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
+.grid.dense{grid-template-columns:repeat(auto-fill,minmax(122px,1fr));gap:16px 10px}
+.card{cursor:pointer}
+.card .art{position:relative;width:100%;aspect-ratio:2/3;border-radius:12px;overflow:hidden;background:var(--raised);border:1px solid var(--line-soft)}
+.card .art img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .45s cubic-bezier(.2,.7,.3,1)}
+.card:hover .art img{transform:scale(1.05)}
+.card:hover .art{border-color:var(--sage-line)}
+.card .art::after{content:"";position:absolute;inset:0;box-shadow:inset 0 -54px 44px -30px #0f1113de;pointer-events:none}
+.card .badge{position:absolute;top:7px;left:7px;z-index:2;font-size:10.5px;padding:2px 7px;border-radius:7px;background:#0f1113c7;border:1px solid #ffffff1f;backdrop-filter:blur(6px);color:#dfe3e4}
+.card .badge.sage{color:var(--sage);border-color:var(--sage-line)}
+.card .fav{position:absolute;top:6px;right:6px;z-index:2;width:24px;height:24px;border-radius:7px;display:grid;place-items:center;color:var(--sage);background:#0f1113b8;backdrop-filter:blur(6px)}
+.card .new{position:absolute;bottom:7px;left:7px;z-index:2;font-size:10px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:#08130f;background:var(--sage);border-radius:6px;padding:1px 6px}
+.card h3{font-size:13.5px;font-weight:500;margin-top:8px;line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.card .by{font-size:11.5px;color:var(--faint);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ================= popovers ================= */
+.pop{position:fixed;z-index:60;background:var(--surface);border:1px solid var(--line);border-radius:13px;box-shadow:0 22px 60px #000000a6;padding:7px;display:none;min-width:210px}
+.pop.open{display:block}
+.pop .ph{font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--faint);font-weight:600;padding:8px 10px 6px}
+.pop .item{display:flex;align-items:center;gap:9px;width:100%;padding:8px 10px;border-radius:9px;font-size:13.5px;text-align:left;color:var(--text)}
+.pop .item:hover{background:var(--raised)}
+.pop .item .k{margin-left:auto;font-size:11.5px;color:var(--faint)}
+.pop .item.on{color:var(--sage)}
+.pop .item .dot{width:14px;height:14px;border-radius:5px;border:1.5px solid var(--line);flex:none;display:grid;place-items:center}
+.pop .item.inc .dot{background:var(--sage);border-color:var(--sage)}
+.pop .item.exc .dot{background:var(--bad);border-color:var(--bad)}
+.pop .item .n{margin-left:auto;font-size:11.5px;color:var(--faint)}
+.pop hr{border:0;border-top:1px solid var(--line-soft);margin:6px 0}
+.pop input.psearch{width:100%;height:32px;border-radius:9px;background:var(--ground);border:1px solid var(--line);padding:0 10px;margin:2px 0 6px}
+.pop input.psearch:focus{outline:none;border-color:var(--sage)}
+.pop .scroll{max-height:300px;overflow-y:auto}
+
+/* activity popover */
+.act{width:376px;padding:0}
+.act header{display:flex;align-items:center;gap:8px;padding:13px 14px;border-bottom:1px solid var(--line-soft)}
+.act header h4{font-size:14px;font-weight:600}
+.act header .linkbtn{margin-left:auto}
+.act .body{max-height:440px;overflow-y:auto;padding:6px}
+.actday{font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--faint);font-weight:600;padding:10px 10px 6px}
+.actrow{display:flex;gap:11px;align-items:center;padding:7px 9px;border-radius:10px}
+.actrow:hover{background:var(--raised)}
+.actrow img{width:34px;height:50px;object-fit:cover;border-radius:6px;flex:none}
+.actrow .t{font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.actrow .s{font-size:11.5px;color:var(--faint)}
+.actrow .when{margin-left:auto;font-size:11px;color:var(--faint)}
+.pill{font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;border-radius:5px;padding:1px 5px}
+.pill.imp{background:var(--sage-dim);color:var(--sage)}
+.pill.dl{background:#d3a44f26;color:var(--warn)}
+.pill.ed{background:#ffffff14;color:var(--muted)}
+
+/* ================= detail route ================= */
+.backbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px;padding:11px 20px;background:#0f1113d9;backdrop-filter:blur(12px);border-bottom:1px solid var(--line-soft)}
+.backbar .crumb{font-size:12.5px;color:var(--faint)}
+.pager{margin-left:auto;display:flex;gap:6px;align-items:center}
+.dhero{position:relative;overflow:hidden;padding:34px 0 0}
+.dhero .bg{position:absolute;inset:-40px;background-size:cover;background-position:center 18%;filter:blur(46px) saturate(1.25);opacity:.30}
+.dhero::after{content:"";position:absolute;inset:0;background:linear-gradient(#0f1113b3,var(--ground) 88%)}
+.dwrap{position:relative;z-index:2;display:grid;grid-template-columns:min(280px,25vw) 1fr;gap:34px;max-width:1240px;margin:0 auto;padding:0 20px}
+.dportrait{position:sticky;top:76px;align-self:start;display:flex;flex-direction:column;gap:9px}
+.dportrait img{width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:15px;border:1px solid var(--line);box-shadow:0 24px 60px #00000080}
+.btn{height:38px;padding:0 15px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;gap:8px;font-size:13.5px;border:1px solid var(--line);color:var(--text);background:var(--surface)}
+.btn:hover{background:var(--raised);border-color:#3a4145}
+.btn.sage{background:var(--sage);border-color:var(--sage);color:#07140f;font-weight:650}
+.btn.sage:hover{background:#68d0b1;border-color:#68d0b1}
+.btn.ghost{background:none}
+.btn svg{width:16px;height:16px}
+.dactions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.dactions .wide{grid-column:1/-1}
+.dhead h1{font-family:"Instrument Serif",serif;font-size:clamp(30px,4.2vw,50px);line-height:1.05;font-weight:400;text-wrap:balance}
+.dhead .by{color:var(--muted);font-size:13.5px;margin-top:9px;display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+.dhead .by a{color:var(--sage);text-decoration:none}
+.dhead .by .sep{color:var(--faint)}
+.tagrow{display:flex;flex-wrap:wrap;gap:6px;margin-top:15px}
+.tag{font-size:12px;padding:4px 10px;border-radius:8px;border:1px solid var(--line);color:#c3cacd;background:var(--surface)}
+.tag:hover{border-color:var(--sage-line);color:var(--sage)}
+.tag.add{border-style:dashed;color:var(--faint);background:none}
+.dtabs{display:flex;gap:20px;margin-top:24px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
+.dtabs::-webkit-scrollbar{display:none}
+.dtabs button{padding:10px 0;font-size:13.5px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.dtabs button:hover{color:var(--text)}
+.dtabs button.on{color:var(--text);border-bottom-color:var(--sage);font-weight:600}
+.dtabs .n{font-size:11px;color:var(--faint);margin-left:5px}
+.dbody{padding:22px 0 90px;display:flex;flex-direction:column;gap:24px;max-width:80ch}
+.sec h3{font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);font-weight:600;display:flex;align-items:center;gap:9px}
+.sec h3 .edit{margin-left:auto;color:var(--sage);letter-spacing:0;text-transform:none;font-size:12.5px;font-weight:500}
+.prose{margin-top:9px;color:#d2d8da;font-size:14.5px;line-height:1.68}
+.prose.box{background:var(--surface);border:1px solid var(--line-soft);border-radius:12px;padding:15px 17px}
+.prose.mono{font-size:12.5px;line-height:1.6;white-space:pre-wrap;color:#b9c2c5}
+.metagrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(116px,1fr));gap:9px;margin-top:9px}
+.metagrid div{background:var(--surface);border:1px solid var(--line-soft);border-radius:11px;padding:11px 13px}
+.metagrid b{display:block;font-size:18px;font-weight:600}
+.metagrid span{font-size:11.5px;color:var(--faint)}
+.gstrip{display:flex;gap:9px;overflow-x:auto;padding-bottom:6px;margin-top:9px}
+.gstrip img{height:120px;border-radius:9px;border:1px solid var(--line-soft);object-fit:cover}
+.lorerow{display:flex;gap:12px;align-items:baseline;padding:11px 13px;border:1px solid var(--line-soft);border-radius:11px;background:var(--surface);margin-top:8px}
+.lorerow .keys{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--sage);flex:none;width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lorerow .txt{font-size:13px;color:#c3cacd;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+
+/* ---- creator notes + info ---- */
+.notes{margin-top:11px;background:var(--surface);border:1px solid var(--line-soft);border-radius:13px;padding:20px 22px;color:#d2d8da;font-size:14.5px;line-height:1.68}
+.notes h4{font-size:15px;font-weight:600;color:var(--text);margin:18px 0 7px}
+.notes h4:first-child{margin-top:0}
+.notes p{margin-bottom:11px}
+.notes ul{margin:0 0 11px 18px}
+.notes li{margin-bottom:4px}
+.notes blockquote{border-left:2px solid var(--sage);padding:2px 0 2px 14px;margin:14px 0;color:#c3cacd}
+.notes .small{font-size:12.5px;color:var(--faint);border-top:1px solid var(--line-soft);padding-top:12px;margin-bottom:0}
+.inforows{margin-top:9px;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:0 26px}
+.inforows div{display:flex;align-items:baseline;gap:12px;padding:9px 2px;border-bottom:1px solid var(--line-soft)}
+.inforows span{font-size:12.5px;color:var(--faint);min-width:118px}
+.inforows b{font-size:13.5px;font-weight:500;margin-left:auto;text-align:right}
+
+/* ================= discover ================= */
+.provrow{display:flex;gap:8px;flex-wrap:wrap}
+.dsearch{display:flex;align-items:center;gap:9px;height:38px;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:var(--surface);flex:1;max-width:520px}
+.dsearch input{flex:1;background:none;border:0}
+.dsearch input:focus{outline:none}
+.card .have{position:absolute;bottom:7px;right:7px;z-index:2;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;background:#0f1113cc;border:1px solid var(--sage-line);color:var(--sage);border-radius:6px;padding:1px 6px;backdrop-filter:blur(6px)}
+.card .get{position:absolute;inset:auto 7px 7px 7px;z-index:3;height:28px;border-radius:8px;background:var(--sage);color:#07140f;font-size:12px;font-weight:650;display:none;align-items:center;justify-content:center;gap:6px}
+.card:hover .get{display:flex}
+
+/* ================= tags tab ================= */
+.tagsplit{display:grid;grid-template-columns:1fr 380px;gap:24px;padding:22px 0 90px;align-items:start}
+.taggrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:9px}
+.tagcard{border:1px solid var(--line);background:var(--surface);border-radius:11px;padding:11px 13px;display:flex;align-items:center;gap:10px;text-align:left}
+.tagcard:hover{border-color:var(--sage-line);background:var(--raised)}
+.tagcard.sel{border-color:var(--sage);background:var(--sage-dim)}
+.tagcard .nm{font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tagcard .ct{margin-left:auto;font-size:11.5px;color:var(--faint)}
+.tagcard .bar{height:3px;border-radius:2px;background:var(--sage);opacity:.55;margin-top:5px}
+.side{position:sticky;top:76px;border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:16px}
+.side h3{font-size:16px;font-weight:600;display:flex;align-items:center;gap:8px}
+.side .sub{font-size:12.5px;color:var(--faint);margin-top:3px}
+.side .acts{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:14px 0}
+.side .acts .btn{height:34px;font-size:13px}
+.minigrid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+.minigrid img{width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:7px;border:1px solid var(--line-soft)}
+
+/* ================= settings route ================= */
+.setwrap{display:grid;grid-template-columns:212px 1fr;gap:30px;max-width:1080px;margin:0 auto;padding:26px 20px 90px}
+.setnav{position:sticky;top:76px;align-self:start;display:flex;flex-direction:column;gap:2px}
+.setnav button{text-align:left;padding:8px 11px;border-radius:9px;font-size:13.5px;color:var(--muted);display:flex;align-items:center;gap:9px}
+.setnav button:hover{background:var(--raised);color:var(--text)}
+.setnav button.on{background:var(--sage-dim);color:var(--sage);font-weight:600}
+.setnav svg{width:15px;height:15px}
+.setsec{margin-bottom:34px}
+.setsec>h2{font-family:"Instrument Serif",serif;font-size:26px;font-weight:400;margin-bottom:3px}
+.setsec>p.lede{color:var(--faint);font-size:13px;margin-bottom:16px}
+.panel{border:1px solid var(--line);background:var(--surface);border-radius:14px;overflow:hidden}
+.opt{display:flex;align-items:center;gap:16px;padding:14px 16px;border-bottom:1px solid var(--line-soft)}
+.opt:last-child{border-bottom:0}
+.opt .lbl{font-size:13.5px;font-weight:500}
+.opt .hint{font-size:12px;color:var(--faint);margin-top:2px}
+.opt .ctlwrap{margin-left:auto;display:flex;align-items:center;gap:8px}
+.toggle{width:40px;height:23px;border-radius:999px;background:var(--hi);border:1px solid var(--line);position:relative;flex:none}
+.toggle::after{content:"";position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:var(--muted);transition:.16s}
+.toggle.on{background:var(--sage-deep);border-color:var(--sage)}
+.toggle.on::after{left:19px;background:#e9fbf5}
+select.inp,input.inp{height:33px;border-radius:9px;background:var(--ground);border:1px solid var(--line);padding:0 10px;font-size:13px;min-width:150px}
+input.inp:focus,select.inp:focus{outline:none;border-color:var(--sage)}
+.statline{display:flex;gap:22px;padding:14px 16px;background:var(--raised);border-bottom:1px solid var(--line-soft)}
+.statline div b{display:block;font-size:17px;font-weight:600}
+.statline div span{font-size:11.5px;color:var(--faint)}
+
+/* ================= tags (consolidation) ================= */
+.tagstats{display:flex;align-items:center;gap:34px;flex-wrap:wrap;border:1px solid var(--line);background:var(--surface);border-radius:16px;padding:16px 22px;margin:22px 0 18px}
+.tagstats b{display:block;font-size:21px;font-weight:600;line-height:1.2}
+.tagstats span{font-size:11.5px;color:var(--faint)}
+.tagstats .note-in{margin-left:auto;font-size:12.5px;color:var(--faint);max-width:44ch;line-height:1.45}
+.cat{border:1px solid var(--line);background:var(--surface);border-radius:15px;margin-bottom:10px;overflow:hidden}
+.cathead{display:flex;align-items:center;gap:11px;width:100%;padding:15px 20px;text-align:left}
+.cathead:hover{background:var(--raised)}
+.cathead .car{color:var(--faint);transition:transform .16s;display:grid;place-items:center}
+.cat.open .cathead .car{transform:rotate(90deg)}
+.cathead h3{font-size:14px;font-weight:600;color:var(--sage)}
+.cathead .n{margin-left:auto;font-size:12px;color:var(--faint)}
+.cathead .cards{font-size:12px;color:var(--faint);min-width:74px;text-align:right}
+.cat .rows{display:none;padding:0 8px 8px}
+.cat.open .rows{display:block}
+.trow{display:grid;grid-template-columns:minmax(200px,1.1fr) minmax(280px,2fr) 90px 34px;gap:18px;align-items:center;padding:11px 12px;border-radius:12px}
+.trow:hover{background:var(--raised)}
+.trow+.trow{box-shadow:inset 0 1px 0 var(--line-soft)}
+.thead{padding:6px 12px 8px;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);font-weight:600}
+.canon{font-size:14px;font-weight:500;background:none;border:1px solid transparent;border-radius:9px;padding:6px 9px;width:100%}
+.canon:hover{border-color:var(--line)}
+.canon:focus{outline:none;border-color:var(--sage);background:var(--ground)}
+.vars{display:flex;flex-wrap:wrap;gap:6px}
+.var{display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 8px 0 11px;border-radius:999px;border:1px solid var(--line);background:var(--ground);font-size:12.5px;color:#c3cacd}
+.var .c{font-size:11px;color:var(--faint)}
+.var .x{color:var(--faint);font-size:11px}
+.var .x:hover{color:var(--bad)}
+.var.odd{border-color:#d3a44f4d;color:var(--warn);font-family:"JetBrains Mono",monospace;font-size:11.5px}
+.var.add{border-style:dashed;color:var(--faint);cursor:pointer}
+.trow .ct{text-align:right;font-size:13px;color:var(--muted)}
+.trow .kill{color:var(--faint);width:26px;height:26px;border-radius:8px;display:grid;place-items:center}
+.trow .kill:hover{color:var(--bad);background:#d97a721a}
+
+/* ================= search overlay ================= */
+.ovl{position:fixed;inset:0;z-index:70;background:#0a0c0dcc;backdrop-filter:blur(16px);display:none;flex-direction:column;padding:64px 20px 20px}
+.ovl.open{display:flex}
+.ovl .row{display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--line);padding-bottom:14px;max-width:1560px;margin:0 auto;width:100%}
+.ovl input{flex:1;background:none;border:0;font-family:"Instrument Serif",serif;font-size:32px}
+.ovl input:focus{outline:none}
+.ovl .res{flex:1;overflow-y:auto;max-width:1560px;margin:0 auto;width:100%}
+.ovl .scope{display:flex;gap:7px;padding:14px 0 0;max-width:1560px;margin:0 auto;width:100%}
+.note{position:fixed;left:14px;bottom:12px;font-size:11.5px;color:var(--muted);background:#16191bd9;border:1px solid var(--line);border-radius:9px;padding:7px 11px;z-index:65;backdrop-filter:blur(6px)}
+.empty{padding:70px 0;text-align:center;color:var(--faint)}
+</style>
+
+<!-- ======================= TOP BAR ======================= -->
+<header class="topbar">
+  <div class="brand"><i></i> Archive</div>
+  <nav class="nav" id="tabs">
+    <button class="on" data-tab="characters">Characters</button>
+    <button data-tab="favorites">Favorites</button>
+    <button data-tab="discover">Discover</button>
+    <button data-tab="tags">Tags</button>
+  </nav>
+  <div class="grow"></div>
+  <button class="searchpill" id="openSearch">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    Search the archive <kbd>⌘K</kbd>
+  </button>
+  <button class="tb-btn" id="btnActivity" title="Activity"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l2 6 4-14 2 8h6"/></svg><span class="dot">7</span></button>
+  <button class="tb-btn" id="btnImport" title="Import"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 5v14M5 12h14"/></svg></button>
+  <button class="tb-btn" id="btnSettings" title="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.2"/><path d="M20.4 13.5a8.4 8.4 0 000-3l1.6-1.2-2-3.5-1.9.7a8.5 8.5 0 00-2.6-1.5L15.2 3h-4l-.3 2a8.5 8.5 0 00-2.6 1.5l-1.9-.7-2 3.5 1.6 1.2a8.4 8.4 0 000 3L4.4 14.7l2 3.5 1.9-.7a8.5 8.5 0 002.6 1.5l.3 2h4l.3-2a8.5 8.5 0 002.6-1.5l1.9.7 2-3.5z"/></svg></button>
+</header>
+
+<!-- ======================= CHARACTERS / FAVORITES ======================= -->
+<div class="route" id="rLibrary">
+  <div class="sechead">
+    <div class="in">
+      <h1 id="libTitle">Characters</h1>
+      <span class="count" id="libCount"></span>
+      <div class="chipbar" id="chipbar"></div>
+      <div class="grow"></div>
+      <button class="sortbtn" id="ctlSort">Sort <b id="sortLabel">Name</b>
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 9l6 6 6-6"/></svg></button>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <section class="shelf" id="shelfWrap">
+      <div class="shelf-head">
+        <h2>Recently added</h2><span class="sub" id="shelfSub">one row · last 6 days</span>
+        <div class="right">
+          <button class="linkbtn" id="shelfAll">See all →</button>
+          <button class="linkbtn mute" id="shelfHide">Hide</button>
+        </div>
+      </div>
+      <div class="grid shelfrow" id="shelfRail"></div>
+      <hr class="div">
+    </section>
+    <div class="grid" id="grid"></div>
+  </div>
+</div>
+
+<!-- ======================= DISCOVER ======================= -->
+<div class="route hide" id="rDiscover">
+  <div class="sechead">
+    <div class="in">
+      <h1>Discover</h1><span class="count">search providers · add straight to the archive</span>
+      <div class="chipbar" id="discBar">
+        <button class="chip on">Chub</button><button class="chip">DataCat</button>
+        <span style="width:1px;height:18px;background:#ffffff14;margin:0 4px"></span>
+        <button class="chip on">Discover</button><button class="chip">Following</button>
+        <span style="width:1px;height:18px;background:#ffffff14;margin:0 4px"></span>
+        <button class="chip">Hide cards I have</button>
+        <button class="chip">Female</button><button class="chip">Fantasy</button>
+        <button class="chip add">＋ Filter</button>
+      </div>
+      <div class="grow"></div>
+      <button class="sortbtn" id="discSort">Sort <b>Trending</b>
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 9l6 6 6-6"/></svg></button>
+    </div>
+  </div>
+  <div class="wrap">
+    <div style="padding:20px 0 2px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <div class="dsearch">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--faint)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input placeholder="Search Chub…" value="cyberpunk detective">
+      </div>
+      <span class="count" id="discCount">248 results · 31 already in the archive</span>
+      <div class="grow" style="flex:1"></div>
+      <button class="btn ghost" style="height:35px;border-radius:999px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12a8 8 0 1114 5"/><path d="M4 17v-5h5"/></svg> Refresh</button>
+    </div>
+    <div class="grid" id="discGrid"></div>
+  </div>
+</div>
+
+<!-- ======================= TAGS ======================= -->
+<div class="route hide" id="rTags">
+  <div class="sechead">
+    <div class="in">
+      <h1>Tags</h1><span class="count">consolidate the vocabulary · edits are staged until you apply</span>
+      <div class="chipbar" style="flex:0 1 auto">
+        <div class="dsearch" style="height:30px;border:0;background:none;padding:0 8px;min-width:190px">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--faint)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input placeholder="Find a tag or variant…" id="tagFind">
+        </div>
+      </div>
+      <div class="grow"></div>
+      <button class="btn ghost" style="height:33px;border-radius:999px;font-size:13px">＋ New canonical</button>
+      <button class="btn ghost" style="height:33px;border-radius:999px;font-size:13px;color:var(--muted)">↺ Reset</button>
+      <button class="btn sage" style="height:33px;border-radius:999px;font-size:13px">Apply tags</button>
+    </div>
+  </div>
+  <div class="wrap" style="max-width:1320px">
+    <div class="tagstats">
+      <div><b class="mono">6</b><span>renames staged</span></div>
+      <div><b class="mono">2</b><span>removals staged</span></div>
+      <div><b class="mono">418</b><span>cards affected</span></div>
+      <div><b class="mono">426 <span style="color:var(--faint)">→</span> 419</b><span>vocabulary</span></div>
+      <div class="note-in">5 unassigned · 924 removed · click a variant’s ✕ to send it back to Unassigned</div>
+    </div>
+    <div id="tagCats"></div>
+    <div style="height:80px"></div>
+  </div>
+</div>
+
+<!-- ======================= DETAIL ======================= -->
+<div class="route hide" id="rDetail">
+  <div class="backbar">
+    <button class="btn ghost" id="back" style="height:32px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M11 6l-6 6 6 6"/></svg> Back</button>
+    <span class="crumb" id="dCrumb">Characters</span>
+    <div class="pager">
+      <span class="crumb mono" id="dPos"></span>
+      <button class="tb-btn" id="prevCard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <button class="tb-btn" id="nextCard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg></button>
+    </div>
+  </div>
+  <div class="dhero">
+    <div class="bg" id="dBg"></div>
+    <div class="dwrap">
+      <div class="dportrait">
+        <img id="dImg" alt="">
+        <div class="dactions">
+          <button class="btn sage wide"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 4v10m0 0l-4-4m4 4l4-4M5 19h14"/></svg> Download card</button>
+          <button class="btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8L3.6 9.7l5.8-.8z"/></svg> Favorite</button>
+          <button class="btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 6h16M4 12h16M4 18h10"/></svg> Edit</button>
+          <button class="btn wide" id="dGalleryBtn">Open gallery · 12 images</button>
+          <button class="btn ghost wide" style="color:var(--faint);font-size:12.5px">⋯ More · export, duplicate, delete</button>
+        </div>
+      </div>
+      <div>
+        <div class="dhead">
+          <h1 id="dName">—</h1>
+          <div class="by">by <a href="#" id="dBy">—</a> <span class="sep">·</span> <span class="mono" id="dDate"></span> <span class="sep">·</span> <span id="dSrc">JanitorAI</span> <span class="sep">·</span> <span class="mono" id="dSize"></span></div>
+          <div class="tagrow" id="dTags"></div>
+        </div>
+        <nav class="dtabs" id="dTabs">
+          <button class="on" data-p="overview">Overview</button>
+          <button data-p="notes">Creator notes</button>
+          <button data-p="greetings">Greetings<span class="n" id="nGreet"></span></button>
+          <button data-p="lore">Lorebook<span class="n" id="nLore"></span></button>
+          <button data-p="gallery">Gallery<span class="n">12</span></button>
+          <button data-p="related">Related</button>
+          <button data-p="info">Info</button>
+        </nav>
+        <div class="dbody" id="dBody"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= SETTINGS ======================= -->
+<div class="route hide" id="rSettings">
+  <div class="backbar">
+    <button class="btn ghost" id="setBack" style="height:32px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M11 6l-6 6 6 6"/></svg> Back</button>
+    <span class="crumb">Settings</span>
+    <div class="pager"><span class="crumb">Saved automatically</span></div>
+  </div>
+  <div class="setwrap">
+    <nav class="setnav" id="setNav">
+      <button class="on">Library</button>
+      <button>Archive &amp; storage</button>
+      <button>Providers</button>
+      <button>Media</button>
+      <button>Userscripts</button>
+      <button>Maintenance</button>
+      <button>About</button>
+    </nav>
+    <div>
+      <section class="setsec">
+        <h2>Library</h2><p class="lede">How the grid looks and what the Characters tab shows by default.</p>
+        <div class="panel">
+          <div class="opt"><div><div class="lbl">Default sort</div><div class="hint">Applied when the Characters tab opens.</div></div>
+            <div class="ctlwrap"><select class="inp"><option>Name (A→Z)</option><option selected>Recently added</option><option>Lore entries</option><option>Creator</option></select></div></div>
+          <div class="opt"><div><div class="lbl">Card size</div><div class="hint">Dense fits ~14 per row on this display.</div></div>
+            <div class="ctlwrap"><select class="inp"><option>Dense</option><option selected>Default</option><option>Large</option></select></div></div>
+          <div class="opt"><div><div class="lbl">Show “Recently added” shelf</div><div class="hint">A single fixed row above the grid.</div></div>
+            <div class="ctlwrap"><span style="font-size:12.5px;color:var(--faint)">12 cards</span><button class="toggle on" data-toggle></button></div></div>
+          <div class="opt"><div><div class="lbl">Badge lore &amp; greeting counts on tiles</div></div>
+            <div class="ctlwrap"><button class="toggle on" data-toggle></button></div></div>
+          <div class="opt"><div><div class="lbl">Blur NSFW thumbnails until hover</div></div>
+            <div class="ctlwrap"><button class="toggle" data-toggle></button></div></div>
+        </div>
+      </section>
+
+      <section class="setsec">
+        <h2>Archive &amp; storage</h2><p class="lede">Where cards live on disk. One mount, one path.</p>
+        <div class="panel">
+          <div class="statline">
+            <div><b class="mono">3,868</b><span>cards</span></div>
+            <div><b class="mono">10.8 GB</b><span>on disk</span></div>
+            <div><b class="mono">31,204</b><span>gallery images</span></div>
+            <div><b class="mono">0</b><span>broken cards</span></div>
+          </div>
+          <div class="opt"><div><div class="lbl">Data directory</div><div class="hint mono" style="font-size:11.5px">/app/data</div></div>
+            <div class="ctlwrap"><button class="btn" style="height:31px;font-size:12.5px">Reveal</button></div></div>
+          <div class="opt"><div><div class="lbl">Compress avatars on import</div><div class="hint">pngquant · ~56% smaller, visually lossless.</div></div>
+            <div class="ctlwrap"><button class="toggle on" data-toggle></button></div></div>
+          <div class="opt"><div><div class="lbl">Duplicate handling</div><div class="hint">Cards are keyed by their id fragment, never by name.</div></div>
+            <div class="ctlwrap"><select class="inp"><option selected>Skip existing</option><option>Keep both</option><option>Replace</option></select></div></div>
+        </div>
+      </section>
+
+      <section class="setsec">
+        <h2>Providers</h2><p class="lede">Sources the Discover tab searches, and the outbound proxy they go through.</p>
+        <div class="panel">
+          <div class="opt"><div><div class="lbl">Chub</div><div class="hint">Enabled · no API key required</div></div><div class="ctlwrap"><button class="toggle on" data-toggle></button></div></div>
+          <div class="opt"><div><div class="lbl">DataCat</div><div class="hint">Enabled · anonymous session token</div></div><div class="ctlwrap"><button class="toggle on" data-toggle></button></div></div>
+          <div class="opt"><div><div class="lbl">Outbound proxy</div><div class="hint mono" style="font-size:11.5px">socks5://127.0.0.1:1080 · <span style="color:var(--sage)">active, IP differs ✓</span></div></div>
+            <div class="ctlwrap"><input class="inp mono" style="min-width:230px" value="socks5://127.0.0.1:1080"><button class="btn" style="height:31px;font-size:12.5px">Test</button></div></div>
+        </div>
+      </section>
+
+      <section class="setsec">
+        <h2>Media</h2><p class="lede">Gallery images referenced by creator notes and greetings.</p>
+        <div class="panel">
+          <div class="opt"><div><div class="lbl">Download media on import</div></div><div class="ctlwrap"><button class="toggle on" data-toggle></button></div></div>
+          <div class="opt"><div><div class="lbl">Images only</div><div class="hint">Audio and video are never persisted.</div></div><div class="ctlwrap"><button class="toggle on" data-toggle></button></div></div>
+          <div class="opt"><div><div class="lbl">Concurrent downloads</div></div><div class="ctlwrap"><select class="inp"><option>2</option><option selected>4</option><option>8</option></select></div></div>
+          <div class="opt"><div><div class="lbl">Retry permanently-dead URLs</div><div class="hint">1,323 URLs are currently marked dead.</div></div><div class="ctlwrap"><button class="btn" style="height:31px;font-size:12.5px">Rescan</button><button class="toggle" data-toggle></button></div></div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= POPOVERS ======================= -->
+<div class="pop" id="popSort">
+  <div class="ph">Sort by</div>
+  <button class="item on" data-sort="name">Name <span class="k">A→Z</span></button>
+  <button class="item" data-sort="created">Recently added</button>
+  <button class="item" data-sort="lore">Lore entries</button>
+  <button class="item" data-sort="greets">Greetings</button>
+  <button class="item" data-sort="desc">Description length</button>
+  <button class="item" data-sort="creator">Creator</button>
+  <hr>
+  <button class="item" data-dir>Reverse order <span class="k mono" id="dirLabel">↑</span></button>
+</div>
+
+<div class="pop" id="popFilter" style="width:278px">
+  <input class="psearch" placeholder="Search tags…" id="tagFilterSearch">
+  <div class="ph">Filters</div>
+  <button class="item" data-f="fav"><span class="dot"></span> Favorites <span class="n" id="fnFav"></span></button>
+  <button class="item" data-f="lore"><span class="dot"></span> Has a lorebook <span class="n" id="fnLore"></span></button>
+  <button class="item" data-f="greets"><span class="dot"></span> Multiple greetings <span class="n" id="fnGreets"></span></button>
+  <button class="item" data-f="new"><span class="dot"></span> Added this week <span class="n" id="fnNew"></span></button>
+  <button class="item" data-f="nomedia"><span class="dot"></span> Missing media <span class="n">43</span></button>
+  <button class="item" data-f="untagged"><span class="dot"></span> Untagged <span class="n">18</span></button>
+  <hr>
+  <div class="ph">Tags · click to include, again to exclude</div>
+  <div class="scroll" id="tagList"></div>
+</div>
+
+<div class="pop act" id="popActivity">
+  <header><h4>Activity</h4><span class="count">7 new since Aug 16</span><button class="linkbtn">Mark all seen</button></header>
+  <div class="body" id="actBody"></div>
+</div>
+
+<div class="pop" id="popImport" style="width:266px">
+  <div class="ph">Add to the archive</div>
+  <button class="item">Upload PNG cards… <span class="k">⌘U</span></button>
+  <button class="item">Import from URL…</button>
+  <button class="item">Search providers…</button>
+  <hr>
+  <div class="ph">Bulk</div>
+  <button class="item">Import a folder…</button>
+  <button class="item">Restore a bundle (.zip)…</button>
+</div>
+
+<!-- ======================= SEARCH OVERLAY ======================= -->
+<div class="ovl" id="ovl">
+  <div class="row">
+    <svg viewBox="0 0 24 24" width="25" height="25" fill="none" stroke="var(--sage)" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <input id="q" placeholder="Search names, creators, tags, descriptions…" autocomplete="off">
+    <button class="tb-btn" id="closeSearch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="scope">
+    <button class="ctl on">All fields</button><button class="ctl">Name</button><button class="ctl">Creator</button><button class="ctl">Tags</button><button class="ctl">Description</button>
+    <div class="grow"></div><span class="count" id="qCount"></span>
+  </div>
+  <div class="res"><div class="grid" id="resGrid" style="padding-top:18px"></div></div>
+</div>
+
+<div class="note">Mock D2 · <b>Archive</b> — chip strip + small Sort, auto density, tag consolidation · try ⌘K, ＋ Filter, Activity, Settings</div>
+
+<script src="cards-data.js"></script>
+<script>
+const CARDS = (window.MOCK_CARDS||[]).map((c,i)=>({...c,_i:i,fav:i%7===0,isnew:i<7}));
+const esc = s => (s||"").replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+const $ = s => document.querySelector(s);
+
+/* ---------- state ---------- */
+const S = {tab:'characters', sort:'name', dir:1, tags:new Map(), flags:new Set(), shelf:true, list:[], route:'rLibrary'};
+
+/* ---------- card markup ---------- */
+function cardHtml(c,{disc=false}={}){
+  const badge = c.lore ? `<span class="badge sage">${c.lore} lore</span>` : (c.greets>1 ? `<span class="badge">${c.greets} greetings</span>` : '');
+  const fav = c.fav && !disc ? `<span class="fav">★</span>` : '';
+  const nw = c.isnew && !disc ? `<span class="new">new</span>` : '';
+  const have = disc && c._i%5===0 ? `<span class="have">in archive</span>` : '';
+  const get = disc ? `<span class="get">＋ Add</span>` : '';
+  return `<article class="card" data-i="${c._i}"><div class="art">${badge}${fav}${nw}${have}${get}<img src="${c.img}" alt="" loading="lazy"></div>
+    <h3>${esc(c.name)}</h3><div class="by">${esc(c.creator||'unknown')}</div></article>`;
+}
+
+/* ---------- tag catalogue ---------- */
+const tagCount = new Map();
+CARDS.forEach(c=>(c.tags||[]).forEach(t=>tagCount.set(t,(tagCount.get(t)||0)+1)));
+const TAGS = [...tagCount.entries()].sort((a,b)=>b[1]-a[1]);
+
+/* ---------- library render ---------- */
+const SORTS = {name:(a,b)=>a.name.localeCompare(b.name), created:(a,b)=>(b.created||'').localeCompare(a.created||''),
+  lore:(a,b)=>b.lore-a.lore, greets:(a,b)=>b.greets-a.greets, desc:(a,b)=>b.desc-a.desc,
+  creator:(a,b)=>(a.creator||'').localeCompare(b.creator||'')};
+const SORTLBL = {name:'Name',created:'Newest',lore:'Lore',greets:'Greetings',desc:'Length',creator:'Creator'};
+
+function apply(){
+  let out = CARDS.filter(c=>{
+    for(const [t,mode] of S.tags){ const has=(c.tags||[]).includes(t); if(mode==='inc'&&!has) return false; if(mode==='exc'&&has) return false; }
+    if(S.tab==='favorites' && !c.fav) return false;
+    if(S.flags.has('fav') && !c.fav) return false;
+    if(S.flags.has('lore') && !c.lore) return false;
+    if(S.flags.has('greets') && c.greets<2) return false;
+    if(S.flags.has('new') && !c.isnew) return false;
+    return true;
+  });
+  out.sort(SORTS[S.sort]); if(S.dir<0) out.reverse();
+  S.list = out;
+  const g = $('#grid');
+  paintShelves();
+  g.innerHTML = out.map(c=>cardHtml(c)).join('') || `<div class="empty" style="grid-column:1/-1">Nothing matches those filters.</div>`;
+  $('#libTitle').textContent = S.tab==='favorites' ? 'Favorites' : 'Characters';
+  $('#libCount').textContent = `${out.length} shown of 3,868`;
+  $('#sortLabel').textContent = SORTLBL[S.sort];
+  $('#dirLabel').textContent = S.dir>0?'↑':'↓';
+  $('#shelfWrap').hidden = !S.shelf || S.tab==='favorites' || S.tags.size || S.flags.size;
+  renderChips();
+}
+
+/* ---------- chip strip ---------- */
+const FLAGLBL = {fav:'Favorites',lore:'Has lorebook',greets:'Multi-greeting',new:'Added this week',nomedia:'Needs media',untagged:'Untagged'};
+const PRESET_FLAGS = ['fav','lore','greets','nomedia'];
+const PRESET_TAGS = TAGS.slice(0,3).map(t=>t[0]);
+function renderChips(){
+  const none = !S.tags.size && !S.flags.size;
+  let h = `<button class="chip ${none?'on':''}" data-all>All</button>`;
+  h += PRESET_FLAGS.map(f=>`<button class="chip ${S.flags.has(f)?'on':''}" data-flag="${f}">${FLAGLBL[f]}</button>`).join('');
+  h += PRESET_TAGS.map(t=>`<button class="chip ${S.tags.get(t)==='inc'?'on':''} ${S.tags.get(t)==='exc'?'on neg':''}" data-tagchip="${esc(t)}">${S.tags.get(t)==='exc'?'− ':''}${esc(t)}</button>`).join('');
+  [...S.tags].filter(([t])=>!PRESET_TAGS.includes(t)).forEach(([t,m])=>{
+    h += `<button class="chip on ${m==='exc'?'neg':''}" data-tagchip="${esc(t)}">${m==='exc'?'− ':''}${esc(t)}<span class="x" data-rmtag="${esc(t)}">✕</span></button>`;});
+  [...S.flags].filter(f=>!PRESET_FLAGS.includes(f)).forEach(f=>{
+    h += `<button class="chip on" data-flag="${f}">${FLAGLBL[f]}<span class="x" data-rmflag="${f}">✕</span></button>`;});
+  h += `<button class="chip add" id="chipMore" data-pop="1">＋ Filter</button>`;
+  $('#chipbar').innerHTML = h;
+}
+$('#chipbar').onclick=e=>{
+  const rt=e.target.closest('[data-rmtag]'), rf=e.target.closest('[data-rmflag]');
+  if(rt){e.stopPropagation();S.tags.delete(rt.dataset.rmtag);renderTagList($('#tagFilterSearch').value.toLowerCase());return apply();}
+  if(rf){e.stopPropagation();S.flags.delete(rf.dataset.rmflag);syncPop();return apply();}
+  const more=e.target.closest('#chipMore'); if(more){e.stopPropagation();return toggle($('#popFilter'),more,'left');}
+  const all=e.target.closest('[data-all]'); if(all){S.tags.clear();S.flags.clear();renderTagList();syncPop();return apply();}
+  const f=e.target.closest('[data-flag]'); if(f){const k=f.dataset.flag;S.flags.has(k)?S.flags.delete(k):S.flags.add(k);syncPop();return apply();}
+  const t=e.target.closest('[data-tagchip]'); if(t){const k=t.dataset.tagchip,cur=S.tags.get(k);
+    if(!cur)S.tags.set(k,'inc'); else if(cur==='inc')S.tags.set(k,'exc'); else S.tags.delete(k);
+    renderTagList($('#tagFilterSearch').value.toLowerCase()); return apply();}
+};
+function syncPop(){ $('#popFilter').querySelectorAll('[data-f]').forEach(b=>b.classList.toggle('inc',S.flags.has(b.dataset.f))); }
+
+const NEWEST = [...CARDS].sort(SORTS.created);
+function cols(el){ return getComputedStyle(el).gridTemplateColumns.split(' ').filter(Boolean).length; }
+function paintShelves(){
+  const n = cols($('#grid'));
+  $('#shelfRail').innerHTML = NEWEST.slice(0,n).map(c=>cardHtml(c)).join('');
+  $('#shelfSub').textContent = `${n} newest · last 6 days`;
+}
+addEventListener('resize',paintShelves);
+$('#discGrid').innerHTML = [...CARDS].reverse().slice(0,42).map(c=>cardHtml(c,{disc:true})).join('');
+['fav','lore','greets','new'].forEach(k=>{
+  const n = CARDS.filter(c=> k==='fav'?c.fav : k==='lore'?c.lore : k==='greets'?c.greets>1 : c.isnew).length;
+  const el = document.getElementById('fn'+k[0].toUpperCase()+k.slice(1)); if(el) el.textContent = n;
+});
+
+/* ---------- popovers ---------- */
+let openPop=null;
+function place(pop,anchor,align='right'){
+  const r=anchor.getBoundingClientRect(); pop.classList.add('open');
+  const w=pop.offsetWidth; pop.style.top=(r.bottom+8)+'px';
+  pop.style.left=Math.max(10,Math.min(align==='right'?r.right-w:r.left, innerWidth-w-10))+'px';
+}
+function toggle(pop,anchor,align='right'){ if(openPop===pop){close();return;} close(); place(pop,anchor,align); openPop=pop; }
+function close(){ if(openPop){openPop.classList.remove('open');openPop=null;} }
+document.addEventListener('click',e=>{ if(openPop && !e.target.closest('.pop') && !e.target.closest('[data-pop]')) close(); });
+[['#ctlSort','#popSort'],['#btnActivity','#popActivity'],['#btnImport','#popImport']]
+ .forEach(([a,p])=>{ const A=$(a); A.dataset.pop=1; A.onclick=e=>{e.stopPropagation();toggle($(p),A);} });
+
+$('#popSort').onclick=e=>{ const b=e.target.closest('.item'); if(!b) return;
+  if(b.dataset.dir!==undefined){ S.dir*=-1; } else { S.sort=b.dataset.sort;
+    $('#popSort').querySelectorAll('.item').forEach(i=>i.classList.toggle('on',i===b)); }
+  apply(); };
+
+function renderTagList(q=''){
+  $('#tagList').innerHTML = TAGS.filter(([t])=>t.toLowerCase().includes(q)).slice(0,120)
+    .map(([t,n])=>`<button class="item ${S.tags.get(t)||''}" data-tag="${esc(t)}"><span class="dot"></span>${esc(t)}<span class="n">${n}</span></button>`).join('');
+}
+renderTagList();
+$('#tagFilterSearch').oninput=e=>renderTagList(e.target.value.toLowerCase());
+$('#popFilter').onclick=e=>{
+  const b=e.target.closest('[data-tag]');
+  if(b){ const t=b.dataset.tag, cur=S.tags.get(t);
+    if(!cur) S.tags.set(t,'inc'); else if(cur==='inc') S.tags.set(t,'exc'); else S.tags.delete(t);
+    renderTagList($('#tagFilterSearch').value.toLowerCase()); return apply(); }
+  const f=e.target.closest('[data-f]');
+  if(f){ const k=f.dataset.f; S.flags.has(k)?S.flags.delete(k):S.flags.add(k); syncPop(); apply(); } };
+/* ---------- activity ---------- */
+const ACTS=[['Today',[['imp','Imported from DataCat','2m'],['imp','Imported from DataCat','2m'],['dl','Gallery downloaded · 18 images','1h'],['ed','Tags edited','3h']]],
+            ['Yesterday',[['imp','Imported from Chub','—'],['imp','Upload · 2 files','—'],['ed','Renamed','—']]]];
+$('#actBody').innerHTML = ACTS.map(([day,rows],di)=>`<div class="actday">${day}</div>`+rows.map((r,ri)=>{
+  const c=CARDS[(di*4+ri)*3+1]||CARDS[0];
+  return `<div class="actrow" data-i="${c._i}"><img src="${c.img}" alt=""><div><div class="t">${esc(c.name)}</div>
+    <div class="s"><span class="pill ${r[0]}">${r[0]==='imp'?'added':r[0]==='dl'?'media':'edited'}</span> ${r[1]}</div></div><span class="when">${r[2]}</span></div>`;
+}).join('')).join('');
+$('#actBody').onclick=e=>{const r=e.target.closest('[data-i]'); if(r){close();openDetail(+r.dataset.i);}};
+
+/* ---------- tags tab (consolidation) ---------- */
+const CATS = {
+  'Genre':['Romance','Comedy','Drama','Fantasy','Horror','Action','Sci-Fi','Isekai','Historical','Western','Slow Burn','Angst','Fluff'],
+  'Tone / Mood':['Wholesome','Dead Dove','Can Be Wholesome, Can Be Sexy','Flirty','Seductive'],
+  'Species / Non-Human':['Demi-Human','Non-Human','Elf','Monster Girl','Demon','Dragon','Robot','Undead','Cat Girl','Human','Supernatural'],
+  'Personality / Archetype':['Dominant','Submissive','Switch','Shy','Yandere','Tsundere','Villain','Brat','Bully','Nerd','Thief'],
+  'Relationship / Role':['Wife','Mother','Daughter','Roommate','Ex-Girlfriend','Childhood Friend','Enemies to Lovers','Teacher','Multiple Characters','Royalty'],
+  'Gender':['Female','Male'],
+  'Content Rating':['NSFW','SFW'],
+  'NSFW Theme / Kink':['Fetish','Free Use','Non-Con','NTR','Virgin'],
+  'Occupation':['Doctor','Gaming','Idol'],
+  'Setting / Era':['European','Trauma','The Eternal Concord']
+};
+const ODD = {'Female':'*female*','Fantasy':'fantasy ','Romance':'Romance!!','NSFW':'nsfw','Demon':'demons'};
+function catOf(t){ for(const [k,v] of Object.entries(CATS)) if(v.includes(t)) return k; return 'Plot / Theme'; }
+const GROUPED = {};
+TAGS.forEach(([t,n])=>{ const k=catOf(t); (GROUPED[k]=GROUPED[k]||[]).push([t,n]); });
+const CATORDER = Object.keys(CATS).concat('Plot / Theme').filter(k=>GROUPED[k]);
+let openCats = new Set(['Genre']);
+function renderTags(q=''){
+  $('#tagCats').innerHTML = CATORDER.map(cat=>{
+    const rows = GROUPED[cat].filter(([t])=>t.toLowerCase().includes(q));
+    if(!rows.length) return '';
+    const open = openCats.has(cat) || q;
+    return `<section class="cat ${open?'open':''}" data-cat="${cat}">
+      <button class="cathead"><span class="car"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 5l7 7-7 7"/></svg></span>
+        <h3>${cat}</h3><span class="n">${rows.length} canonical</span>
+        <span class="cards">${rows.reduce((a,b)=>a+b[1],0)} cards</span></button>
+      <div class="rows">
+        <div class="trow thead"><span>Canonical tag</span><span>Merged variants</span><span style="text-align:right">Cards</span><span></span></div>
+        ${rows.map(([t,n])=>`<div class="trow">
+          <input class="canon" value="${esc(t)}">
+          <div class="vars">${ODD[t]?`<span class="var odd">${esc(ODD[t])} <button class="x">✕</button></span>`:''}
+            <span class="var">${esc(t)} <span class="c mono">${n}</span> <button class="x">✕</button></span>
+            <span class="var add">＋</span></div>
+          <span class="ct mono">${n}</span>
+          <button class="kill" title="Remove tag"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        </div>`).join('')}
+      </div></section>`;
+  }).join('');
+}
+renderTags();
+$('#tagCats').onclick=e=>{ const h=e.target.closest('.cathead'); if(!h) return;
+  const cat=h.parentElement.dataset.cat; openCats.has(cat)?openCats.delete(cat):openCats.add(cat);
+  h.parentElement.classList.toggle('open'); };
+$('#tagFind').oninput=e=>renderTags(e.target.value.toLowerCase());
+
+/* ---------- routing ---------- */
+function show(id){ document.querySelectorAll('.route').forEach(r=>r.classList.toggle('hide',r.id!==id)); S.route=id; scrollTo(0,0); }
+$('#tabs').onclick=e=>{ const b=e.target.closest('[data-tab]'); if(!b) return;
+  $('#tabs').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+  S.tab=b.dataset.tab;
+  if(S.tab==='discover') show('rDiscover'); else if(S.tab==='tags') show('rTags'); else { show('rLibrary'); apply(); } };
+$('#btnSettings').onclick=()=>{close();show('rSettings');};
+$('#setBack').onclick=()=>show(S.tab==='discover'?'rDiscover':S.tab==='tags'?'rTags':'rLibrary');
+$('#setNav').onclick=e=>{const b=e.target.closest('button'); if(b){$('#setNav').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));}};
+document.addEventListener('click',e=>{const t=e.target.closest('[data-toggle]'); if(t) t.classList.toggle('on');});
+$('#shelfHide').onclick=()=>{S.shelf=false;apply();};
+$('#shelfAll').onclick=()=>{S.sort='created';S.dir=1;S.flags.add('new');syncPop();apply();};
+
+/* ---------- detail ---------- */
+let dIdx=0, dPane='overview';
+function openDetail(i){
+  const c=CARDS[i]; if(!c) return; dIdx=i;
+  $('#dBg').style.backgroundImage=`url(${c.img})`; $('#dImg').src=c.img;
+  $('#dName').textContent=c.name; $('#dBy').textContent=c.creator||'unknown';
+  $('#dDate').textContent=(c.created||'').slice(0,10);
+  $('#dSize').textContent=(c.desc/1000).toFixed(1)+'k chars';
+  $('#nGreet').textContent=c.greets; $('#nLore').textContent=c.lore||'';
+  $('#dTags').innerHTML=(c.tags||[]).map(t=>`<button class="tag">${esc(t)}</button>`).join('')+`<button class="tag add">＋ tag</button>`;
+  const pos=S.list.findIndex(x=>x._i===i);
+  $('#dPos').textContent = pos>=0 ? `${pos+1} of ${S.list.length}` : '';
+  $('#dCrumb').textContent = S.tab==='favorites'?'Favorites':'Characters';
+  renderPane(c); show('rDetail');
+}
+function renderPane(c){
+  const B=$('#dBody');
+  if(dPane==='overview') B.innerHTML=`
+    <div class="sec"><h3>Tagline <button class="edit">Edit</button></h3><div class="prose serif" style="font-size:19px;line-height:1.45">${esc(c.tagline||'—')}</div></div>
+    <div class="sec"><h3>At a glance</h3><div class="metagrid">
+      <div><b class="mono">${(c.desc/1000).toFixed(1)}k</b><span>description chars</span></div>
+      <div><b class="mono">${c.greets}</b><span>greetings</span></div>
+      <div><b class="mono">${c.lore}</b><span>lore entries</span></div>
+      <div><b class="mono">12</b><span>gallery images</span></div>
+      <div><b class="mono">${(c.created||'').slice(0,10)}</b><span>added</span></div></div></div>
+    <div class="sec"><h3>Description <button class="edit">Edit inline</button></h3><div class="prose box">${esc(c.blurb||'—')}…</div></div>
+    <div class="sec"><h3>First message <button class="edit">Greeting 1 of ${c.greets} ▾</button></h3><div class="prose box">${esc(c.first||'—')}…</div></div>
+    <div class="sec"><h3>Gallery <button class="edit">Open all</button></h3><div class="gstrip">${CARDS.slice(c._i,c._i+9).map(g=>`<img src="${g.img}" alt="">`).join('')}</div></div>`;
+  else if(dPane==='greetings') B.innerHTML=Array.from({length:Math.max(1,c.greets)},(_,k)=>`
+    <div class="sec"><h3>Greeting ${k+1}${k?'':' · primary'} <button class="edit">Edit</button></h3><div class="prose box">${esc(c.first||'—')}…</div></div>`).join('');
+  else if(dPane==='lore') B.innerHTML = c.lore ? `<div class="sec"><h3>${c.lore} entries <button class="edit">Add entry</button></h3>`+
+    Array.from({length:Math.min(c.lore,10)},(_,k)=>`<div class="lorerow"><span class="keys">${['the tower','ashford','her mother','the pact','night market'][k%5]}</span>
+      <span class="txt">${esc((c.blurb||'').slice(k*90,k*90+180))||'Entry text…'}</span></div>`).join('')+`</div>`
+    : `<div class="empty">No lorebook on this card. <button class="linkbtn">Create one</button></div>`;
+  else if(dPane==='gallery') B.innerHTML=`<div class="sec"><h3>12 images <button class="edit">Download all</button></h3>
+    <div class="grid dense" style="padding:10px 0 0">${CARDS.slice(c._i,c._i+12).map(g=>`<div class="card"><div class="art"><img src="${g.img}" alt=""></div></div>`).join('')}</div></div>`;
+  else if(dPane==='related') B.innerHTML=`<div class="sec"><h3>Same creator · ${esc(c.creator||'unknown')}</h3>
+    <div class="grid dense" style="padding:10px 0 0">${CARDS.filter(x=>x.creator===c.creator&&x._i!==c._i).slice(0,10).map(g=>cardHtml(g)).join('')||'<div class="empty">No other cards.</div>'}</div></div>
+    <div class="sec"><h3>Shares tags</h3><div class="grid dense" style="padding:10px 0 0">${CARDS.filter(x=>x._i!==c._i&&(x.tags||[]).some(t=>(c.tags||[]).includes(t))).slice(0,10).map(g=>cardHtml(g)).join('')}</div></div>`;
+  else if(dPane==='notes') B.innerHTML=`
+    <div class="sec"><h3>Creator notes <button class="edit">Edit</button></h3>
+      <div class="notes">
+        <h4>About ${esc(c.name)}</h4>
+        <p>${esc(c.tagline||'—')}</p>
+        <p>${esc((c.blurb||'').slice(0,340))}…</p>
+        <blockquote>Works best with a system prompt that keeps replies under 300 words. She will not break character on her own — push her.</blockquote>
+        <h4>Changelog</h4>
+        <ul><li><b>v1.3</b> — trimmed the definition, split the lorebook by location</li>
+        <li><b>v1.2</b> — added ${Math.max(1,c.greets-1)} alternate greeting${c.greets>2?'s':''}</li>
+        <li><b>v1.0</b> — initial release</li></ul>
+        <p class="small">Notes are rendered from the card's <span class="mono">creator_notes</span>. Layout is kept, the creator's palette is not.</p>
+      </div></div>`;
+  else if(dPane==='info') B.innerHTML=`
+    <div class="sec"><h3>Card</h3><div class="inforows">
+      <div><span>File</span><b class="mono">${esc(c.name.replace(/[^A-Za-z0-9]+/g,'_'))}_a1b2c3d4.png</b></div>
+      <div><span>Card id</span><b class="mono">a1b2c3d4</b></div>
+      <div><span>Gallery id</span><b class="mono">gid_7f31c0</b></div>
+      <div><span>Spec</span><b>chara_card_v3</b></div>
+      <div><span>Size on disk</span><b class="mono">1.4 MB</b></div>
+      <div><span>Avatar</span><b class="mono">512 × 768 · pngquant</b></div>
+    </div></div>
+    <div class="sec"><h3>Provenance</h3><div class="inforows">
+      <div><span>Source</span><b>JanitorAI</b></div>
+      <div><span>Creator</span><b>${esc(c.creator||'unknown')}</b></div>
+      <div><span>Created</span><b class="mono">${(c.created||'').slice(0,10)}</b></div>
+      <div><span>Added to archive</span><b class="mono">${(c.created||'').slice(0,10)}</b></div>
+      <div><span>Last edited</span><b class="mono">2026-08-14</b></div>
+      <div><span>Links</span><b><a href="#" style="color:var(--sage);text-decoration:none">janitorai ↗</a></b></div>
+    </div></div>
+    <div class="sec"><h3>Content</h3><div class="inforows">
+      <div><span>Description</span><b class="mono">${c.desc.toLocaleString()} chars</b></div>
+      <div><span>Greetings</span><b class="mono">${c.greets}</b></div>
+      <div><span>Lore entries</span><b class="mono">${c.lore}</b></div>
+      <div><span>Example dialogue</span><b class="mono">none</b></div>
+      <div><span>Gallery images</span><b class="mono">12 · 8.1 MB</b></div>
+      <div><span>Unresolved macros</span><b class="mono">0</b></div>
+    </div></div>
+    <div class="sec"><h3>card.json</h3><div class="prose box mono">${esc(JSON.stringify({name:c.name,creator:c.creator,tags:c.tags,description:(c.blurb||'').slice(0,220)+'…',first_mes:(c.first||'').slice(0,220)+'…',alternate_greetings:c.greets-1,character_book:{entries:c.lore},extensions:{jai:{id:'a1b2c3d4'},datacat:{}}},null,2))}</div></div>`;
+  else B.innerHTML=`<div class="sec"><h3>card.json <button class="edit">Copy</button></h3><div class="prose box mono">${esc(JSON.stringify({name:c.name,creator:c.creator,tags:c.tags,description:(c.blurb||'').slice(0,220)+'…',first_mes:(c.first||'').slice(0,220)+'…',alternate_greetings:c.greets-1,character_book:{entries:c.lore},extensions:{jai:{id:'a1b2c3d4'},datacat:{}}},null,2))}</div></div>`;
+}
+$('#dTabs').onclick=e=>{const b=e.target.closest('[data-p]'); if(!b)return;
+  $('#dTabs').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); dPane=b.dataset.p; renderPane(CARDS[dIdx]);};
+$('#back').onclick=()=>show(S.tab==='tags'?'rTags':S.tab==='discover'?'rDiscover':'rLibrary');
+function step(d){ const pos=S.list.findIndex(x=>x._i===dIdx); const n=S.list[pos+d]; if(n) openDetail(n._i); }
+$('#prevCard').onclick=()=>step(-1); $('#nextCard').onclick=()=>step(1);
+document.addEventListener('click',e=>{ const t=e.target.closest('.card'); if(t&&t.dataset.i) openDetail(+t.dataset.i); });
+
+/* ---------- search ---------- */
+$('#openSearch').onclick=()=>{ $('#ovl').classList.add('open'); q.focus(); q.dispatchEvent(new Event('input')); };
+$('#closeSearch').onclick=()=>$('#ovl').classList.remove('open');
+q.oninput=e=>{ const v=e.target.value.toLowerCase();
+  const hits = !v ? CARDS.slice(0,30) : CARDS.filter(c=>(c.name+' '+(c.creator||'')+' '+(c.tags||[]).join(' ')+' '+(c.blurb||'')).toLowerCase().includes(v));
+  $('#qCount').textContent = v?`${hits.length} matches`:'recent';
+  $('#resGrid').innerHTML = hits.slice(0,60).map(c=>cardHtml(c)).join('') || `<div class="empty" style="grid-column:1/-1">No matches.</div>`; };
+document.addEventListener('keydown',e=>{
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#openSearch').click();}
+  if(e.key==='Escape'){$('#ovl').classList.remove('open');close();}
+  if(S.route==='rDetail'&&!$('#ovl').classList.contains('open')){ if(e.key==='j')step(1); if(e.key==='k')step(-1); }});
+document.addEventListener('click',e=>{ if(e.target.closest('#ovl .card')) $('#ovl').classList.remove('open'); });
+
+apply();
+</script>

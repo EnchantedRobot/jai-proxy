@@ -43,6 +43,10 @@ class CardOut(BaseModel):
     )
     has_creator_notes: bool
     has_example_dialogue: bool
+    favorite: bool = Field(
+        default=False,
+        description="Starred, out of the card's own `extensions.fav` -- so it travels with the PNG and round-trips through SillyTavern rather than living in this server's settings.",
+    )
     size: int = Field(description="Card PNG size in bytes.")
     modified: datetime = Field(
         description="The file's mtime. Says when the card was last *written*, which on this archive is dominated by bulk repair passes -- see `linked_at` for when it arrived."
@@ -65,6 +69,18 @@ class CardOut(BaseModel):
         default=None,
         description="Why this card could not be parsed. Null for healthy cards; a card with an error has only its file fields filled in.",
     )
+
+
+class FavoriteIn(BaseModel):
+    """The one targeted write in the API. See `set_favorite` for why a single
+    boolean does not go through the whole-document `PUT`."""
+
+    value: bool = Field(description="True to star the card, false to unstar it.")
+
+
+class FavoriteOut(BaseModel):
+    id: str
+    favorite: bool
 
 
 class CardListOut(BaseModel):

@@ -105,17 +105,36 @@ def _forwarded_response_headers(response: httpx.Response) -> dict[str, str]:
     }
 
 
-@router.api_route("/proxy/{url:path}", methods=["GET", "POST"])
+# Two routes rather than one `api_route(methods=["GET", "POST"])`, and the
+# reason is downstream: FastAPI writes a *single* operation id per function, so
+# a two-method route emits the same id under both `get:` and `post:` in the
+# OpenAPI document. That is not cosmetic -- openapi-typescript turns each into
+# a TypeScript declaration of the same name and the frontend's `tsc -b` fails
+# on the duplicate (see `make api-schema`). One function per method is what
+# keeps the generated client compilable; both delegate to `_forward` below, so
+# there is still one implementation.
+@router.get("/proxy/{url:path}")
 async def cors_proxy(url: str, request: Request) -> Response:
     """Fetch `url` server-side and hand the response back verbatim.
 
     The URL arrives percent-encoded as a single path segment (`proxyEncode` in
     provider-utils.js escapes `/` and `?` along with everything else), so
     Starlette's own path decoding hands it back whole, query string included.
-
-    POST is here for `mega.js`, the one caller that posts a JSON command batch
-    through the fallback; every other site is a GET.
     """
+    return await _forward(url, request)
+
+
+@router.post("/proxy/{url:path}")
+async def cors_proxy_post(url: str, request: Request) -> Response:
+    """`cors_proxy`, for the one caller that posts.
+
+    `mega.js` sends a JSON command batch through the fallback; every other site
+    is a GET.
+    """
+    return await _forward(url, request)
+
+
+async def _forward(url: str, request: Request) -> Response:
     target = url.strip()
     if not target:
         return PlainTextResponse("no URL given", status_code=400)

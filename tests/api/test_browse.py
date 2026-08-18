@@ -47,6 +47,7 @@ def test_card_shape_is_the_contract(client):
         "prompt_chars": len("Abbie is a test character.") + len("Hello, I am Abbie."),
         "has_creator_notes": False,
         "has_example_dialogue": False,
+        "favorite": False,
         "size": item["size"],
         "modified": item["modified"],
         "linked_at": "2026-07-21T17:31:47.257Z",
@@ -135,6 +136,32 @@ def test_search_does_not_reach_into_prose(client):
     assert client.get("/api/v1/characters?q=test+character").json()["total"] == 0
 
 
+def test_search_can_be_scoped_to_one_field(client):
+    """The ⌘K scope chips. A narrower scope only ever narrows: `all` is the
+    union, so nothing matches in a scope that would not have matched without
+    one."""
+    # "korny" is a creator, not a name -- so it survives the creator scope and
+    # not the name scope.
+    assert _names(client.get("/api/v1/characters?q=korny").json()) == ["Abbie", "Cleo"]
+    assert _names(client.get("/api/v1/characters?q=korny&scope=creator").json()) == ["Abbie", "Cleo"]
+    assert client.get("/api/v1/characters?q=korny&scope=name").json()["total"] == 0
+    assert _names(client.get("/api/v1/characters?q=abbie&scope=name").json()) == ["Abbie"]
+    assert _names(client.get("/api/v1/characters?q=vampire&scope=tags").json()) == ["Abbie"]
+
+
+def test_scope_does_not_reach_the_page_title_or_filename(client):
+    """Both are in the default haystack and in none of the narrow scopes --
+    which is the point of scoping: "bella" the page title should not answer a
+    search of creator names."""
+    assert _names(client.get("/api/v1/characters?q=second").json()) == ["Bella"]
+    assert client.get("/api/v1/characters?q=second&scope=name").json()["total"] == 0
+    assert client.get("/api/v1/characters?q=second&scope=creator").json()["total"] == 0
+
+
+def test_an_unknown_scope_is_rejected(client):
+    assert client.get("/api/v1/characters?q=abbie&scope=description").status_code == 422
+
+
 def test_tag_filter_requires_every_tag(client):
     assert _names(client.get("/api/v1/characters?tag=Female").json()) == ["Abbie", "Cleo"]
     assert _names(client.get("/api/v1/characters?tag=Female&tag=Vampire").json()) == ["Abbie"]
@@ -153,6 +180,88 @@ def test_creator_and_source_filters(client):
 def test_has_lorebook_filter(client):
     assert _names(client.get("/api/v1/characters?has_lorebook=true").json()) == ["Abbie"]
     assert _names(client.get("/api/v1/characters?has_lorebook=false").json()) == ["Bella", "Cleo"]
+
+
+def test_favorite_filter_reads_the_card_not_a_sidecar(client, populated_archive):
+    """The star lives in `extensions.fav` on the PNG, so a card starred by
+    anything -- this API, the old UI, SillyTavern -- filters here with no
+    migration in between."""
+    extensions = jai_extensions("55556666-0000-0000-0000-000000000000")
+    extensions["fav"] = True
+    (populated_archive["characters"] / "Dora_55556666.png").write_bytes(
+        card_png("Dora", extensions=extensions)
+    )
+    client.post("/api/v1/refresh")
+
+    assert _names(client.get("/api/v1/characters?favorite=true").json()) == ["Dora"]
+    assert "Dora" not in _names(client.get("/api/v1/characters?favorite=false").json())
+    # Unfiltered still means everything, starred or not.
+    assert client.get("/api/v1/characters").json()["total"] == 4
+
+
+def test_favorite_is_read_from_the_envelope_root_too(client, populated_archive):
+    """SillyTavern mirrors `fav` outside `data`, and writes it as the string
+    `"true"` as often as the boolean. Reading is tolerant of both; writing is
+    not, because only the extensions copy survives a re-embed."""
+    (populated_archive["characters"] / "Elle_77778888.png").write_bytes(
+        card_png(
+            "Elle",
+            extensions=jai_extensions("77778888-0000-0000-0000-000000000000"),
+            envelope_extra={"fav": "true"},
+        )
+    )
+    client.post("/api/v1/refresh")
+
+    assert _names(client.get("/api/v1/characters?favorite=true").json()) == ["Elle"]
+
+
+def test_exclude_tag_removes_cards_and_beats_include(client):
+    assert _names(client.get("/api/v1/characters?exclude_tag=Female").json()) == ["Bella"]
+    assert _names(client.get("/api/v1/characters?tag=Female&exclude_tag=Vampire").json()) == ["Cleo"]
+    # The same tag both ways is a contradiction, and "not this" is the stronger
+    # half of it -- a hand-built URL gets an empty set, not an arbitrary winner.
+    assert client.get("/api/v1/characters?tag=Female&exclude_tag=female").json()["total"] == 0
+
+
+def test_untagged_filter_finds_the_tagging_backlog(client, populated_archive):
+    (populated_archive["characters"] / "Fern_99998888.png").write_bytes(
+        card_png("Fern", extensions=jai_extensions("99998888-0000-0000-0000-000000000000"))
+    )
+    client.post("/api/v1/refresh")
+
+    assert _names(client.get("/api/v1/characters?untagged=true").json()) == ["Fern"]
+    assert _names(client.get("/api/v1/characters?untagged=false").json()) == ["Abbie", "Bella", "Cleo"]
+
+
+def test_min_greetings_counts_the_primary_greeting(client):
+    """Bella has two alternates plus her `first_mes`, so she is the only card
+    the mock's multi-greeting chip should surface."""
+    assert _names(client.get("/api/v1/characters?min_greetings=2").json()) == ["Bella"]
+    assert client.get("/api/v1/characters?min_greetings=1").json()["total"] == 3
+    assert client.get("/api/v1/characters?min_greetings=4").json()["total"] == 0
+
+
+def test_added_after_compares_against_acquisition_time(client, populated_archive):
+    """Same field `sort=added` orders by, compared the same way -- ISO-8601
+    sorts lexically, so the chip and the sort cannot disagree."""
+    extensions = jai_extensions("12341234-0000-0000-0000-000000000000")
+    extensions["jai"]["linkedAt"] = "2026-08-10T09:00:00.000Z"
+    (populated_archive["characters"] / "Gwen_12341234.png").write_bytes(
+        card_png("Gwen", extensions=extensions)
+    )
+    client.post("/api/v1/refresh")
+
+    assert _names(client.get("/api/v1/characters?added_after=2026-08-01").json()) == ["Gwen"]
+    assert client.get("/api/v1/characters?added_after=2026-01-01").json()["total"] == 4
+
+
+def test_added_after_excludes_cards_with_no_acquisition_stamp(client, populated_archive):
+    """An undated card is not recent. Treating a missing stamp as "now" would
+    put every hand-dropped card at the top of the Added This Week chip."""
+    (populated_archive["characters"] / "Hana_44445555.png").write_bytes(card_png("Hana"))
+    client.post("/api/v1/refresh")
+
+    assert "Hana" not in _names(client.get("/api/v1/characters?added_after=2000-01-01").json())
 
 
 def test_sort_and_reverse(client):

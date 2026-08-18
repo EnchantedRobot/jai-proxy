@@ -124,6 +124,13 @@ class CardSummary:
     prompt_chars: int = 0
     has_creator_notes: bool = False
     has_example_dialogue: bool = False
+    # Starred by the user, out of `extensions.fav`. A bool on the summary rather
+    # than a lookup into `extensions` because the grid filters and paints on it,
+    # and the extensions blob is 790 bytes a card that a list request does not
+    # otherwise pay for. SillyTavern also mirrors this at the envelope root, so
+    # the parse reads both -- but only the extensions copy survives a patch (see
+    # `pngtools.embed_card`), which is why writes go there.
+    favorite: bool = False
     # The card's whole `data.extensions` block, verbatim. Kept here -- unlike
     # every other piece of prose-adjacent content -- because it is not prose: it
     # is identity. Provider links, gallery_id, version uids and the per-source
@@ -233,8 +240,25 @@ def summarize(path: Path, stat_result: Any | None = None) -> CardSummary:
         prompt_chars=sum(len(_text(data.get(f))) for f in _PROMPT_FIELDS),
         has_creator_notes=bool(_text(data.get("creator_notes")).strip()),
         has_example_dialogue=bool(_text(data.get("mes_example")).strip()),
+        favorite=_favorite(outer if isinstance(outer, dict) else {}, extensions),
         extensions=extensions,
     )
+
+
+def _favorite(outer: dict[str, Any], extensions: dict[str, Any]) -> bool:
+    """Whether this card is starred, from either place the flag is written.
+
+    SillyTavern keeps `fav` at the envelope root *and* under
+    `data.extensions`, and cards that passed through it can carry either or
+    both -- and either as the string `"true"`, which is what its own settings
+    round-trip produces. Reading is therefore tolerant of all four shapes.
+    Writing is not: only the extensions copy survives `pngtools.embed_card`,
+    which rebuilds the envelope from the spec header plus `data`.
+    """
+    for value in (extensions.get("fav"), outer.get("fav")):
+        if value is True or value == "true":
+            return True
+    return False
 
 
 def _diagnose(raw: bytes) -> str:

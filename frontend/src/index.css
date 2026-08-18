@@ -1,0 +1,153 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@import '@fontsource-variable/figtree';
+@import '@fontsource/instrument-serif';
+@import '@fontsource/instrument-serif/400-italic.css';
+@import '@fontsource-variable/jetbrains-mono';
+
+/* The archive is a single designed theme, sage-on-dark, taken from
+   docs/mockups/d-archive.html. There is no light mode and no theme customizer
+   (docs/UI_REWRITE_PLAN.md §1.1) -- so the palette lives on a bare `:root`
+   with no `.dark` variant to swap into, and `color-scheme` tells the browser
+   to render its own chrome (scrollbars, form controls) to match.
+
+   Two layers of token here, deliberately:
+
+   - The mock's own names (--ground, --sage, --faint ...) are the vocabulary
+     the design is written in, and every port of a mock rule reads better
+     against them than against a translation.
+   - shadcn's contract names (--background, --primary, --border ...) are
+     what the vendored ui/ primitives consume. They are defined *in terms of*
+     the first layer, so there is one place a colour is decided. */
+:root {
+  color-scheme: dark;
+
+  /* --- the mock's palette, verbatim ------------------------------------ */
+  --ground: #0f1113;
+  --surface: #16191b;
+  --raised: #1d2124;
+  --hi: #242a2d;
+  --line: #272c30;
+  --line-soft: #1f2427;
+  --text: #e9ebec;
+  --muted: #9aa2a6;
+  --faint: #6b7379;
+  --sage: #57c2a2;
+  --sage-dim: #57c2a21f;
+  --sage-line: #57c2a24d;
+  --sage-deep: #2f7d67;
+  --on-sage: #08130f;
+  --warn: #d3a44f;
+  --bad: #d97a72;
+
+  /* --- shadcn's contract, expressed in the palette above ---------------- */
+  --background: var(--ground);
+  --foreground: var(--text);
+  --card: var(--surface);
+  --card-foreground: var(--text);
+  --popover: var(--raised);
+  --popover-foreground: var(--text);
+  --primary: var(--sage);
+  --primary-foreground: var(--on-sage);
+  --secondary: var(--raised);
+  --secondary-foreground: var(--text);
+  --muted-foreground: var(--muted);
+  --accent: var(--hi);
+  --accent-foreground: var(--text);
+  --destructive: var(--bad);
+  --destructive-foreground: var(--on-sage);
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--sage);
+  --radius: 0.625rem;
+}
+
+/* Tailwind utilities generated from the tokens: `bg-surface`, `text-faint`,
+   `border-line`, `font-serif`, `font-mono` and so on. Anything named here is
+   a utility; anything not is still reachable as `var(--x)`. */
+@theme inline {
+  --font-sans: 'Figtree Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-serif: 'Instrument Serif', Georgia, serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+
+  --color-ground: var(--ground);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-hi: var(--hi);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-text: var(--text);
+  --color-faint: var(--faint);
+  --color-sage: var(--sage);
+  --color-sage-dim: var(--sage-dim);
+  --color-sage-line: var(--sage-line);
+  --color-sage-deep: var(--sage-deep);
+  --color-on-sage: var(--on-sage);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--raised);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--text);
+    font-family: var(--font-sans);
+    /* The mock is designed at 14px, not Tailwind's 16px default. Setting it
+       here rather than per-component keeps every `text-sm`/`text-base` in the
+       ported rules landing where the mock put it. */
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  *,
+  *::before,
+  *::after {
+    /* Flex and grid children default to min-width:auto, which lets long
+       unbroken text (a URL in creator notes, a 60-character card name) push
+       its container wider than the viewport. The mock sets this globally for
+       the same reason. */
+    min-width: 0;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--sage);
+    outline-offset: 2px;
+  }
+}

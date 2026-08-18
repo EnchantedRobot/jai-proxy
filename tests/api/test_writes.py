@@ -176,6 +176,26 @@ def test_if_match_lets_a_stale_write_fail_loudly(client, populated_archive):
     assert read_card(populated_archive["characters"] / "Abbie_0d162f5f.png")["description"] == "first writer"
 
 
+def test_detail_read_carries_the_etag_a_write_checks(client, populated_archive):
+    # The editor takes its `If-Match` token from the detail read, not a second
+    # request -- the GET must hand out the same validator `/png` does.
+    detail = client.get("/api/v1/characters/Abbie_0d162f5f.png")
+    assert detail.status_code == 200
+    etag = detail.headers["etag"]
+    assert etag == client.get("/api/v1/characters/Abbie_0d162f5f.png/png").headers["etag"]
+
+    card = read_card(populated_archive["characters"] / "Abbie_0d162f5f.png")
+    card["description"] = "written against the detail read's etag"
+    assert (
+        client.put(
+            "/api/v1/characters/Abbie_0d162f5f.png",
+            json={"card": card},
+            headers={"If-Match": etag},
+        ).status_code
+        == 200
+    )
+
+
 def test_if_match_with_a_current_etag_goes_through(client, populated_archive):
     card = read_card(populated_archive["characters"] / "Abbie_0d162f5f.png")
     etag = client.get("/api/v1/characters/Abbie_0d162f5f.png/png").headers["etag"]
@@ -186,6 +206,67 @@ def test_if_match_with_a_current_etag_goes_through(client, populated_archive):
         headers={"If-Match": etag},
     )
     assert resp.status_code == 200
+
+
+# --- favourites -------------------------------------------------------------
+
+
+def test_favorite_toggle_writes_into_the_card(client, populated_archive):
+    """The star goes into the PNG, not into this server's settings, so it comes
+    back with the card wherever the card is exported to."""
+    path = populated_archive["characters"] / "Abbie_0d162f5f.png"
+
+    resp = client.post("/api/v1/characters/Abbie_0d162f5f.png/favorite", json={"value": True})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"id": "Abbie_0d162f5f.png", "favorite": True}
+    assert read_card(path)["extensions"]["fav"] is True
+    assert client.get("/api/v1/characters/Abbie_0d162f5f.png").json()["favorite"] is True
+
+
+def test_unstarring_writes_false_rather_than_dropping_the_key(client, populated_archive):
+    """`fav: false` and no `fav` at all mean the same thing here, but a card that
+    passed through SillyTavern may be starred at the envelope root too -- and
+    that root copy does not survive a re-embed. Writing the explicit false keeps
+    the answer in the one place that does survive."""
+    client.post("/api/v1/characters/Abbie_0d162f5f.png/favorite", json={"value": True})
+    resp = client.post("/api/v1/characters/Abbie_0d162f5f.png/favorite", json={"value": False})
+
+    assert resp.json()["favorite"] is False
+    card = read_card(populated_archive["characters"] / "Abbie_0d162f5f.png")
+    assert card["extensions"]["fav"] is False
+
+
+def test_starring_a_card_leaves_its_pixels_alone(client, populated_archive):
+    """A star is one boolean and must cost nothing. If it re-encoded, a click in
+    the grid would quietly undo pngquant on the card it starred."""
+    path = populated_archive["characters"] / "Abbie_0d162f5f.png"
+    before = pngtools.non_text_chunks(path.read_bytes())
+
+    client.post("/api/v1/characters/Abbie_0d162f5f.png/favorite", json={"value": True})
+
+    assert pngtools.non_text_chunks(path.read_bytes()) == before
+
+
+def test_starring_keeps_the_rest_of_the_card_intact(client, populated_archive):
+    """A targeted write is only safe if it is genuinely targeted -- provenance,
+    gallery link and prose all have to come through untouched."""
+    path = populated_archive["characters"] / "Abbie_0d162f5f.png"
+    before = read_card(path)
+
+    client.post("/api/v1/characters/Abbie_0d162f5f.png/favorite", json={"value": True})
+
+    after = read_card(path)
+    assert after["description"] == before["description"]
+    assert after["character_book"] == before["character_book"]
+    assert after["extensions"]["jai"] == before["extensions"]["jai"]
+    assert after["extensions"]["gallery_id"] == before["extensions"]["gallery_id"]
+
+
+def test_starring_an_unknown_card_is_404(client):
+    resp = client.post("/api/v1/characters/Nobody_00000000.png/favorite", json={"value": True})
+
+    assert resp.status_code == 404
 
 
 # --- deleting ---------------------------------------------------------------

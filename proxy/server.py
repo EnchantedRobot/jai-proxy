@@ -19,7 +19,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from proxy import deps
@@ -39,6 +39,13 @@ logger = logging.getLogger("jai_proxy.server")
 # it is code, it ships with the server, and it is the same directory in a
 # checkout and in the container image. See web/VENDORED.md.
 WEB_DIR = ROOT / "web"
+
+# The React client that replaces it (docs/UI_REWRITE_PLAN.md). Built by
+# `make frontend-build` into frontend/dist -- present in the container image
+# and in a checkout that has run the build, absent otherwise, which is why
+# everything below is guarded. In dev it is served by Vite on :5173 instead,
+# with /api proxied back here.
+FRONTEND_DIST = ROOT / "frontend" / "dist"
 
 
 @contextlib.asynccontextmanager
@@ -136,6 +143,67 @@ class NoCacheStaticFiles(StaticFiles):
         response = super().file_response(*args, **kwargs)
         response.headers["Cache-Control"] = "no-store, must-revalidate"
         return response
+
+
+class ImmutableStaticFiles(StaticFiles):
+    """Serve Vite's content-hashed assets with a cache header safe to keep forever.
+
+    The exact opposite of `NoCacheStaticFiles` above, and safely so: every file
+    under frontend/dist/assets carries a content hash in its name, so a changed
+    file is a different URL and a cached one can never be stale. This is what
+    retires the hand-bumped `MODULE_VERSION` the old frontend needed.
+    """
+
+    def file_response(self, *args, **kwargs) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
+# The React client, mounted under /next for the length of the overlap. It has
+# to be registered *before* the web/ mount below: a mount at "/" matches
+# everything, so anything registered after it is unreachable.
+#
+# At cut-over this moves to "/", the web/ mount and NoCacheStaticFiles go, and
+# the frontend's `base` flips to '/' to match (UI_REWRITE_PLAN.md §5, stage 7).
+if FRONTEND_DIST.is_dir():
+    app.mount(
+        "/next/assets",
+        ImmutableStaticFiles(directory=FRONTEND_DIST / "assets"),
+        name="frontend-assets",
+    )
+
+    @app.get("/next", include_in_schema=False)
+    @app.get("/next/{full_path:path}", include_in_schema=False)
+    def serve_frontend(full_path: str = "") -> FileResponse:
+        """Serve the built client, falling back to index.html for its routes.
+
+        The fallback is the point: this app has client-side routing, so
+        /next/characters/<id> is a real address that must return the shell
+        rather than a 404. That is a thing StaticFiles cannot do -- see the
+        note on the web/ mount -- and it is why deep links work here and never
+        did in the old UI.
+        """
+        candidate = FRONTEND_DIST / full_path
+        # `resolve()` on both sides so a traversal (`/next/../../etc/passwd`)
+        # cannot escape dist/ -- the path arrives from the URL, unvalidated.
+        if (
+            full_path
+            and candidate.is_file()
+            and FRONTEND_DIST.resolve() in candidate.resolve().parents
+        ):
+            return FileResponse(candidate)
+        # no-store on the shell only: it names the hashed assets, so a cached
+        # copy would keep pointing at the previous build's JavaScript.
+        return FileResponse(
+            FRONTEND_DIST / "index.html",
+            headers={"Cache-Control": "no-store, must-revalidate"},
+        )
+else:
+    logger.info(
+        "frontend/dist is missing at %s; /next will 404 (run `make frontend-build`)",
+        FRONTEND_DIST,
+    )
 
 
 if WEB_DIR.is_dir():

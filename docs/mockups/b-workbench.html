@@ -1,0 +1,334 @@
+<meta charset="utf-8">
+<title>Archive · Workbench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#f6f5f3; --surface:#ffffff; --raised:#efeeeb; --line:#e0dedb; --line-soft:#eceae7;
+  --text:#1c1d1f; --muted:#6b6d72; --faint:#93959b;
+  --accent:#1f7a63; --accent-soft:#1f7a6314; --sel:#1f7a6322;
+  --good:#2e7d5b; --warn:#a5761c; --bad:#b04a44;
+  font-family:Figtree,ui-sans-serif,system-ui,sans-serif;
+}
+:root[data-theme="dark"]{
+  --ground:#111214; --surface:#191a1d; --raised:#212327; --line:#2c2f34; --line-soft:#232629;
+  --text:#e9eaec; --muted:#9a9da4; --faint:#6b6f77;
+  --accent:#57c2a2; --accent-soft:#57c2a21f; --sel:#57c2a230;
+  --good:#57c2a2; --warn:#d3a44f; --bad:#d97a72;
+}
+*{box-sizing:border-box;margin:0;padding:0;min-width:0}
+html,body{height:100%}
+body{background:var(--ground);color:var(--text);font-size:14px;line-height:1.45;overflow:hidden;-webkit-font-smoothing:antialiased}
+button,input,select{font:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+
+.app{display:flex;flex-direction:column;height:100vh}
+
+/* ---- header: identity + tabs + search ---- */
+.bar{flex:none;background:var(--surface);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;padding:0 14px;height:56px}
+.brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:-.02em;font-size:15px}
+.brand .m{width:26px;height:26px;border-radius:7px;background:var(--accent);color:var(--surface);display:grid;place-items:center;font-size:13px}
+.tabs{display:flex;gap:2px;background:var(--raised);padding:3px;border-radius:9px}
+.tabs button{padding:6px 13px;border-radius:7px;font-size:13.5px;color:var(--muted);font-weight:500}
+.tabs button.on{background:var(--surface);color:var(--text);box-shadow:0 1px 2px #0000001a}
+.search{flex:1;max-width:460px;position:relative;display:flex;align-items:center}
+.search svg{position:absolute;left:10px;width:15px;height:15px;color:var(--faint)}
+.search input{width:100%;height:34px;border-radius:9px;background:var(--ground);border:1px solid var(--line);padding:0 10px 0 32px}
+.search input:focus{outline:none;border-color:var(--accent)}
+.right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.btn{height:33px;padding:0 11px;border-radius:8px;border:1px solid var(--line);background:var(--surface);display:inline-flex;align-items:center;gap:7px;white-space:nowrap;font-size:13.5px}
+.btn:hover{background:var(--raised)}
+.btn.icon{width:33px;padding:0;justify-content:center;color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.btn svg{width:15px;height:15px}
+
+/* ---- 3 panes ---- */
+.panes{flex:1;display:grid;grid-template-columns:236px 1fr 372px;min-height:0}
+.pane{min-height:0;display:flex;flex-direction:column}
+.facets{background:var(--surface);border-right:1px solid var(--line);overflow-y:auto;padding:12px 10px 30px}
+.fgroup{margin-bottom:16px}
+.fhead{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);font-weight:600;padding:0 6px 7px}
+.fhead .clr{margin-left:auto;text-transform:none;letter-spacing:0;font-size:11.5px;color:var(--accent);font-weight:500}
+.frow{display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:7px;width:100%;font-size:13px;color:var(--text);text-align:left}
+.frow:hover{background:var(--raised)}
+.frow .n{margin-left:auto;font-size:11.5px;color:var(--faint)}
+.frow .dot{width:13px;height:13px;border-radius:4px;border:1.5px solid var(--line);flex:none}
+.frow.inc .dot{background:var(--accent);border-color:var(--accent)}
+.frow.exc .dot{background:var(--bad);border-color:var(--bad)}
+.frow.exc span:first-of-type{text-decoration:line-through;color:var(--muted)}
+.frow .lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.moreLink{font-size:12.5px;color:var(--accent);padding:4px 7px}
+
+/* ---- grid ---- */
+.gridpane{background:var(--ground)}
+.gbar{flex:none;display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--line-soft)}
+.gbar .n{font-size:13px;color:var(--muted)}
+.gbar .n b{color:var(--text)}
+select.sel{height:31px;border-radius:8px;border:1px solid var(--line);background:var(--surface);padding:0 8px;font-size:13px}
+.slider{display:flex;align-items:center;gap:7px;color:var(--faint);font-size:12px}
+input[type=range]{accent-color:var(--accent);width:90px}
+.scroll{flex:1;overflow-y:auto;padding:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--tile,150px),1fr));gap:12px}
+.tile{position:relative;border-radius:11px;overflow:hidden;background:var(--raised);cursor:pointer;aspect-ratio:2/3;border:1px solid var(--line-soft)}
+.tile img{width:100%;height:100%;object-fit:cover;display:block}
+.tile .veil{position:absolute;inset:auto 0 0 0;padding:22px 8px 8px;background:linear-gradient(transparent,#0a0b0ce8 65%);color:#fff}
+.tile h3{font-size:12.5px;font-weight:600;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.tile .by{font-size:11px;color:#c6cad1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile.on{outline:2px solid var(--accent);outline-offset:-2px}
+.tile .check{position:absolute;top:7px;left:7px;width:20px;height:20px;border-radius:6px;border:1.5px solid #ffffff9c;background:#0a0b0c66;backdrop-filter:blur(4px);display:grid;place-items:center;opacity:0;transition:opacity .15s}
+.tile:hover .check,.tile.on .check{opacity:1}
+.tile.on .check{background:var(--accent);border-color:var(--accent)}
+.tile .check svg{width:12px;height:12px;color:#fff;opacity:0}
+.tile.on .check svg{opacity:1}
+.flagdot{position:absolute;top:8px;right:8px;display:flex;gap:4px}
+.flagdot i{width:7px;height:7px;border-radius:50%;display:block}
+
+/* ---- inspector ---- */
+.insp{background:var(--surface);border-left:1px solid var(--line);overflow-y:auto}
+.insp-head{padding:14px;border-bottom:1px solid var(--line-soft);display:flex;gap:12px}
+.insp-head img{width:88px;height:132px;border-radius:9px;object-fit:cover;flex:none;background:var(--raised)}
+.insp-head h2{font-size:18px;line-height:1.15;letter-spacing:-.02em;font-weight:700}
+.insp-head .by{font-size:12.5px;color:var(--muted);margin-top:4px}
+.qact{display:flex;gap:5px;margin-top:auto;flex-wrap:wrap}
+.qact button{width:29px;height:29px;border-radius:7px;border:1px solid var(--line);display:grid;place-items:center;color:var(--muted)}
+.qact button:hover{background:var(--raised);color:var(--text)}
+.qact svg{width:14px;height:14px}
+.itabs{display:flex;gap:14px;padding:0 14px;border-bottom:1px solid var(--line-soft)}
+.itabs button{padding:9px 0;font-size:13px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.itabs button.on{color:var(--text);font-weight:600;border-bottom-color:var(--accent)}
+.ibody{padding:14px;display:flex;flex-direction:column;gap:14px}
+.kv{display:grid;grid-template-columns:84px 1fr;gap:7px 10px;font-size:13px;align-items:center}
+.kv dt{color:var(--faint);font-size:12px}
+.kv dd input{width:100%;height:29px;border:1px solid transparent;border-radius:6px;padding:0 7px;background:transparent}
+.kv dd input:hover{border-color:var(--line)}
+.kv dd input:focus{outline:none;border-color:var(--accent);background:var(--ground)}
+.tagrow{display:flex;flex-wrap:wrap;gap:5px}
+.tag{font-size:12px;padding:3px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-weight:500}
+.tag.add{background:transparent;border:1px dashed var(--line);color:var(--faint);font-weight:400}
+.fldlbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);font-weight:600;display:flex;align-items:center;gap:6px}
+.fldlbl .expand{margin-left:auto;color:var(--accent);text-transform:none;letter-spacing:0;font-size:11.5px}
+.text{background:var(--ground);border:1px solid var(--line);border-radius:9px;padding:9px 10px;font-size:13px;color:var(--text);max-height:132px;overflow:auto;white-space:pre-wrap;margin-top:6px}
+.text:focus{outline:none;border-color:var(--accent)}
+.rowstats{display:flex;gap:8px}
+.rowstats div{flex:1;background:var(--ground);border:1px solid var(--line-soft);border-radius:9px;padding:8px 9px}
+.rowstats b{display:block;font-size:15px}
+.rowstats span{font-size:11px;color:var(--faint)}
+.stick{position:sticky;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:10px 14px;display:flex;gap:8px;align-items:center}
+.chgs{font-size:12px;color:var(--warn);margin-right:auto}
+.empty{padding:26px 16px;color:var(--muted);font-size:13px;text-align:center}
+.summary{padding:14px;display:flex;flex-direction:column;gap:12px}
+.bigstat{background:var(--ground);border:1px solid var(--line-soft);border-radius:11px;padding:12px}
+.bigstat b{font-size:24px;letter-spacing:-.02em;display:block}
+.bigstat span{font-size:12px;color:var(--faint)}
+.barlist{display:flex;flex-direction:column;gap:7px}
+.barrow{font-size:12.5px}
+.barrow .t{display:flex;justify-content:space-between;color:var(--muted);margin-bottom:3px}
+.barrow .track{height:6px;border-radius:3px;background:var(--raised);overflow:hidden}
+.barrow .fill{height:100%;background:var(--accent);border-radius:3px}
+.note{position:fixed;left:12px;bottom:10px;font-size:11.5px;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:5px 9px;z-index:9}
+</style>
+
+<div class="app">
+  <header class="bar">
+    <div class="brand"><span class="m">A</span> Archive</div>
+    <nav class="tabs">
+      <button class="on">Library</button><button>Discover</button><button>Queue</button><button>Tools</button>
+    </nav>
+    <div class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="q" placeholder="Search 3,868 cards…">
+    </div>
+    <div class="right">
+      <button class="btn icon" id="themeBtn" title="Toggle theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg></button>
+      <button class="btn icon" title="Notifications"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 10-12 0c0 6-2 7-2 7h16s-2-1-2-7"/><path d="M10.5 20a2 2 0 003 0"/></svg></button>
+      <button class="btn icon" title="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 00.3 1.8a2 2 0 11-2.8 2.8a1.6 1.6 0 00-2.7 1.1a2 2 0 11-4 0a1.6 1.6 0 00-2.7-1.1a2 2 0 11-2.8-2.8A1.6 1.6 0 003 15a2 2 0 010-4a1.6 1.6 0 001.1-2.7a2 2 0 112.8-2.8A1.6 1.6 0 009 4.6a2 2 0 114 0a1.6 1.6 0 002.7 1.1a2 2 0 112.8 2.8A1.6 1.6 0 0021 11a2 2 0 010 4z"/></svg></button>
+      <button class="btn primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Import</button>
+    </div>
+  </header>
+
+  <div class="panes">
+    <!-- facets -->
+    <aside class="pane facets">
+      <div class="fgroup">
+        <div class="fhead">Status</div>
+        <button class="frow"><span class="dot"></span><span class="lbl">Favorites</span><span class="n mono">312</span></button>
+        <button class="frow"><span class="dot"></span><span class="lbl">Has lorebook</span><span class="n mono">1,204</span></button>
+        <button class="frow"><span class="dot"></span><span class="lbl">Missing media</span><span class="n mono">43</span></button>
+        <button class="frow"><span class="dot"></span><span class="lbl">Possible duplicate</span><span class="n mono">17</span></button>
+        <button class="frow"><span class="dot"></span><span class="lbl">Unlinked to provider</span><span class="n mono">88</span></button>
+      </div>
+      <div class="fgroup">
+        <div class="fhead">Source <span class="clr">clear</span></div>
+        <button class="frow inc"><span class="dot"></span><span class="lbl">JanitorAI</span><span class="n mono">2,910</span></button>
+        <button class="frow"><span class="dot"></span><span class="lbl">Chub</span><span class="n mono">604</span></button>
+        <button class="frow"><span class="dot"></span><span class="lbl">DataCat</span><span class="n mono">288</span></button>
+        <button class="frow"><span class="dot"></span><span class="lbl">Local import</span><span class="n mono">66</span></button>
+      </div>
+      <div class="fgroup">
+        <div class="fhead">Tags <span class="clr">clear</span></div>
+        <div id="tagFacets"></div>
+        <button class="moreLink">Show all 520 tags…</button>
+      </div>
+      <div class="fgroup">
+        <div class="fhead">Creators</div>
+        <div id="creatorFacets"></div>
+      </div>
+    </aside>
+
+    <!-- grid -->
+    <section class="pane gridpane">
+      <div class="gbar">
+        <span class="n"><b id="shown">98</b> of 3,868</span>
+        <select class="sel"><option>Recently added</option><option>Name A–Z</option><option>Creator</option><option>Most lore entries</option><option>Largest description</option></select>
+        <span class="slider">Size <input type="range" min="110" max="240" value="150" id="size"></span>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn" id="selAll">Select all</button>
+          <button class="btn icon" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 12a8 8 0 11-2.3-5.6M20 4v4h-4"/></svg></button>
+        </div>
+      </div>
+      <div class="scroll"><div class="grid" id="grid"></div></div>
+    </section>
+
+    <!-- inspector -->
+    <aside class="pane insp" id="insp"></aside>
+  </div>
+</div>
+
+<div class="note">Mock B · <b>Workbench</b> — click a tile to inspect · ⌘/Ctrl-click for multi-select · sun icon toggles light/dark</div>
+
+<script src="cards-data.js"></script>
+<script>
+const CARDS = window.MOCK_CARDS || [];
+const clean = s => (s||"").replace(/!?\[[^\]]*\]\([^)]*\)/g,"").replace(/[#*_>`]/g,"").replace(/\s+/g," ").trim();
+const esc = s => (s||"").replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+let list = CARDS, chosen = new Set();
+
+// facet counts from the real sample
+const tally = (key) => { const m = new Map(); CARDS.forEach(c => (key==='tags'?c.tags||[]:[c.creator||'unknown']).forEach(t=>m.set(t,(m.get(t)||0)+1))); return [...m].sort((a,b)=>b[1]-a[1]); };
+const facetHtml = rows => rows.map(([t,n])=>`<button class="frow" data-tag="${esc(t)}"><span class="dot"></span><span class="lbl">${esc(t)}</span><span class="n mono">${n}</span></button>`).join('');
+tagFacets.innerHTML = facetHtml(tally('tags').slice(0,9));
+creatorFacets.innerHTML = facetHtml(tally('creator').slice(0,6));
+document.querySelectorAll('.frow').forEach(r => r.onclick = () => {
+  r.classList.contains('inc') ? (r.classList.remove('inc'), r.classList.add('exc'))
+  : r.classList.contains('exc') ? r.classList.remove('exc') : r.classList.add('inc');
+});
+
+function render(){
+  grid.innerHTML = list.map((c,i)=>`
+    <article class="tile ${chosen.has(i)?'on':''}" data-i="${i}">
+      <img src="${c.img}" alt="" loading="lazy">
+      <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12.5l4.5 4.5L19 7"/></svg></span>
+      <span class="flagdot">${c.lore?'<i style="background:#d3a44f"></i>':''}${i%7===0?'<i style="background:#57c2a2"></i>':''}</span>
+      <div class="veil"><h3>${esc(c.name)}</h3><div class="by">${esc(c.creator||'unknown')}</div></div>
+    </article>`).join('');
+  shown.textContent = list.length;
+}
+
+function inspector(){
+  if(chosen.size === 0){ insp.innerHTML = summaryHtml(); return; }
+  if(chosen.size > 1){ insp.innerHTML = bulkHtml(); return; }
+  const c = list[[...chosen][0]];
+  insp.innerHTML = `
+  <div class="insp-head">
+    <img src="${c.img}" alt="">
+    <div style="display:flex;flex-direction:column;flex:1;min-width:0">
+      <h2>${esc(c.name)}</h2>
+      <div class="by">${esc(c.creator||'unknown')} · added ${(c.created||'').slice(0,10)}</div>
+      <div class="qact">
+        <button title="Favorite"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8L3.6 9.7l5.8-.8z"/></svg></button>
+        <button title="Download PNG"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 4v10m0 0l-4-4m4 4l4-4M5 19h14"/></svg></button>
+        <button title="Open full editor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14 4h6v6M20 4l-8 8M10 6H5a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1v-5"/></svg></button>
+        <button title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></svg></button>
+      </div>
+    </div>
+  </div>
+  <div class="itabs"><button class="on">Details</button><button>Lorebook ${c.lore?`<span class="mono" style="color:var(--faint)">${c.lore}</span>`:''}</button><button>Gallery</button><button>Raw</button></div>
+  <div class="ibody">
+    <dl class="kv">
+      <dt>Name</dt><dd><input value="${esc(c.name)}"></dd>
+      <dt>Creator</dt><dd><input value="${esc(c.creator||'')}"></dd>
+      <dt>Version</dt><dd><input value="1.0"></dd>
+    </dl>
+    <div>
+      <div class="fldlbl">Tags</div>
+      <div class="tagrow" style="margin-top:6px">${(c.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}<span class="tag add">+ add</span></div>
+    </div>
+    <div>
+      <div class="fldlbl">Tagline</div>
+      <div class="text" contenteditable style="max-height:64px">${esc(c.tagline)||'—'}</div>
+    </div>
+    <div>
+      <div class="fldlbl">Description <span class="mono" style="color:var(--faint)">${(c.desc/1000).toFixed(1)}k</span><button class="expand">Expand ⤢</button></div>
+      <div class="text" contenteditable>${esc(c.blurb).slice(0,420)||'—'}…</div>
+    </div>
+    <div class="rowstats">
+      <div><b class="mono">${c.greets}</b><span>greetings</span></div>
+      <div><b class="mono">${c.lore}</b><span>lore entries</span></div>
+      <div><b class="mono">12</b><span>gallery images</span></div>
+    </div>
+  </div>
+  <div class="stick"><span class="chgs">1 unsaved change</span><button class="btn">Revert</button><button class="btn primary">Apply</button></div>`;
+}
+
+function bulkHtml(){
+  const n = chosen.size;
+  return `<div class="insp-head" style="align-items:center">
+      <div style="width:88px;height:132px;border-radius:9px;background:var(--raised);display:grid;place-items:center;font-size:26px;font-weight:700" class="mono">${n}</div>
+      <div><h2>${n} cards selected</h2><div class="by">Edits apply to every selected card.</div></div>
+    </div>
+    <div class="ibody">
+      <div><div class="fldlbl">Add tags</div><div class="tagrow" style="margin-top:6px"><span class="tag">Sci-Fi</span><span class="tag add">+ add</span></div></div>
+      <div><div class="fldlbl">Remove tags</div><div class="tagrow" style="margin-top:6px"><span class="tag add">+ add</span></div></div>
+      <dl class="kv"><dt>Set creator</dt><dd><input placeholder="leave blank to keep"></dd></dl>
+      <div class="rowstats">
+        <div><b class="mono">${n}</b><span>cards</span></div>
+        <div><b class="mono">${[...chosen].filter(i=>list[i].lore).length}</b><span>with lore</span></div>
+        <div><b class="mono">${Math.round([...chosen].reduce((a,i)=>a+list[i].desc,0)/1000)}k</b><span>total text</span></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn">Download PNGs</button><button class="btn">Fetch media</button><button class="btn">Export bundle</button><button class="btn" style="color:var(--bad)">Delete…</button>
+      </div>
+    </div>
+    <div class="stick"><span class="chgs">1 pending bulk edit</span><button class="btn">Clear</button><button class="btn primary">Apply to ${n}</button></div>`;
+}
+
+function summaryHtml(){
+  const top = [...new Map(CARDS.flatMap(c=>c.tags||[]).map(t=>[t,0])).keys()];
+  const m = new Map(); CARDS.forEach(c=>(c.tags||[]).forEach(t=>m.set(t,(m.get(t)||0)+1)));
+  const rows = [...m].sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const max = rows[0][1];
+  return `<div class="summary">
+    <div class="fldlbl">This view</div>
+    <div class="bigstat"><b class="mono">${list.length}</b><span>cards matching the current filters</span></div>
+    <div class="rowstats">
+      <div><b class="mono">${list.filter(c=>c.lore).length}</b><span>with lorebooks</span></div>
+      <div><b class="mono">${list.filter(c=>c.greets>1).length}</b><span>multi-greeting</span></div>
+      <div><b class="mono">${Math.round(list.reduce((a,c)=>a+c.desc,0)/1000)}k</b><span>chars of text</span></div>
+    </div>
+    <div class="fldlbl" style="margin-top:4px">Tag mix</div>
+    <div class="barlist">${rows.map(([t,n])=>`<div class="barrow"><div class="t"><span>${esc(t)}</span><span class="mono">${n}</span></div><div class="track"><div class="fill" style="width:${n/max*100}%"></div></div></div>`).join('')}</div>
+    <div class="empty">Select a card to edit it here — no popup, the grid stays put.</div>
+  </div>`;
+}
+
+grid.addEventListener('click', e => {
+  const t = e.target.closest('.tile'); if(!t) return;
+  const i = +t.dataset.i;
+  if(e.metaKey || e.ctrlKey){ chosen.has(i) ? chosen.delete(i) : chosen.add(i); }
+  else { chosen = new Set([i]); }
+  render(); inspector();
+});
+selAll.onclick = () => { chosen = new Set(list.map((_,i)=>i)); render(); inspector(); };
+size.oninput = e => grid.style.setProperty('--tile', e.target.value+'px');
+q.oninput = e => {
+  const v = e.target.value.toLowerCase();
+  list = !v ? CARDS : CARDS.filter(c => (c.name+' '+(c.creator||'')+' '+(c.tags||[]).join(' ')).toLowerCase().includes(v));
+  chosen = new Set(); render(); inspector();
+};
+themeBtn.onclick = () => document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+if(matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.dataset.theme = 'dark';
+render(); inspector();
+</script>

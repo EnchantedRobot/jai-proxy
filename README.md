@@ -430,6 +430,19 @@ MLX upstream was the last thing tying the server to a second macOS-only process
 every writable path folded under `data/`, and the whole thing runs from one
 image with one mount.
 
+**In progress: the UI rewrite** (`docs/UI_REWRITE_PLAN.md`). `web/` — 68k lines
+of vendored CharacterLibrary, still a SillyTavern extension underneath — is
+being replaced by a React client in `frontend/`, built against `/api/v1` and
+nothing else. The two run side by side until cut-over: `web/` keeps `/`, the new
+one answers under `/next`.
+
+```
+make run              # the server, as always -- serves /next from frontend/dist
+make frontend-dev     # the client on :5173, /api proxied to :8000
+make api-schema       # regenerate the typed client after any route change
+make frontend-test frontend-typing frontend-lint
+```
+
 Deliberately out of scope unless a real need surfaces: reconstructing lorebook
 entries from raw prompt text (real captures show no structural markers to
 recover them — lorebooks come exclusively via the `/hampter/script` path).

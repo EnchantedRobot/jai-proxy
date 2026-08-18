@@ -13,7 +13,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 from urllib.parse import quote
 
 from fastapi import (
@@ -38,6 +38,8 @@ from proxy.api.schemas import (
     CardOut,
     CardWriteIn,
     DeletedOut,
+    FavoriteIn,
+    FavoriteOut,
     GalleryOut,
     TagsApplyIn,
     TagsApplyOut,
@@ -92,6 +94,7 @@ def _card_out(record: catalog.CardSummary, *, extensions: bool = False) -> CardO
         prompt_chars=record.prompt_chars,
         has_creator_notes=record.has_creator_notes,
         has_example_dialogue=record.has_example_dialogue,
+        favorite=record.favorite,
         size=record.size,
         modified=datetime.fromtimestamp(record.mtime, tz=timezone.utc),
         linked_at=record.linked_at,
@@ -128,23 +131,48 @@ def _gallery_out(record: catalog.CardSummary) -> GalleryOut:
     return out
 
 
+# What a `scope`d search matches `q` against, as a function of the record. The
+# default (`all`) uses the pre-folded haystack; the rest fold on demand, which
+# costs about a millisecond across the whole archive and keeps the index from
+# carrying four more derived strings for a feature driven from one overlay.
+_SCOPES: dict[str, Callable[[catalog.CardSummary], str]] = {
+    "all": lambda r: r.haystack,
+    "name": lambda r: r.name.casefold(),
+    "creator": lambda r: r.creator.casefold(),
+    "tags": lambda r: " ".join(r.tags).casefold(),
+}
+
+
 def _matches(
     record: catalog.CardSummary,
     *,
     terms: list[str],
+    scope: str,
     tags: list[str],
+    excluded_tags: list[str],
     creator: str | None,
     source: str | None,
     has_lorebook: bool | None,
     has_gallery: bool | None,
+    favorite: bool | None,
+    untagged: bool | None,
+    min_greetings: int | None,
+    added_after: str | None,
 ) -> bool:
     # AND across search terms so a second word narrows rather than widens --
     # "korny abbie" should find the one card, not every card by either.
-    if any(term not in record.haystack for term in terms):
-        return False
-    if tags:
+    if terms:
+        haystack = _SCOPES[scope](record)
+        if any(term not in haystack for term in terms):
+            return False
+    if tags or excluded_tags:
         present = {t.casefold() for t in record.tags}
         if not all(t in present for t in tags):
+            return False
+        # Exclude wins over include, which only matters for a client that sends
+        # the same tag both ways -- the chip strip cannot, but a hand-built URL
+        # can, and "not this tag" is the stronger statement of the two.
+        if any(t in present for t in excluded_tags):
             return False
     if creator is not None and record.creator.casefold() != creator:
         return False
@@ -154,6 +182,19 @@ def _matches(
         return False
     if has_gallery is not None and bool(record.gallery_id) != has_gallery:
         return False
+    if favorite is not None and record.favorite != favorite:
+        return False
+    if untagged is not None and (not record.tags) != untagged:
+        return False
+    if min_greetings is not None and record.greeting_count < min_greetings:
+        return False
+    if added_after is not None:
+        # String comparison, not date parsing: `linked_at` is stored as the raw
+        # ISO-8601 the importer stamped and ISO-8601 sorts lexically, so this is
+        # the same ordering `sort=added` uses. A card with no stamp at all is
+        # not "added recently" -- it is undated, and drops out.
+        if not record.linked_at or record.linked_at < added_after:
+            return False
     return True
 
 
@@ -189,11 +230,28 @@ def list_characters(
         None,
         description="Free text over name, creator, page title, filename and tags. Space-separated terms are ANDed. Prose is not searched.",
     ),
+    scope: Literal["all", "name", "creator", "tags"] = Query(
+        "all",
+        description="Which fields `q` is matched against. A narrower scope narrows the same query -- it never reaches fields `all` does not cover, and prose is searched by none of them.",
+    ),
     tag: list[str] = Query(default=[], description="Repeatable; a card must carry every tag given."),
+    exclude_tag: list[str] = Query(
+        default=[],
+        description="Repeatable; a card carrying any of these is left out. Overrides `tag` when both name the same one.",
+    ),
     creator: str | None = Query(None, description="Exact creator match, case-insensitive."),
     source: str | None = Query(None, description="Exact `source_kind` match, e.g. `chub_import`."),
     has_lorebook: bool | None = Query(None),
     has_gallery: bool | None = Query(None, description="Whether the card carries a gallery_id at all."),
+    favorite: bool | None = Query(None, description="Only starred cards, or only unstarred ones."),
+    untagged: bool | None = Query(None, description="`true` for cards carrying no tags at all -- the tagging backlog."),
+    min_greetings: int | None = Query(
+        None, ge=0, description="Cards with at least this many greetings. `2` is the mock's multi-greeting chip."
+    ),
+    added_after: str | None = Query(
+        None,
+        description="Cards acquired at or after this ISO-8601 instant, compared against `linked_at`. Cards with no stamp are excluded.",
+    ),
     health: Literal["ok", "broken", "all"] = Query(
         "ok",
         description="`ok` lists parseable cards (the default), `broken` the ones that fail to parse, `all` both.",
@@ -219,17 +277,24 @@ def list_characters(
 
     terms = [t for t in (q or "").casefold().split() if t]
     wanted_tags = [t.casefold() for t in tag if t.strip()]
+    unwanted_tags = [t.casefold() for t in exclude_tag if t.strip()]
     matched = [
         r
         for r in records
         if _matches(
             r,
             terms=terms,
+            scope=scope,
             tags=wanted_tags,
+            excluded_tags=unwanted_tags,
             creator=creator.casefold() if creator else None,
             source=source.casefold() if source else None,
             has_lorebook=has_lorebook,
             has_gallery=has_gallery,
+            favorite=favorite,
+            untagged=untagged,
+            min_greetings=min_greetings,
+            added_after=added_after,
         )
     ]
 
@@ -259,9 +324,16 @@ def list_characters(
 
 
 @router.get("/characters/{card_id}", response_model=CardDetailOut, summary="One card in full")
-def get_character(card_id: str) -> CardDetailOut:
+def get_character(card_id: str, response: Response = None) -> CardDetailOut:  # type: ignore[assignment]
+    # The detail read carries the same `If-Match` validator a write checks against
+    # (`_etag_of`), so an editor gets its precondition token from the read that
+    # populated the page -- no second request to fetch it. `response` is injected
+    # for the HTTP route and left None for the internal callers below (`put_*`
+    # return `get_character(...)`), which have their own response.
     idx = _shared.index()
     record = _shared.require(idx, card_id)
+    if response is not None and record.ok:
+        response.headers["ETag"] = _etag_of(idx.root / record.filename)
     # The index already diagnosed this card on the scan that found it, and its
     # reason is more specific than anything recoverable here (a file that is not a
     # PNG, versus a PNG that was never a card, versus a corrupt payload). Report
@@ -402,6 +474,41 @@ def put_character(
     # sit behind its two-second debounce.
     catalog.index().refresh(force=True)
     return get_character(record.filename)
+
+
+@router.post(
+    "/characters/{card_id}/favorite",
+    response_model=FavoriteOut,
+    summary="Star or unstar a card",
+)
+def set_favorite(card_id: str, body: FavoriteIn) -> FavoriteOut:
+    """Flip `extensions.fav` on one card.
+
+    The one place a targeted write beats this API's whole-document rule. That
+    rule exists to stop *ambiguous partial prose updates* -- two clients each
+    holding half a card and each sure it owns the field it is writing. A star is
+    none of that: one boolean, no field to conflict over, flipped from a grid
+    tile by someone who has not read the card at all. Routing it through `PUT`
+    would mean fetching a 1.2 MB detail payload and sending it back with an
+    `If-Match`, per click.
+
+    It lives in the card rather than in this server's settings so it survives
+    export -- the star is on the PNG, and comes back with it.
+    """
+    idx = _shared.index()
+    record = _shared.require(idx, card_id)
+    path = idx.root / record.filename
+    try:
+        _, data = edit.read_card(path)
+        extensions = data.get("extensions")
+        extensions = dict(extensions) if isinstance(extensions, dict) else {}
+        extensions["fav"] = body.value
+        data["extensions"] = extensions
+        edit.patch_card(path, data)
+    except edit.WriteError as exc:
+        raise _shared.write_error(exc) from exc
+    catalog.index().refresh(force=True)
+    return FavoriteOut(id=record.filename, favorite=body.value)
 
 
 @router.delete("/characters/{card_id}", response_model=DeletedOut, summary="Bin a card")
