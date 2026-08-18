@@ -164,6 +164,13 @@ async function applyPlan() {
     syncFromDom();
     const { mapping, removed } = rebuildMapping(state);
     const characters = await CoreAPI.refreshCharacters(true);   // re-survey, don't reuse the open-time list
+    if (!Array.isArray(characters) || characters.length === 0) {
+        // An empty re-survey would silently flatten every plan into "nothing to
+        // apply" -- surface it as the failure it is instead.
+        console.error('[TagManager] Re-survey returned no characters; refusing to apply.', characters);
+        CoreAPI.showToast('Could not re-scan the archive — nothing was applied.', 'error');
+        return;
+    }
     const plan = buildApplyPayload(characters, mapping, removed);
     if (Object.keys(plan.rename).length === 0 && plan.remove.length === 0) {
         CoreAPI.showToast('The dictionary changes nothing on these cards — nothing to apply.', 'info');
@@ -211,7 +218,7 @@ async function applyPlan() {
         // Rebuild buckets from the SAME working dictionary against the
         // refreshed characters, rather than reopening -- that would also
         // re-read the dictionary and reset scroll / open-section state.
-        characterList = await CoreAPI.refreshCharacters(true);
+        characterList = (await CoreAPI.refreshCharacters(true)) || CoreAPI.getAllCharacters();
         loadState(mapping, removed);
         renderBody();
     } catch (err) {

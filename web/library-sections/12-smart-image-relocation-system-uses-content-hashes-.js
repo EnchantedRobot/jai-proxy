@@ -815,7 +815,7 @@ async function fetchCharacters(forceRefresh = false) {
                 if (openerChars && Array.isArray(openerChars)) {
                     debugLog(`Loaded ${openerChars.length} characters from host window.`);
                     processAndRender(openerChars);
-                    return;
+                    return allCharacters;
                 }
             } catch (err) {
                 console.warn("Host window access failed:", err);
@@ -848,10 +848,15 @@ async function fetchCharacters(forceRefresh = false) {
         debugLog('Gallery Data: loaded', Array.isArray(data) ? data.length : 'object');
         processAndRender(data);
         data = null; // Release reference - processAndRender has consumed it into allCharacters
+        // Callers (eg. the tag manager's re-survey) use the return value as the
+        // authoritative post-refresh list -- an implicit undefined here reads as
+        // "no cards", which silently empties any plan built from it.
+        return allCharacters;
 
     } catch (error) {
         console.error("Failed to fetch characters:", error);
         document.getElementById('loading').textContent = 'Error: ' + error.message;
+        return allCharacters;
     }
 }
 
