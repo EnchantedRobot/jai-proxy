@@ -34,6 +34,16 @@ def ignored(text: str) -> bool:
     return any(p.search(text) for p in IGNORE)
 
 
+def aborted(failure: str | None) -> bool:
+    """ERR_ABORTED is the browser cancelling a request, not the server failing
+    one -- overwhelmingly, an image still loading when the page navigates away.
+    A card's creator notes pull a dozen remote images through /proxy/, so
+    clicking onward from a detail page reliably produces a handful of these, and
+    counting them as failures made a healthy run look broken. Real server
+    errors still land: they arrive as responses, not failures (see below)."""
+    return bool(failure and "ERR_ABORTED" in failure)
+
+
 def foreign(url: str) -> bool:
     """True for a request to somewhere other than the server under test. A card
     portrait is served by us; a creator-notes image on a remote CDN is not, and
@@ -55,8 +65,9 @@ def main() -> int:
             if m.type in ("error", "warning") and not ignored(m.text) else None))
         page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
         page.on("requestfailed", lambda r: (
-            failed.append(f"{r.url} {r.failure}")
-            if not ignored(r.url) and not foreign(r.url) else None))
+            failed.append(f"[{page.url.replace(BASE, '')}] {r.url} {r.failure}")
+            if not ignored(r.url) and not foreign(r.url)
+            and not aborted(r.failure) else None))
         page.on("response", lambda r: (
             failed.append(f"HTTP {r.status} {r.url}")
             if r.status >= 400 and not ignored(r.url) and not foreign(r.url) else None))
@@ -365,33 +376,71 @@ def drive(page, result: dict) -> None:
         page.click("button:text-is('Cancel')")
         page.wait_for_timeout(400)
 
-    # --- Discover: provider browse (Stage 5) ---
-    # Non-mutating on purpose -- "Get" is a real write plus a real provider
-    # fetch, and both /build-chub and /build-datacat already have pytest
-    # coverage (tests/api/test_acquisition.py). This gate proves the page's
-    # own mechanics: it reaches a real provider, the have-guard round-trips
-    # through our own /api/v1/characters/have, and the tile grid renders.
+    # --- Discover: provider browse + card preview ---
+    # Non-mutating on purpose -- "Get" is a real write, and /build-chub and
+    # /build-datacat already have pytest coverage (tests/api/test_acquisition.py,
+    # tests/api/test_discover_preview.py). This gate proves the page's own
+    # mechanics: it reaches a real provider, the have-guard round-trips through
+    # our own /api/v1/characters/have, the tile grid renders, and a provider
+    # card can actually be *read* -- the last of which is the thing that was
+    # missing entirely when Discover was first built.
     page.goto(APP, wait_until="networkidle", timeout=60_000)
     page.wait_for_selector("a[href*='/characters/']", timeout=60_000)
     page.click("a:text-is('Discover')")
     page.wait_for_selector("text=add straight to the archive", timeout=15_000)
+    page.wait_for_selector("a[href*='/discover/chub/']", timeout=60_000)
     page.wait_for_timeout(1500)
-    result["discover_chub_results"] = page.eval_on_selector_all(
-        "img", "els => els.length")
+    result["discover_chub_results"] = len(
+        page.query_selector_all("a[href*='/discover/chub/']"))
+
+    # The sort control is present for every provider and every feed (the mock's
+    # #discSort); it used to be a Chub-browse-only select.
+    result["discover_sort_label"] = page.inner_text(
+        "button:has-text('Sort')").replace("\n", " ")
 
     page.fill("input[placeholder='Search Chub…']", "elf")
     page.wait_for_timeout(2500)
     result["discover_chub_search_count"] = page.inner_text("text=/results/")
 
     page.click("button:text-is('DataCat')")
-    page.wait_for_timeout(2500)
-    result["discover_datacat_loaded"] = page.eval_on_selector_all(
-        "img", "els => els.length") >= 0  # reached without throwing
+    page.wait_for_selector("a[href*='/discover/datacat/']", timeout=60_000)
+    result["discover_datacat_results"] = len(
+        page.query_selector_all("a[href*='/discover/datacat/']"))
+    # DataCat had no sort control at all until the Discover rebuild.
+    result["discover_datacat_sort_label"] = page.inner_text(
+        "button:has-text('Sort')").replace("\n", " ")
 
     page.click("button:text-is('Hide cards I have')")
     page.wait_for_timeout(1000)
     result["discover_hide_have_toggled"] = "border-sage-line" in (
         page.get_attribute("button:text-is('Hide cards I have')", "class") or "")
+
+    # Open a provider card. This exercises the whole read path in one click:
+    # the browser's capture (full node / detail + lorebook), the server's
+    # POST /api/v1/discover/preview, and the archive's own detail panes
+    # rendering a card that is not in the archive.
+    page.click("button:text-is('Chub')")
+    page.wait_for_selector("a[href*='/discover/chub/']", timeout=60_000)
+    page.wait_for_timeout(1500)
+    page.query_selector_all("a[href*='/discover/chub/']")[0].click()
+    page.wait_for_selector("h1", timeout=60_000)
+    page.wait_for_timeout(1000)
+    result["preview_url"] = page.url.replace(BASE, "")
+    result["preview_title"] = page.inner_text("h1")
+    result["preview_tabs"] = page.eval_on_selector_all(
+        "nav button", "els => els.map(e => e.textContent.trim())")
+    # Read-only: the archive's Edit affordances must not appear on a card that
+    # has nothing to write to yet.
+    result["preview_edit_buttons"] = len(
+        page.query_selector_all("button:has-text('Edit')"))
+    result["preview_can_add"] = page.query_selector(
+        "button:has-text('Add to archive'), button:has-text('Add again')") is not None
+    if result["preview_edit_buttons"]:
+        errors.append("preview offered Edit on a card not in the archive")
+    if len(result["preview_tabs"]) != 4:
+        errors.append(f"preview tabs: {result['preview_tabs']}")
+    page.go_back()
+    page.wait_for_timeout(1500)
 
     # --- Settings (Stage 6) ---
     # Deliberately careful about what actually gets clicked: Library's Default
@@ -409,9 +458,15 @@ def drive(page, result: dict) -> None:
 
     page.click("nav a:has-text('Providers')")
     page.wait_for_timeout(500)
-    page.click("button:has-text('Test')")
+    # Scoped to the proxy row: DataCat's session row also has a "Test" button,
+    # and a bare has-text('Test') was picking that one -- so this step had been
+    # exercising the DataCat token check and then timing out waiting for a proxy
+    # verdict that was never requested.
+    proxy_row = page.locator(
+        "div:has(> input[placeholder^='http://host:port'])").first
+    proxy_row.locator("button:has-text('Test')").click()
     page.wait_for_selector("text=/not configured|active|failed|IP did not change/",
-                            timeout=10_000)
+                            timeout=15_000)
     result["settings_proxy_test_ran"] = True
 
     page.click("nav a:has-text('Userscripts')")

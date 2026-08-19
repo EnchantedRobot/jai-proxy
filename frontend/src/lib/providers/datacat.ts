@@ -118,6 +118,40 @@ export async function searchDatacat(opts: {
   return { totalCount: data.totalCount ?? 0, characters: data.characters ?? [] }
 }
 
+/**
+ * DataCat's `/api/characters/fresh` — the endpoint behind every sort that is
+ * not plain `recent` (`datacat-api.js:475-490`).
+ *
+ * It answers *two* windows in one call, `last24h` and `thisWeek`, each a whole
+ * list rather than a page; the caller picks one and pages it client-side. That
+ * shape is why the sort control needs its own request path instead of a
+ * parameter on `searchDatacat`, and why it was easier to ship no sort control
+ * at all than to wire it — which is what happened.
+ */
+export async function fetchDatacatFresh(opts: {
+  sortBy: string
+  limit24?: number
+  limitWeek?: number
+}): Promise<{ last24h: DatacatCharacter[]; thisWeek: DatacatCharacter[] }> {
+  const { sortBy, limit24 = 200, limitWeek = 200 } = opts
+  const params = new URLSearchParams({
+    summary: '1',
+    sortBy,
+    limit24: String(limit24),
+    limitWeek: String(limitWeek),
+    minTotalTokens: String(MIN_TOTAL_TOKENS),
+  })
+  const response = await dcFetch(`/api/characters/fresh?${params}`)
+  if (!response.ok)
+    throw new Error(`DataCat fresh failed: HTTP ${response.status}`)
+  const data = await response.json()
+  const windows = data.windows ?? {}
+  return {
+    last24h: windows.last24h?.characters ?? [],
+    thisWeek: windows.thisWeek?.characters ?? [],
+  }
+}
+
 export function datacatAvatarUrl(hit: DatacatCharacter): string {
   const avatar = hit.avatar
   if (!avatar || typeof avatar !== 'string') return ''
@@ -180,6 +214,84 @@ export async function fetchDatacatDownload(
   const response = await dcFetch(`/api/characters/${id}/download?${params}`)
   if (!response.ok) return null
   return response.json()
+}
+
+// ---- Lorebook script hydration ---------------------------------------------
+
+/** The only `api_path` shape hampter serves a script from. Anything else on a
+ *  `scripts[]` row is not a lorebook fetch and is left alone. */
+const HAMPTER_SCRIPT_PATH = /^\/hampter\/script\/[a-f0-9-]{36}$/i
+
+interface DatacatScript {
+  type?: string
+  is_public?: boolean
+  is_code_public?: boolean
+  api_path?: string
+  script?: string
+  settings?: string
+}
+
+/** True when the row advertises a public lorebook whose content was not
+ *  obtained -- what a caller checks to know the card will import thin. */
+export function hasUnfetchedLorebook(character: DatacatCharacter): boolean {
+  const scripts = character?.scripts as DatacatScript[] | undefined
+  if (!Array.isArray(scripts)) return false
+  return scripts.some((s) => s?.type === 'lorebook' && s.is_public && !s.script)
+}
+
+/**
+ * Fill in the lorebook content DataCat's detail payload leaves out, in place.
+ *
+ * DataCat stopped inlining `script` on its rows; a lorebook's entries now live
+ * at `api_path` on janitorai.com, one fetch per script. Skipping this is why
+ * DataCat cards were importing with an empty lorebook — the mapper
+ * (`proxy/sources/datacat.py:extract_character_book_from_scripts`) reads
+ * `script`, and there was never anything in it.
+ *
+ * Two things make this the browser's job rather than the server's, both ported
+ * verbatim from `web/modules/providers/datacat/datacat-api.js:591-621`:
+ * janitorai.com is CORS-open to a page but the endpoint only accepts browser
+ * TLS fingerprints, so a plain `fetch` is required and `fetchWithProxy`'s
+ * undici fallback is a guaranteed 403.
+ *
+ * Never throws. A script that will not load leaves the card thinner, which
+ * `hasUnfetchedLorebook` reports; it does not stop the card being read or kept.
+ */
+export async function hydrateDatacatScripts(
+  character: DatacatCharacter,
+): Promise<boolean> {
+  const scripts = character?.scripts as DatacatScript[] | undefined
+  if (!Array.isArray(scripts) || !scripts.length) return true
+  for (const script of scripts) {
+    if (!script || script.type !== 'lorebook' || !script.is_public) continue
+    if (script.script) continue
+    // Listed publicly, but the creator locked the content; hampter serves the
+    // metadata and nothing else, so asking is pointless rather than failing.
+    if (script.is_code_public === false) continue
+    if (
+      typeof script.api_path !== 'string' ||
+      !HAMPTER_SCRIPT_PATH.test(script.api_path)
+    )
+      continue
+    try {
+      const response = await fetch(`https://janitorai.com${script.api_path}`, {
+        headers: { Accept: 'application/json' },
+      })
+      if (!response.ok) continue
+      const full = (await response.json()) as {
+        script?: string
+        settings?: string
+      }
+      if (typeof full?.script === 'string' && full.script) {
+        script.script = full.script
+        if (!script.settings && typeof full.settings === 'string')
+          script.settings = full.settings
+      }
+    } catch {
+      // Left unfetched; `hasUnfetchedLorebook` is how a caller notices.
+    }
+  }
+  return !hasUnfetchedLorebook(character)
 }
 
 // ---- Session token lifecycle (Stage 6B B3) ---------------------------------
@@ -271,6 +383,16 @@ export interface DatacatCreator {
   characterCount?: number
 }
 
+/**
+ * NOTE: `/api/creators/{id}` does *not* speak the browse feed's vocabulary. It
+ * answers `{success, creator}` where the creator carries `creatorId`,
+ * `userName` and `charCount` -- there is no `name` and no `creator_name` on it
+ * at all (verified live 2026-08-19). Reading the feed's spellings here made
+ * every lookup return null, which is why following a creator stored the raw
+ * uuid as their display name. `web/` read `creator.userName`
+ * (`datacat-browse.js:1163`); so does this now, with the other spellings kept
+ * as fallbacks so neither shape can break the other.
+ */
 export async function fetchDatacatCreator(
   id: string,
 ): Promise<DatacatCreator | null> {
@@ -278,13 +400,20 @@ export async function fetchDatacatCreator(
   if (!response.ok) return null
   const data = await response.json()
   const creator = (data.creator ?? data) as Record<string, unknown>
-  const name = (creator.name ?? creator.creator_name) as string | undefined
+  const name = (creator.userName ??
+    creator.user_name ??
+    creator.name ??
+    creator.creator_name) as string | undefined
   if (!name) return null
   return {
-    id: String(creator.id ?? creator.creator_id ?? id),
+    id: String(creator.creatorId ?? creator.id ?? creator.creator_id ?? id),
+    // `avatar` alone is a bare filename; the display URLs are whole URLs.
+    avatar: (creator.avatarDisplayUrl ??
+      creator.avatar_display_url ??
+      creator.avatar) as string | undefined,
     name,
-    avatar: creator.avatar as string | undefined,
-    characterCount: Number(creator.character_count ?? 0) || undefined,
+    characterCount:
+      Number(creator.charCount ?? creator.character_count ?? 0) || undefined,
   }
 }
 
@@ -318,6 +447,40 @@ export async function fetchDatacatCreatorCharacters(opts: {
     totalCount: data.total ?? data.totalCount ?? 0,
     characters: data.list ?? data.characters ?? [],
   }
+}
+
+/**
+ * Everything one creator has published, paged to the end.
+ *
+ * `limit`/`offset` with a 50-row page, stopping on a short page or once
+ * `total` is reached — `datacat-browse.js:2021-2042`. A page that fails keeps
+ * what the creator already contributed rather than discarding the list, which
+ * matters when the feed is fanning out over twenty creators and one of them
+ * times out.
+ *
+ * The cap is a safety valve, not a policy: the two stop conditions above are
+ * the real end, and this only bounds a `total` that never arrives.
+ */
+export async function fetchDatacatCreatorAll(
+  creatorId: string,
+  opts: { sortBy?: string; maxPages?: number } = {},
+): Promise<DatacatCharacter[]> {
+  const { sortBy = 'newest', maxPages = 40 } = opts
+  const limit = 50
+  const rows: DatacatCharacter[] = []
+  for (let page = 0; page < maxPages; page += 1) {
+    const result = await fetchDatacatCreatorCharacters({
+      creatorId,
+      limit,
+      offset: page * limit,
+      sortBy,
+    }).catch(() => null)
+    if (!result) break
+    rows.push(...result.characters)
+    if (result.characters.length < limit || rows.length >= result.totalCount)
+      break
+  }
+  return rows
 }
 
 // ---- Tag catalogue ---------------------------------------------------------

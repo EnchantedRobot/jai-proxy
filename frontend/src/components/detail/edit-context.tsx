@@ -17,6 +17,10 @@ import { cn } from '@/lib/utils'
 interface EditState {
   /** The card's current `data` object, the base every edit copies from. */
   data: CardData
+  /** No edit affordances at all. Set by the Discover preview, which renders
+   *  these same panes over a card that is not in the archive and therefore has
+   *  nothing to write to. */
+  readOnly: boolean
   /** Which section is in edit mode, or null. */
   editing: string | null
   isSaving: boolean
@@ -42,11 +46,15 @@ export function EditProvider({
   id,
   data,
   etag,
+  readOnly = false,
   children,
 }: {
   id: string
   data: CardData
   etag: string | null
+  /** Render the panes with no Edit buttons. `id` and `etag` are then unused --
+   *  pass anything; nothing will call `save`. */
+  readOnly?: boolean
   children: React.ReactNode
 }) {
   const [editing, setEditing] = useState<string | null>(null)
@@ -74,13 +82,14 @@ export function EditProvider({
   const value = useMemo<EditState>(
     () => ({
       data,
+      readOnly,
       editing,
       isSaving: put.isPending,
       begin: setEditing,
       cancel: () => setEditing(null),
       save,
     }),
-    [data, editing, put.isPending, save],
+    [data, readOnly, editing, put.isPending, save],
   )
 
   return <Ctx value={value}>{children}</Ctx>
@@ -88,11 +97,13 @@ export function EditProvider({
 
 /**
  * The Edit button for a section's `action` slot. Hidden while another section is
- * being edited, so only one editor is ever open.
+ * being edited, so only one editor is ever open -- and hidden outright when the
+ * provider is read-only, which is how the Discover preview reuses these panes
+ * without offering to save a card that does not exist yet.
  */
 export function EditButton({ section }: { section: string }) {
-  const { editing, begin } = useEdit()
-  if (editing !== null) return null
+  const { editing, begin, readOnly } = useEdit()
+  if (readOnly || editing !== null) return null
   return (
     <button
       type="button"

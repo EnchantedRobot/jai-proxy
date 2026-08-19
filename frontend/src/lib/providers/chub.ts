@@ -10,8 +10,6 @@ import { fetchWithProxy } from './shared'
 export const CHUB_API_BASE = 'https://api.chub.ai'
 export const CHUB_AVATAR_BASE = 'https://avatars.charhub.io/avatars/'
 
-export type ChubSort = 'trending' | 'download_count' | 'id'
-
 /**
  * Chub's URQL_TOKEN, sent as a plain `Authorization: Bearer` header.
  *
@@ -64,17 +62,43 @@ function extractNodes(data: unknown): ChubNode[] {
   return []
 }
 
+/**
+ * Chub's `/search`, assembled the way `chub-browse.js:2618-2656` assembles it.
+ *
+ * The three rules that are easy to get wrong, and were:
+ *
+ * - A preset carries a **time window** (`max_days_ago`) and sometimes a
+ *   `special_mode`, not just a sort. Sending the sort alone turns "Hot this
+ *   week" into "Most downloaded ever".
+ * - Both are dropped once there is a search term, so a query is not silently
+ *   restricted to the last seven days.
+ * - Browsing one author ignores the window entirely and uses that view's own
+ *   sort — you want their whole catalogue, not their recent half.
+ */
 export async function searchChub(opts: {
   search?: string
   page?: number
-  sort?: ChubSort
+  /** A `CHUB_PRESETS` entry, already resolved to its parts. */
+  sort?: string
+  days?: number
+  specialMode?: string
   auth?: ChubAuth
-  /** A single creator's cards, used by the Following feed. */
+  /** One creator's catalogue, by Chub username. */
   username?: string
+  perPage?: number
 }): Promise<{ nodes: ChubNode[]; hasMore: boolean }> {
-  const { search = '', page = 1, sort = 'trending', auth, username } = opts
+  const {
+    search = '',
+    page = 1,
+    sort = 'trending',
+    days = 0,
+    specialMode,
+    auth,
+    username,
+    perPage = 48,
+  } = opts
   const params = new URLSearchParams({
-    first: '48',
+    first: String(perPage),
     page: String(page),
     ...nsfwParams(auth),
     include_forks: 'true',
@@ -82,10 +106,15 @@ export async function searchChub(opts: {
     min_tokens: '50',
   })
   if (search) params.set('search', search)
-  if (username) params.set('username', username)
-  // Relevance ordering (Chub's `default`) only makes sense once there's a
-  // search term; browsing with no term needs an explicit sort.
-  if (search || sort !== 'trending') params.set('sort', sort)
+  // `default` is Chub's server-side relevance ordering, which is what you get
+  // by not naming a sort at all.
+  if (sort && sort !== 'default') params.set('sort', sort)
+  if (username) {
+    params.set('username', username)
+  } else if (!search) {
+    if (specialMode) params.set('special_mode', specialMode)
+    if (days > 0) params.set('max_days_ago', String(days))
+  }
   // NOTE: `topics`/`excludetopics` are deliberately never sent -- Chub's
   // server-side tag matching is unreliable. Tag filtering is client-side, in
   // `shared.ts`. See salvage item 6.
@@ -97,10 +126,9 @@ export async function searchChub(opts: {
     throw new Error(`Chub search failed: HTTP ${response.status}`)
   const data = await response.json()
   const nodes = extractNodes(data)
-  const d = data as Record<string, unknown>
-  const inner = d?.data as Record<string, unknown> | undefined
-  const cursor = inner?.cursor ?? d?.cursor
-  return { nodes, hasMore: cursor != null && nodes.length > 0 }
+  // A full page means there is plausibly another; `/search` publishes no total
+  // and its `cursor` is not populated on this endpoint.
+  return { nodes, hasMore: nodes.length >= perPage }
 }
 
 export function chubAvatarUrl(node: ChubNode): string {
@@ -122,6 +150,51 @@ export async function fetchChubFull(
   if (!response.ok) return null
   const data = await response.json()
   return (data as { node?: ChubNode }).node ?? null
+}
+
+/**
+ * A linked lorebook, resolved through Chub's v4 git API.
+ *
+ * Chub stores a lorebook two ways. An `embedded_lorebook` travels inside the
+ * character's own definition and needs nothing extra. A *linked* one is a
+ * separate Chub project, and the character node only says that it exists, via a
+ * non-empty `related_lorebooks`; the content lives in that project's
+ * `raw/card.json`, at the latest commit. Nothing but this fetch produces it —
+ * which is why cards added before this existed came in without the lorebook
+ * they advertise.
+ *
+ * Port of `web/modules/providers/chub/chub-api.js:186-216`. The server-side
+ * mapper already knows what to do with the result and already prefers the
+ * embedded book when the linked one turns out to be empty
+ * (`proxy/sources/chub.py:118-124`) — this only has to hand it over.
+ */
+export async function fetchChubLinkedLorebook(
+  projectId: number | string | undefined,
+  auth?: ChubAuth,
+): Promise<Record<string, unknown> | null> {
+  if (!projectId) return null
+  const headers = chubHeaders(auth)
+  const base = `${CHUB_API_BASE}/api/v4/projects/${projectId}/repository`
+  try {
+    const commits = await fetchWithProxy(`${base}/commits`, { headers })
+    if (!commits.ok) return null
+    const log = (await commits.json()) as { id?: string }[]
+    const ref = Array.isArray(log) ? log[0]?.id : undefined
+    if (!ref) return null
+
+    // The path is doubly encoded on purpose: it is `raw/card.json` with the
+    // slash percent-encoded, and Chub's gateway decodes once before matching.
+    const file = await fetchWithProxy(
+      `${base}/files/raw%252Fcard.json/raw?ref=${encodeURIComponent(ref)}`,
+      { headers },
+    )
+    if (!file.ok) return null
+    return (await file.json()) as Record<string, unknown>
+  } catch {
+    // A card whose lorebook cannot be resolved is still worth keeping; the
+    // server falls back to the embedded book, or to none.
+    return null
+  }
 }
 
 // ---- Following (read-only) -------------------------------------------------
@@ -274,7 +347,7 @@ export async function fetchChubTimeline(opts: {
  * lets a known tag be typed in regardless.
  */
 export async function fetchChubPopularTags(auth?: ChubAuth): Promise<string[]> {
-  const sorts: ChubSort[] = ['trending', 'download_count', 'id']
+  const sorts = ['trending', 'download_count', 'id']
   const counts = new Map<string, { label: string; n: number }>()
   const pages = await Promise.all(
     sorts.map((sort) =>

@@ -30,6 +30,32 @@ import { Lightbox } from './Lightbox'
 import { MediaDiscovery } from './MediaDiscovery'
 import { ClampedProse, EmptyState, ProseBox, Section } from './Section'
 
+/**
+ * The subset of a card the four content panes actually read.
+ *
+ * `CardDetailOut` describes a card *on disk* -- filename, size, mtime,
+ * thumbnail, gallery. A Discover preview is the same card before any of that
+ * exists (`POST /api/v1/discover/preview`), so it cannot satisfy that type and
+ * should not pretend to. Naming what the panes need instead lets Overview,
+ * Notes, Greetings and Lorebook serve both without a single fake field: an
+ * archived card is structurally a `PaneCard`, so `CharacterDetailPage` keeps
+ * passing its `CardDetail` unchanged.
+ *
+ * The other three panes stay on `CardDetail` on purpose -- Gallery, Related and
+ * Info are *about* being in the archive, which is exactly why the preview hides
+ * them.
+ */
+export type PaneCard = Pick<
+  CardDetail,
+  | 'card'
+  | 'name'
+  | 'page_name'
+  | 'description_chars'
+  | 'greetings'
+  | 'lore_entries'
+  | 'create_date'
+>
+
 /** Save / Cancel row shared by the editors, right-aligned under the field. */
 function SaveRow({
   onSave,
@@ -47,7 +73,7 @@ function SaveRow({
 
 // ---- Overview --------------------------------------------------------------
 
-export function OverviewPane({ card }: { card: CardDetail }) {
+export function OverviewPane({ card }: { card: PaneCard }) {
   const data = card.card
   // The source page's title blurb is the closest thing a JAI/Chub card has to a
   // tagline; hide it when it merely repeats the name (common on JAI, where the
@@ -98,7 +124,7 @@ function CardTextSection({
   field,
   title,
 }: {
-  data: CardDetail['card']
+  data: PaneCard['card']
   field: string
   title: string
 }) {
@@ -150,7 +176,7 @@ function Stat({ value, label }: { value: React.ReactNode; label: string }) {
 
 // ---- Creator notes ---------------------------------------------------------
 
-export function NotesPane({ card }: { card: CardDetail }) {
+export function NotesPane({ card }: { card: PaneCard }) {
   const notes = str(card.card, 'creator_notes')
   if (!notes.trim())
     return <EmptyState>This card carries no creator notes.</EmptyState>
@@ -170,7 +196,7 @@ export function NotesPane({ card }: { card: CardDetail }) {
 
 // ---- Greetings -------------------------------------------------------------
 
-export function GreetingsPane({ card }: { card: CardDetail }) {
+export function GreetingsPane({ card }: { card: PaneCard }) {
   const { editing, save } = useEdit()
   const all = greetings(card.card)
   const isEditing = editing === 'greetings'
@@ -260,7 +286,7 @@ function GreetingsEditor({
 
 // ---- Lorebook --------------------------------------------------------------
 
-export function LorebookPane({ card }: { card: CardDetail }) {
+export function LorebookPane({ card }: { card: PaneCard }) {
   const entries = loreEntries(card.card)
   const name = lorebookName(card.card)
 

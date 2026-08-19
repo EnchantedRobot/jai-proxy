@@ -4,6 +4,7 @@ import { CharactersPage } from '@/pages/CharactersPage'
 import { CharacterDetailPage } from '@/pages/CharacterDetailPage'
 import { TagsPage } from '@/pages/TagsPage'
 import { DiscoverPage } from '@/pages/DiscoverPage'
+import { DiscoverPreviewPage } from '@/pages/DiscoverPreviewPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 
 /**
@@ -20,6 +21,13 @@ export default function App() {
         <Route path="/characters/:id" element={<CharacterDetailPage />} />
         <Route path="/tags" element={<TagsPage />} />
         <Route path="/discover" element={<DiscoverPage />} />
+        {/* A provider card, read before it is kept. Deep-linkable like the
+            archive's own detail route, and carrying the Discover query string
+            so prev/next steps through the grid it was opened from. */}
+        <Route
+          path="/discover/:provider/:id"
+          element={<DiscoverPreviewPage />}
+        />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/:section" element={<SettingsPage />} />
         <Route path="*" element={<NotYet />} />

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
-import { ArrowLeft, ChevronLeft, ChevronRight, Download } from 'lucide-react'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
+import { Download } from 'lucide-react'
 import {
   useCharacterDetail,
   type CardDetail,
@@ -8,7 +8,12 @@ import {
 import { useCharacters } from '@/hooks/use-characters'
 import { readState } from '@/lib/browse'
 import { sourceLabel, formatDate, formatBytes } from '@/lib/card'
-import { cn, isTypingTarget } from '@/lib/utils'
+import { isTypingTarget } from '@/lib/utils'
+import {
+  CardDetailLayout,
+  DetailPager,
+  Sep,
+} from '@/components/detail/CardDetailLayout'
 import {
   GalleryPane,
   InfoPane,
@@ -22,16 +27,6 @@ import { EditProvider } from '@/components/detail/edit-context'
 import { HeaderTags } from '@/components/detail/HeaderTags'
 import { PortraitActions } from '@/components/detail/PortraitActions'
 import { PANES, type Pane } from '@/components/detail/panes-def'
-
-const TAB_LABELS: Record<Pane, string> = {
-  overview: 'Overview',
-  notes: 'Creator notes',
-  greetings: 'Greetings',
-  lore: 'Lorebook',
-  gallery: 'Gallery',
-  related: 'Related',
-  info: 'Info',
-}
 
 /**
  * The full-page card detail: a blurred hero, a sticky portrait column with its
@@ -129,150 +124,79 @@ export function CharacterDetailPage() {
   backSearch.delete('tab')
 
   return (
-    <>
-      <div className="sticky top-0 z-20 flex items-center gap-2.5 border-b border-line-soft bg-ground/85 px-5 py-[11px] backdrop-blur-[12px]">
-        <Link
-          to={{ pathname: '/', search: backSearch.toString() }}
-          className="flex h-8 items-center gap-2 rounded-[10px] border border-line px-3 text-[13px] hover:bg-raised"
-        >
-          <ArrowLeft className="size-4" /> Back
-        </Link>
-        <span className="text-[12.5px] text-faint">Characters</span>
-        <div className="ml-auto flex items-center gap-1.5">
-          {position >= 0 && (
-            <span className="font-mono text-[12.5px] text-faint">
-              {position + 1} of{' '}
-              {neighbours.data?.pages[0]?.total ?? cards.length}
-            </span>
-          )}
-          <NavArrow onClick={() => go(-1)} disabled={position <= 0}>
-            <ChevronLeft className="size-4" />
-          </NavArrow>
-          <NavArrow
-            onClick={() => go(1)}
-            disabled={
+    // Wraps the whole layout, not just the panes: the rename dialog in the
+    // portrait column and the tag editor in the header both write through this
+    // context too, so it has to sit above all three slots.
+    <EditProvider id={card.id} data={card.card} etag={etag}>
+      <CardDetailLayout
+        heroImage={thumb}
+        back={{ pathname: '/', search: backSearch.toString() }}
+        backLabel="Characters"
+        pager={
+          <DetailPager
+            position={position >= 0 ? position + 1 : null}
+            total={neighbours.data?.pages[0]?.total ?? cards.length}
+            onPrev={() => go(-1)}
+            onNext={() => go(1)}
+            prevDisabled={position <= 0}
+            nextDisabled={
               position < 0 ||
               (position >= cards.length - 1 && !neighbours.hasNextPage)
             }
-          >
-            <ChevronRight className="size-4" />
-          </NavArrow>
-        </div>
-      </div>
-
-      <div className="relative overflow-hidden pt-[34px]">
-        <div
-          className="absolute -inset-10 bg-cover bg-center opacity-30 blur-[46px] saturate-125"
-          style={{ backgroundImage: `url(${thumb})` }}
-        />
-        <div className="absolute inset-0 bg-gradient-to-b from-ground/70 to-ground" />
-        <EditProvider id={card.id} data={card.card} etag={etag}>
-          <div className="relative z-2 mx-auto grid max-w-[1240px] grid-cols-1 gap-[34px] px-5 md:grid-cols-[min(280px,25vw)_1fr]">
-            <div className="flex flex-col gap-2.5 md:sticky md:top-[76px] md:self-start">
-              <img
-                src={thumb}
-                alt={card.name}
-                className="aspect-[2/3] w-full rounded-[15px] border border-line object-cover shadow-[0_24px_60px_#00000080]"
-              />
-              <a
-                href={card.png_url}
-                className="flex h-[38px] items-center justify-center gap-2 rounded-[10px] border border-sage bg-sage text-[13.5px] font-semibold text-on-sage hover:bg-[#68d0b1]"
-                download
-              >
-                <Download className="size-4" /> Download card
-              </a>
-              <PortraitActions
-                card={card}
-                etag={etag}
-                onAvatarReplaced={() => setAvatarBust((n) => n + 1)}
-              />
-            </div>
-
-            <div>
-              <h1 className="font-serif text-[clamp(30px,4.2vw,50px)] leading-[1.05] font-normal text-balance">
-                {card.name}
-              </h1>
-              <div className="mt-2.5 flex flex-wrap items-center gap-2.5 text-[13.5px] text-muted">
-                by{' '}
-                <span className="text-sage">{card.creator || 'unknown'}</span>
-                <Sep />{' '}
-                <span className="font-mono">
-                  {formatDate(card.create_date)}
-                </span>
-                <Sep /> {sourceLabel(card.source_kind)}
-                <Sep />{' '}
-                <span className="font-mono">{formatBytes(card.size)}</span>
-              </div>
-
-              <HeaderTags card={card} />
-
-              <nav className="mt-6 flex gap-5 overflow-x-auto overflow-y-hidden border-b border-line">
-                {PANES.map((pane) => (
-                  <button
-                    key={pane}
-                    type="button"
-                    onClick={() => setTab(pane)}
-                    className={cn(
-                      '-mb-px border-b-2 border-transparent py-2.5 text-[13.5px] whitespace-nowrap text-muted hover:text-text',
-                      activeTab === pane &&
-                        'border-sage font-semibold text-text',
-                    )}
-                  >
-                    {TAB_LABELS[pane]}
-                    <PaneCount pane={pane} card={card} />
-                  </button>
-                ))}
-              </nav>
-
-              <div className="flex max-w-[80ch] flex-col gap-6 pt-[22px] pb-[90px]">
-                {activeTab === 'overview' && <OverviewPane card={card} />}
-                {activeTab === 'notes' && <NotesPane card={card} />}
-                {activeTab === 'greetings' && <GreetingsPane card={card} />}
-                {activeTab === 'lore' && <LorebookPane card={card} />}
-                {activeTab === 'gallery' && <GalleryPane card={card} />}
-                {activeTab === 'related' && <RelatedPane card={card} />}
-                {activeTab === 'info' && <InfoPane card={card} />}
-              </div>
-            </div>
-          </div>
-        </EditProvider>
-      </div>
-    </>
+          />
+        }
+        portrait={
+          <>
+            <img
+              src={thumb}
+              alt={card.name}
+              className="aspect-[2/3] w-full rounded-[15px] border border-line object-cover shadow-[0_24px_60px_#00000080]"
+            />
+            <a
+              href={card.png_url}
+              className="flex h-[38px] items-center justify-center gap-2 rounded-[10px] border border-sage bg-sage text-[13.5px] font-semibold text-on-sage hover:bg-[#68d0b1]"
+              download
+            >
+              <Download className="size-4" /> Download card
+            </a>
+            <PortraitActions
+              card={card}
+              etag={etag}
+              onAvatarReplaced={() => setAvatarBust((n) => n + 1)}
+            />
+          </>
+        }
+        title={card.name}
+        meta={
+          <>
+            by <span className="text-sage">{card.creator || 'unknown'}</span>
+            <Sep />{' '}
+            <span className="font-mono">{formatDate(card.create_date)}</span>
+            <Sep /> {sourceLabel(card.source_kind)}
+            <Sep /> <span className="font-mono">{formatBytes(card.size)}</span>
+          </>
+        }
+        tags={<HeaderTags card={card} />}
+        panes={PANES}
+        activeTab={activeTab}
+        onTabChange={setTab}
+        tabCount={(pane) => paneCount(pane, card)}
+      >
+        {activeTab === 'overview' && <OverviewPane card={card} />}
+        {activeTab === 'notes' && <NotesPane card={card} />}
+        {activeTab === 'greetings' && <GreetingsPane card={card} />}
+        {activeTab === 'lore' && <LorebookPane card={card} />}
+        {activeTab === 'gallery' && <GalleryPane card={card} />}
+        {activeTab === 'related' && <RelatedPane card={card} />}
+        {activeTab === 'info' && <InfoPane card={card} />}
+      </CardDetailLayout>
+    </EditProvider>
   )
 }
 
-function PaneCount({ pane, card }: { pane: Pane; card: CardDetail }) {
-  const count =
-    pane === 'greetings'
-      ? card.greetings
-      : pane === 'lore'
-        ? card.lore_entries
-        : 0
-  if (!count) return null
-  return <span className="ml-1.5 text-[11px] text-faint">{count}</span>
-}
-
-function NavArrow({
-  onClick,
-  disabled,
-  children,
-}: {
-  onClick: () => void
-  disabled?: boolean
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="grid size-8 place-items-center rounded-lg border border-line text-muted hover:bg-raised disabled:opacity-35 disabled:hover:bg-transparent"
-    >
-      {children}
-    </button>
-  )
-}
-
-function Sep() {
-  return <span className="text-faint">·</span>
+/** The small number beside the Greetings and Lorebook tabs. */
+function paneCount(pane: Pane, card: CardDetail): number | undefined {
+  if (pane === 'greetings') return card.greetings
+  if (pane === 'lore') return card.lore_entries
+  return undefined
 }

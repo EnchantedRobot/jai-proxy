@@ -780,6 +780,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/discover/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read a provider card without keeping it
+         * @description Map a captured provider payload into a tavern card and describe it.
+         *
+         *     The one door Discover's card view goes through. See the module docstring
+         *     for why this is a server route and not a TypeScript mapper.
+         */
+        post: operations["preview_api_v1_discover_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/datacat/health": {
         parameters: {
             query?: never;
@@ -1761,6 +1784,126 @@ export interface components {
              * @description Where the gallery folder landed, or null when it was kept or was not there.
              */
             gallery?: string | null;
+        };
+        /**
+         * DiscoverPreviewIn
+         * @description What the browser captured on the provider, unchanged.
+         *
+         *     The fields mirror `ChubBuildRequest` / `DatacatBuildRequest` exactly, minus
+         *     the write-only ones (`avatar_b64`, `gallery_id`), so the same captured
+         *     payload can be previewed and then built without being re-fetched or
+         *     reshaped.
+         */
+        DiscoverPreviewIn: {
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "chub" | "datacat";
+            /**
+             * Node
+             * @description Chub's `GET /api/characters/{fullPath}?full=true` node. Required for provider=chub.
+             */
+            node?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Linked Lorebook
+             * @description The linked-project lorebook, when the node carries `related_lorebooks`. Resolved browser-side through Chub's v4 git API.
+             */
+            linked_lorebook?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Character
+             * @description DataCat's `GET /api/characters/{id}` detail payload, with `scripts[]` already hydrated. Required for provider=datacat.
+             */
+            character?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Download
+             * @description DataCat's `/download` response, which fills in fields the detail payload leaves empty on a repaired Saucepan card. Preferred when present, exactly as `/build-datacat` prefers it.
+             */
+            download?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * DiscoverPreviewOut
+         * @description A provider card described in the archive's own terms.
+         *
+         *     Deliberately *not* a `CardDetailOut`: there is no file, so there is no
+         *     filename, size, mtime, thumbnail or gallery, and inventing them would make
+         *     the type lie. What it does share is every field derived from the card
+         *     itself, under the same names, so the detail panes render a preview and an
+         *     archived card with the same components.
+         */
+        DiscoverPreviewOut: {
+            /** Provider */
+            provider: string;
+            /** Name */
+            name: string;
+            /** Creator */
+            creator: string;
+            /** Page Name */
+            page_name: string;
+            /** Tags */
+            tags: string[];
+            /** Source Kind */
+            source_kind: string;
+            /** Source Url */
+            source_url: string;
+            /**
+             * Card Id
+             * @description The provider's own id for the character.
+             */
+            card_id: string;
+            /**
+             * Fragment
+             * @description The `_<id8>` slice the archive would file it under.
+             */
+            fragment: string;
+            /** Character Version */
+            character_version: string;
+            /**
+             * Greetings
+             * @description Primary greeting plus alternates.
+             */
+            greetings: number;
+            /** Lore Entries */
+            lore_entries: number;
+            /** Description Chars */
+            description_chars: number;
+            /** Prompt Chars */
+            prompt_chars: number;
+            /** Has Creator Notes */
+            has_creator_notes: boolean;
+            /** Has Example Dialogue */
+            has_example_dialogue: boolean;
+            /** Create Date */
+            create_date: string;
+            /** Spec */
+            spec: string;
+            /** Spec Version */
+            spec_version: string;
+            /**
+             * Card
+             * @description The card's `data` object, exactly as the build route would write it.
+             */
+            card: {
+                [key: string]: unknown;
+            };
+            /**
+             * Avatar Url
+             * @description The provider's image for the card. Served from the provider, not the archive -- nothing has been downloaded.
+             */
+            avatar_url?: string | null;
+            /**
+             * Warnings
+             * @description What the same cleaning pass the build route runs would flag -- unresolved macros, mostly. Shown so a card's problems are visible before it is kept.
+             */
+            warnings?: string[];
         };
         /** ExistingRequest */
         ExistingRequest: {
@@ -3685,6 +3828,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserscriptOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_api_v1_discover_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DiscoverPreviewIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscoverPreviewOut"];
                 };
             };
             /** @description Validation Error */

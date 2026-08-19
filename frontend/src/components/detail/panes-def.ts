@@ -12,3 +12,15 @@ export const PANES = [
 ] as const
 
 export type Pane = (typeof PANES)[number]
+
+/** Each tab's label, beside the keys rather than in a component file, so a
+ *  module that only needs the names does not import the layout. */
+export const TAB_LABELS: Record<Pane, string> = {
+  overview: 'Overview',
+  notes: 'Creator notes',
+  greetings: 'Greetings',
+  lore: 'Lorebook',
+  gallery: 'Gallery',
+  related: 'Related',
+  info: 'Info',
+}

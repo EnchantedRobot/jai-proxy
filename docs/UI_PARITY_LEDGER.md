@@ -35,8 +35,24 @@ Seeded from three mechanical sweeps, so nothing can hide between them:
 3. **`web/modules/providers/`** — every provider capability flag (`hasFollowing`,
    `supportsFollowingManager`) and every row of the provider settings schemas
    (`chub-provider.js:548-563`, `datacat-provider.js`).
+4. **The provider *browse views***, added 2026-08-19 — `chub-browse.js` (3,845
+   lines), `datacat-browse.js` (4,073) and `browse-view.js` (2,086): every sort
+   catalogue, every view mode, every modal section, every toggle.
 
-Re-run sweep 2 before any future cut-over sign-off.
+### Why sweep 4 had to be added
+
+Sweep 3 read the provider *settings schemas*. It never touched the ~10,000
+lines that are the actual Discover UI, and sweep 2 could not cover the gap
+because **the mock's Discover route is deliberately thin** — a grid, a chip bar
+and a sort button, against a Library/Detail/Tags/Settings design that is
+detailed. A mock-driven sweep therefore produced a mock-shaped Discover: no way
+to open a card, one provider with no sort control at all, and both Following
+feeds built as if they were filters over browse.
+
+**The rule this adds: where the mock is thinner than `web/`, `web/` is the
+spec.** The mock is a design for surfaces it designed. It is not an inventory.
+
+Re-run sweeps 2 and 4 before any future cut-over sign-off.
 
 ---
 
@@ -85,24 +101,45 @@ Re-run sweep 2 before any future cut-over sign-off.
 
 ## Discover / providers
 
+Rewritten 2026-08-19 from sweep 4. The previous version of this section had 12
+rows, 10 of them `shipped`, and was wrong: it described a surface built from the
+mock rather than from `web/`. Rows marked **(regression)** were claimed
+`shipped` here while broken or absent in the app.
+
 | capability | status | evidence |
 |---|---|---|
-| Chub browse + search + sort | `shipped` | `lib/providers/chub.ts` |
-| DataCat browse | `shipped` | `lib/providers/datacat.ts` |
-| Refresh | `shipped` | `pages/DiscoverPage.tsx:184-189` |
+| Chub browse + search | `shipped` | `lib/providers/chub.ts` `searchChub` |
+| Chub sort — all 11 discovery presets (sort **+ time window + special_mode**) | `shipped` | **(regression: was 3 bare sorts)** `CHUB_PRESETS` in `lib/discover-state.ts`, ported from `chub-browse.js:68-80`; params assembled per `chub-browse.js:2618-2656` |
+| DataCat browse | `shipped` | `lib/providers/datacat.ts` `searchDatacat` |
+| DataCat sort — `recent` + 5 orderings × 2 windows | `shipped` | **(regression: the control was hidden entirely for DataCat)** `fetchDatacatFresh` over `/api/characters/fresh`; `DATACAT_FRESH_SORTS` |
+| Sort control present for every provider and feed | `shipped` | Mock `d-archive.html:371` — `components/DiscoverSort.tsx`, options from `discoverSortOptions` |
+| **Read a provider card before keeping it** | `shipped` | **(regression: did not exist)** `POST /api/v1/discover/preview` runs the *same* mapper `/build-*` runs (`proxy/api/v1/discover.py`); rendered by the archive's own detail panes via `components/detail/CardDetailLayout.tsx` at `/discover/:provider/:id`. `web/` had a modal per provider; the mock opens every card, Discover's included (`d-archive.html:882`) |
+| Preview is read-only | `shipped` | `EditProvider readOnly` — `edit-context.tsx`; asserted by the smoke gate |
+| Preview prev/next + J/K over the grid | `shipped` | `DiscoverPreviewPage`, same trick as `CardTile` — the tile carries Discover's query string |
+| Refresh | `shipped` | `pages/DiscoverPage.tsx` |
 | Hide cards I have + duplicate guard | `shipped` | `POST /characters/have` |
-| Add to archive (Get) | `shipped` | `/build-chub`, `/build-datacat` — pytest only, never exercised live |
-| Chub API token (`chubToken`, URQL_TOKEN → `Authorization: Bearer`) | `shipped` | `lib/providers/chub.ts` `chubHeaders`, Settings → Providers `ChubTokenRow` |
-| Chub Following — timeline feed + follows list | `shipped` | `fetchChubTimeline` / `fetchChubFollows`; Discover's Discover/Following toggle |
-| Chub follow / unfollow writes | `dropped` | Managed on chub.ai itself; avoids write paths against a third-party API that cannot be tested safely. Decided 2026-08-18. |
+| Add to archive (Get) | `shipped` | **(regression: 404 on every click in dev — `/build-` was missing from `vite.config.ts`'s proxy list)** `useAddToArchive` |
+| Chub linked lorebook on import | `shipped` | **(regression: never fetched, so cards with `related_lorebooks` were written without their lorebook)** `fetchChubLinkedLorebook` (v4 git API), ported from `chub-api.js:186-216`. Verified live: 29 entries on `chub/3054` |
+| DataCat lorebook script hydration on import | `shipped` | **(regression: never called, so lorebooks behind a per-script janitorai fetch imported empty)** `hydrateDatacatScripts`, ported from `datacat-api.js:591-621`; must run in the browser (TLS fingerprint — `/proxy` is a guaranteed 403) |
+| Chub Following — timeline **+ per-author supplement** | `shipped` | **(regression: timeline only, one page of 20, cursor misread)** `chubFollowingFeed`. `/api/timeline/v1` is page-numbered and always answers `cursor: null`; measured, it surfaces 30 of 61 followed authors, which is why `web/` supplements. Verified live: 1,312 cards, 19 creators in the first 60 |
+| DataCat Following — feed over every followed creator | `shipped` | **(regression: returned 0 cards)** `datacatFollowingFeed`. Two faults: `/api/creators/{id}/characters` answers `{total, list}`, not `{totalCount, characters}`; and the feed is an aggregate, not network pagination — every creator's cards merged, deduped, sorted. Verified live: 1,197 cards from 19 creators. Since 2026-08-19 each creator contributes their newest page (`FOLLOWING_PER_CREATOR = 50`) instead of their whole catalogue — one request per creator, the count line says `showing the most recent 50 per creator` when any was cut, and `?creator=` still reads a catalogue whole |
+| Following sort (newest / oldest / name / most messages) | `shipped` | `FOLLOWING_SORTS`, applied across the merged feed (`datacat-browse.js:2114-2131`) |
+| Following manager — add / remove / jump to a creator | `shipped` | **(was Settings-only)** `components/FollowingManager.tsx`, per `browse-view.js:1285-1592`. DataCat writes; Chub read-only by the decision below |
+| Creator browse mode + creator sorts | `shipped` | **(did not exist)** creator name on a tile is a link; `CHUB_CREATOR_SORTS` / `DATACAT_CREATOR_SORTS`, back banner, `creator` in the URL |
+| Chub API token (`chubToken`, URQL_TOKEN → `Authorization: Bearer`) | `shipped` | `chubHeaders`, Settings → Providers `ChubTokenRow` |
+| Chub follow / unfollow writes | `dropped` | Managed on chub.ai itself; avoids write paths against a third-party account that cannot be tested safely. Decided 2026-08-18, reaffirmed 2026-08-19 |
 | DataCat token — persist, refresh, clear | `shipped` | `DatacatSessionRow`; `setSavedDatacatToken` restores it in `AppShell` before the first call |
-| DataCat Following — follow/unfollow + feed | `shipped` | `useDatacatFollows` over the existing `datacatFollowedCreators` key; feed fans out over `creators/{id}/characters` |
-| Discover tag include/exclude chips + catalogue | `shipped` | `DiscoverTagFilter`; `matchesTagFilters` in `lib/providers/shared.ts`, client-side only, 12 vitest |
-| NSFW/NSFL per provider (`chubNsfw`, `datacatNsfw`) | `shipped` | `nsfwParams` in `lib/providers/chub.ts`; toggles in Settings → Providers |
-| Persistent tag excludes (`providerExcludeTags`) | `shipped` | `withPersistentExcludes`, layered as a floor the chips cannot re-admit |
-| Infinite scroll per provider (`infiniteScroll`) | `dropped` | Always-on is the wanted behaviour; the key existed but the control never earned itself. Decided at Stage 6B. |
-| Provider order (`providerOrder`) | `dropped` | Two providers. Chip-row order is not worth a setting. Decided at Stage 6B. |
-| JanitorAI / Supabase auth, MeiliSearch, Hampter, saucepan, botbooru, wyvern, pygmalion providers | `dropped` | §5.2 + the `web/` trim — providers cut to Chub + DataCat before the rewrite |
+| Discover tag include/exclude chips + catalogue | `shipped` | `DiscoverTagFilter`; `matchesTagFilters`, client-side only, 12 vitest |
+| NSFW/NSFL per provider | `shipped` | `nsfwParams`; toggles in Settings → Providers |
+| Persistent tag excludes (`providerExcludeTags`) | `shipped` | `withPersistentExcludes`, a floor the chips cannot re-admit |
+| Discover state in the URL (linkable, back-button-correct) | `shipped` | `lib/discover-state.ts` — also what makes the preview route's prev/next possible |
+| Hide possible duplicates (fuzzy name+creator tiers) | `dropped` | `browse-view.js:626-805`. The exact `_<id8>` have-guard covers the common case; fuzzy matching is a judgement call worth revisiting only if re-uploads prove a real problem. Decided 2026-08-19 |
+| Creator bulk download (whole catalogue, progress, cancel) | `dropped` | `browse-view.js:1593-1848`, and gated behind a setting even in `web/`. Decided 2026-08-19 |
+| Paste a card URL to import directly | `dropped` | Same call as "Import from URL" in the Import section below — in the post-cutover backlog |
+| Media/gallery extraction from the preview | `dropped` | `cdDatacatExtract`. Media is a post-import concern here: the archive's own pipeline handles it once the card is in (`MediaDiscovery`) |
+| Infinite scroll toggle (`infiniteScroll`) | `dropped` | Always-on is the wanted behaviour. Decided at Stage 6B |
+| Provider order (`providerOrder`) | `dropped` | Two providers. Decided at Stage 6B |
+| JanitorAI / Supabase auth, MeiliSearch, Hampter, saucepan, botbooru, wyvern, pygmalion providers | `dropped` | §5.2 + the `web/` trim — providers cut to Chub + DataCat before the rewrite. This also drops those groups from DataCat's sort menu |
 | Provider-link management UI | `dropped` | §5.2 |
 
 ## Settings
@@ -184,6 +221,16 @@ two (`providerGallery`/chub gallery, mega) shipped 2026-08-19 — see Media
 pipeline above.
 
 **0 decisions remain.**
+
+### What the Discover rewrite says about that count
+
+The count was never the problem — the *inventory* was. Every Discover row above
+marked `shipped` on 2026-08-18 was signed off against a ledger that had never
+read the code it was describing, and the surface it certified turned out to
+have no way to open a card, a 404 on every Get, no sort control for one of two
+providers, and two Following feeds that returned 20 cards and 0. A row is only
+worth what the sweep behind it was. Sweep 4 exists so the next section that
+looks complete has been checked against something.
 
 **2 need a real run, not a decision:**
 

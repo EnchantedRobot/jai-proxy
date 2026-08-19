@@ -12,7 +12,13 @@ const SERVER = 'http://localhost:8000'
 // (/api/v1/datacat); `/proxy` is the CORS passthrough a provider fetch falls
 // back to, and without it Discover cannot work in dev. `/existing` is the
 // duplicate guard, still living in the userscript namespace.
-const SERVER_PATHS = ['/api', '/proxy', '/health', '/existing']
+//
+// `/build-` is the acquisition namespace (`/build-chub`, `/build-datacat`) and
+// its absence here is why Discover's Get answered 404 on every click in dev:
+// the POST never left Vite. These routes are mounted at the server root, not
+// under /api (proxy/server.py mounts `build_router` unprefixed), so no other
+// entry in this list covers them.
+const SERVER_PATHS = ['/api', '/proxy', '/health', '/existing', '/build-']
 
 // https://vite.dev/config/
 export default defineConfig({

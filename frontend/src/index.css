@@ -121,6 +121,14 @@
     height: 100%;
   }
 
+  html {
+    /* Reserve the scrollbar's width whether or not the page scrolls. A detail
+       tab with an empty pane is shorter than the viewport and one with a
+       gallery is not, so without this the centred layout slides sideways every
+       time the tab changes on any platform that draws a real scrollbar. */
+    scrollbar-gutter: stable;
+  }
+
   body {
     margin: 0;
     background: var(--ground);

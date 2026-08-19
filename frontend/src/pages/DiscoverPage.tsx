@@ -1,23 +1,28 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { RefreshCw, Search } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router'
+import { RefreshCw, Search, X } from 'lucide-react'
 import { CardGrid } from '@/components/CardGrid'
 import { DiscoverTile } from '@/components/DiscoverTile'
+import { DiscoverSort } from '@/components/DiscoverSort'
 import { DiscoverTagFilter } from '@/components/DiscoverTagFilter'
-import { EMPTY_TAGS, type TagSelection } from '@/components/discover-tags-def'
+import { FollowingManager } from '@/components/FollowingManager'
+import { type TagSelection } from '@/components/discover-tags-def'
 import { useDebounced } from '@/hooks/use-debounced'
 import {
-  useAddChubToArchive,
-  useAddDatacatToArchive,
+  FOLLOWING_PER_CREATOR,
+  useAddToArchive,
   useDatacatFollows,
   useDiscoverSearch,
   useHaveGuard,
-  type DiscoverMode,
-  type Provider,
 } from '@/hooks/use-discover'
 import { useProviderSettings, useSettings } from '@/hooks/use-settings'
-import type { ChubNode } from '@/lib/providers/chub'
-import type { ChubSort } from '@/lib/providers/chub'
-import type { DatacatCharacter } from '@/lib/providers/datacat'
+import {
+  defaultSort,
+  readDiscoverState,
+  writeDiscoverState,
+  type DiscoverMode,
+  type DiscoverState,
+} from '@/lib/discover-state'
 import {
   hasTagFilters,
   matchesTagFilters,
@@ -26,24 +31,25 @@ import {
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
-const CHUB_SORTS: { value: ChubSort; label: string }[] = [
-  { value: 'trending', label: 'Trending' },
-  { value: 'download_count', label: 'Most downloaded' },
-  { value: 'id', label: 'Newest' },
-]
-
 /**
  * Search providers and add straight to the archive (docs/UI_REWRITE_PLAN.md
- * §3.8, §4.5). Chub and DataCat, not the whole legacy provider stack --
- * JanitorAI Supabase auth, MeiliSearch and DataCat script hydration stay out of
- * scope for "search and add a card".
+ * §3.8, §4.5) — Chub and DataCat, not the whole legacy provider stack.
  *
- * Following and tag filtering landed at Stage 6B, having been deferred at Stage
- * 5 and then never built. The two are asymmetric on purpose: Chub's follows
- * live in a real account so they are read-only here, while DataCat's are local
- * settings data with no remote copy, so this app owns them outright.
+ * Rebuilt against `web/modules/providers/` after the first version turned out
+ * to have been built against the mock's Discover route alone, which is a grid
+ * and a chip bar. What the mock does not show — and `web/` does — is that
+ * Discover has four feeds (browse and Following, per provider), each with its
+ * own ordering, and that a provider card is *readable* before you keep it.
+ *
+ * State lives in the query string, like the archive side: a Discover view is a
+ * link, and the card preview at `/discover/:provider/:id` reads the same params
+ * to rebuild this grid for its prev/next.
  */
 export function DiscoverPage() {
+  const [params, setParams] = useSearchParams()
+  const state = readDiscoverState(params)
+  const { provider, mode, creator, creatorName } = state
+
   const settings = useSettings()
   const { chubToken, chubNsfw, providerExcludeTags } = useProviderSettings()
   // Absent (nothing saved, or still loading) reads as both enabled -- the
@@ -52,13 +58,31 @@ export function DiscoverPage() {
   const chubOn = providersConf?.chub !== false
   const datacatOn = providersConf?.datacat !== false
 
-  const [provider, setProvider] = useState<Provider>('chub')
-  const [mode, setMode] = useState<DiscoverMode>('browse')
-  const [sort, setSort] = useState<ChubSort>('trending')
-  const [rawSearch, setRawSearch] = useState('')
-  const [hideHave, setHideHave] = useState(false)
-  const [tags, setTags] = useState<TagSelection>(EMPTY_TAGS)
+  // The search box types faster than the provider answers; the URL takes the
+  // debounced value so the address bar does not thrash either.
+  const [rawSearch, setRawSearch] = useState(state.q)
   const search = useDebounced(rawSearch, 350)
+
+  const patch = useCallback(
+    (next: Partial<DiscoverState>) => {
+      const merged = { ...readDiscoverState(params), ...next }
+      // A sort belongs to the feed that offers it, so switching feed resets it
+      // rather than carrying a name the new feed has never heard of.
+      if (
+        next.provider !== undefined ||
+        next.mode !== undefined ||
+        next.creator !== undefined
+      ) {
+        if (next.sort === undefined) merged.sort = defaultSort(merged)
+      }
+      setParams(writeDiscoverState(merged), { replace: true })
+    },
+    [params, setParams],
+  )
+
+  useEffect(() => {
+    if (search !== state.q) patch({ q: search })
+  }, [search, state.q, patch])
 
   const auth = useMemo(
     () => ({ token: chubToken, nsfw: chubNsfw }),
@@ -69,15 +93,13 @@ export function DiscoverPage() {
   // A provider turned off in Settings disappears from the toggle; if it was
   // the active one, fall back to whichever provider is still on.
   useEffect(() => {
-    if (provider === 'chub' && !chubOn && datacatOn) setProvider('datacat')
-    else if (provider === 'datacat' && !datacatOn && chubOn) setProvider('chub')
-  }, [provider, chubOn, datacatOn])
+    if (provider === 'chub' && !chubOn && datacatOn)
+      patch({ provider: 'datacat' })
+    else if (provider === 'datacat' && !datacatOn && chubOn)
+      patch({ provider: 'chub' })
+  }, [provider, chubOn, datacatOn, patch])
 
-  const results = useDiscoverSearch(provider, search, sort, {
-    mode,
-    auth,
-    followed: datacatFollows,
-  })
+  const results = useDiscoverSearch(state, { auth, followed: datacatFollows })
   const {
     data,
     error,
@@ -91,17 +113,29 @@ export function DiscoverPage() {
 
   const items = useMemo(() => data?.pages.flatMap((p) => p.items) ?? [], [data])
   const total = data?.pages[data.pages.length - 1]?.total
+  // DataCat's Following feed reads one page per creator (their newest), so a
+  // creator with more than that is represented, not exhausted. Say so rather
+  // than let the count read as "everything they have published".
+  const truncatedCreators = data?.pages[data.pages.length - 1]?.truncated ?? 0
+
+  const tags: TagSelection = useMemo(
+    () => ({
+      include: [...state.tags]
+        .filter(([, m]) => m === 'inc')
+        .map(([tag]) => tag),
+      exclude: [...state.tags]
+        .filter(([, m]) => m === 'exc')
+        .map(([tag]) => tag),
+    }),
+    [state.tags],
+  )
 
   // Client-side only, always -- neither provider's server-side tag matching is
   // trustworthy (`lib/providers/shared.ts`, trap 2). The persistent
   // `providerExcludeTags` entry is layered underneath as a floor the chips
   // cannot re-admit.
   const filters = useMemo(
-    () =>
-      withPersistentExcludes(
-        { include: tags.include, exclude: tags.exclude },
-        providerExcludeTags?.[provider],
-      ),
+    () => withPersistentExcludes(tags, providerExcludeTags?.[provider]),
     [tags, providerExcludeTags, provider],
   )
   const filtering = hasTagFilters(filters)
@@ -116,9 +150,14 @@ export function DiscoverPage() {
   const have = useHaveGuard(tagMatched.map((i) => i.providerId))
   const haveSet = have.data ?? new Set<string>()
   const haveCount = tagMatched.filter((i) => haveSet.has(i.providerId)).length
-  const visible = hideHave
+  const visible = state.hideHave
     ? tagMatched.filter((i) => !haveSet.has(i.providerId))
     : tagMatched
+
+  const feedNote =
+    truncatedCreators > 0
+      ? ` · showing the most recent ${FOLLOWING_PER_CREATOR} per creator`
+      : ''
 
   // Trap 1: a page's own tag lists are truncated, so filtering thins results
   // unpredictably. Pull a few more pages rather than letting a live filter look
@@ -136,31 +175,15 @@ export function DiscoverPage() {
   }, [filtering, hasNextPage, isFetching, visible.length, fetchNextPage])
 
   const chubNeedsToken =
-    provider === 'chub' && mode === 'following' && !chubToken
+    provider === 'chub' && mode === 'following' && !chubToken && !creator
   const noFollows =
     provider === 'datacat' &&
     mode === 'following' &&
+    !creator &&
     datacatFollows.length === 0
 
-  const addChub = useAddChubToArchive()
-  const addDatacat = useAddDatacatToArchive()
+  const add = useAddToArchive()
   const [addingKey, setAddingKey] = useState<string | null>(null)
-
-  const onAdd = (key: string, raw: ChubNode | DatacatCharacter) => {
-    setAddingKey(key)
-    const mutation = provider === 'chub' ? addChub : addDatacat
-    mutation.mutate(raw as ChubNode & DatacatCharacter, {
-      onSuccess: (result) => {
-        toast(
-          result.duplicate
-            ? 'Already in the archive.'
-            : `Added ${result.card?.name ?? 'card'}.`,
-        )
-      },
-      onError: (err) => toast(err.message, 'bad'),
-      onSettled: () => setAddingKey(null),
-    })
-  }
 
   const sentinelRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -175,6 +198,8 @@ export function DiscoverPage() {
     observer.observe(element)
     return () => observer.disconnect()
   }, [hasNextPage, fetchNextPage, visible.length])
+
+  const gridSearch = writeDiscoverState(state).toString()
 
   return (
     <>
@@ -191,7 +216,9 @@ export function DiscoverPage() {
             {chubOn && (
               <ProviderChip
                 on={provider === 'chub'}
-                onClick={() => setProvider('chub')}
+                onClick={() =>
+                  patch({ provider: 'chub', creator: '', creatorName: '' })
+                }
               >
                 Chub
               </ProviderChip>
@@ -199,7 +226,9 @@ export function DiscoverPage() {
             {datacatOn && (
               <ProviderChip
                 on={provider === 'datacat'}
-                onClick={() => setProvider('datacat')}
+                onClick={() =>
+                  patch({ provider: 'datacat', creator: '', creatorName: '' })
+                }
               >
                 DataCat
               </ProviderChip>
@@ -207,18 +236,21 @@ export function DiscoverPage() {
             <span className="mx-1 h-[18px] w-px bg-white/8" />
             <ProviderChip
               on={mode === 'browse'}
-              onClick={() => setMode('browse')}
+              onClick={() => patch({ mode: 'browse' as DiscoverMode })}
             >
               Discover
             </ProviderChip>
             <ProviderChip
               on={mode === 'following'}
-              onClick={() => setMode('following')}
+              onClick={() => patch({ mode: 'following' as DiscoverMode })}
             >
               Following
             </ProviderChip>
             <span className="mx-1 h-[18px] w-px bg-white/8" />
-            <ProviderChip on={hideHave} onClick={() => setHideHave((v) => !v)}>
+            <ProviderChip
+              on={state.hideHave}
+              onClick={() => patch({ hideHave: !state.hideHave })}
+            >
               Hide cards I have
             </ProviderChip>
           </div>
@@ -227,32 +259,52 @@ export function DiscoverPage() {
             provider={provider}
             auth={auth}
             value={tags}
-            onChange={setTags}
+            onChange={(next) => {
+              const map = new Map<string, 'inc' | 'exc'>()
+              for (const tag of next.include) map.set(tag, 'inc')
+              for (const tag of next.exclude) map.set(tag, 'exc')
+              patch({ tags: map })
+            }}
           />
 
           <div className="flex-1" />
 
-          {provider === 'chub' && mode === 'browse' && (
-            <select
-              value={sort}
-              onChange={(e) => setSort(e.target.value as ChubSort)}
-              className="h-[33px] rounded-full border border-line bg-ground px-3 text-[13px] text-muted-foreground focus:border-sage focus:outline-none"
-            >
-              {CHUB_SORTS.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          )}
+          <FollowingManager
+            provider={provider}
+            auth={auth}
+            onBrowseCreator={(id, name) =>
+              patch({ creator: id, creatorName: name })
+            }
+          />
+          <DiscoverSort state={state} onChange={(sort) => patch({ sort })} />
         </div>
       </div>
 
       <div className="mx-auto max-w-[1560px] px-5">
+        {creator && (
+          <div className="mt-4 flex items-center gap-3 rounded-xl border border-sage-line bg-sage-dim px-4 py-2.5">
+            <span className="text-[13.5px]">
+              Browsing{' '}
+              <b className="font-semibold text-sage">
+                {creatorName || creator}
+              </b>
+              ’s cards
+            </span>
+            <button
+              type="button"
+              onClick={() => patch({ creator: '', creatorName: '' })}
+              className="ml-auto flex items-center gap-1.5 rounded-full border border-line px-3 py-1 text-[12.5px] text-muted hover:border-white/20 hover:text-text"
+            >
+              <X className="size-3.5" /> Clear
+            </button>
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center gap-2.5 py-5">
-          {/* Neither provider's Following feed takes a search term, so the box
-              is absent there rather than present and inert (§0). */}
-          {mode === 'browse' && (
+          {/* Neither Following feed takes a search term, and a creator's
+              catalogue is already the filter -- so the box is absent there
+              rather than present and inert. */}
+          {mode === 'browse' && !creator && (
             <div className="flex h-[38px] max-w-[520px] flex-1 items-center gap-2.5 rounded-[10px] border border-line bg-surface px-3">
               <Search className="size-4 shrink-0 text-faint" />
               <input
@@ -265,14 +317,16 @@ export function DiscoverPage() {
           )}
           <span className="text-[12.5px] whitespace-nowrap text-faint">
             {isPending
-              ? 'searching…'
+              ? mode === 'following'
+                ? 'building your feed…'
+                : 'searching…'
               : filtering
                 ? // With a tag filter on, the provider's own total is not the
                   // number on screen -- report what actually matched.
                   `${visible.length} of ${items.length} loaded match${haveCount ? ` · ${haveCount} already in the archive` : ''}`
                 : total !== undefined
-                  ? `${total.toLocaleString()} results${haveCount ? ` · ${haveCount} already in the archive` : ''}`
-                  : `${items.length} results shown${haveCount ? ` · ${haveCount} already in the archive` : ''}`}
+                  ? `${total.toLocaleString()} results${haveCount ? ` · ${haveCount} already in the archive` : ''}${feedNote}`
+                  : `${items.length} results shown${haveCount ? ` · ${haveCount} already in the archive` : ''}${feedNote}`}
           </span>
           <div className="flex-1" />
           <button
@@ -294,7 +348,7 @@ export function DiscoverPage() {
         ) : noFollows ? (
           <EmptyFollowing
             title="You’re not following anyone on DataCat yet"
-            body="DataCat has no accounts, so this list lives in your archive’s own settings. Add a creator in Settings → Providers and their cards show up here."
+            body="DataCat has no accounts, so this list lives in your archive’s own settings. Follow a creator from the Following button above, or from any card, and their cards show up here."
           />
         ) : (
           <>
@@ -318,9 +372,31 @@ export function DiscoverPage() {
             <DiscoverTile
               key={item.key}
               item={item}
+              search={gridSearch}
               have={haveSet.has(item.providerId)}
               adding={addingKey === item.key}
-              onAdd={() => onAdd(item.key, item.raw)}
+              onBrowseCreator={() =>
+                patch({
+                  creator: item.creatorId || item.creator,
+                  creatorName: item.creator,
+                })
+              }
+              onAdd={() => {
+                setAddingKey(item.key)
+                add.mutate(
+                  { provider: item.provider, raw: item.raw },
+                  {
+                    onSuccess: (result) =>
+                      toast(
+                        result.duplicate
+                          ? 'Already in the archive.'
+                          : `Added ${result.card?.name ?? 'card'}.`,
+                      ),
+                    onError: (err) => toast(err.message, 'bad'),
+                    onSettled: () => setAddingKey(null),
+                  },
+                )
+              }}
             />
           ))}
         </CardGrid>
