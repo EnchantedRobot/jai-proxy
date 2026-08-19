@@ -23,10 +23,10 @@ const SERVER_PATHS = ['/api', '/proxy', '/health', '/existing', '/build-']
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  // During the overlap the old `web/` frontend still owns "/", so this app is
-  // mounted under a prefix and its assets must be requested from there. At
-  // cut-over this becomes '/' (docs/UI_REWRITE_PLAN.md §2.5, §5 Stage 7).
-  base: '/next/',
+  // The app owns the root: it is served from frontend/dist by the server
+  // itself, and its assets are requested from /assets (docs/UI_REWRITE_PLAN.md
+  // §2.5). This was '/next/' for the length of the overlap with `web/`.
+  base: '/',
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './src'),

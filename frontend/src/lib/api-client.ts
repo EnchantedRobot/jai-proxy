@@ -3,7 +3,7 @@ import type { paths } from './api-schema'
 
 // The archive server. In dev, Vite proxies /api and friends to :8000
 // (vite.config.ts), so a same-origin base URL is right in every environment --
-// including under the /next/ prefix, which applies to assets, not to the API.
+// the app's `base` applies to its assets, not to the API.
 export const apiClient = createClient<paths>({
   baseUrl: window.location.origin,
   // Resolve `fetch` lazily rather than capturing it at module-load time, so

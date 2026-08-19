@@ -33,9 +33,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      # Two trees, run separately: each resolves its fixtures relative to its
-      # own directory (see the test-js target in the Makefile). Zero deps, so
-      # there is nothing to install first.
+      # The userscripts' suite: node:test with zero deps, so there is nothing
+      # to install first (see the test-js target in the Makefile).
       - run: make test-js
 
   frontend:

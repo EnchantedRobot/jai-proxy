@@ -19,22 +19,24 @@ So: one JSON file on disk, beside the cards, inside the volume that already gets
 mounted and backed up.
 
 WHAT THIS MODULE KNOWS
-Nothing about the frontend's schema. The blob is an opaque JSON object; the
-mapping onto SillyTavern's `extension_settings` shape belongs to the client-side
-adapter (`web/archive-api.js`), the same seam every other ST-ism lives behind.
-Keeping the server ignorant is what stops `settings.json` from re-growing a
-SillyTavern shape the archive would then have to honour forever.
+Nothing about the frontend's schema. The blob is an opaque JSON object, and what
+the keys mean is entirely the client's business -- today, the `ui2` namespace
+plus the handful of root keys in `frontend/src/hooks/use-settings.ts`. Keeping
+the server ignorant is what stopped `settings.json` from re-growing the
+SillyTavern shape the old frontend mapped it onto, and what let that mapping be
+deleted with the frontend rather than migrated.
 
-THE ONE EXCEPTION
-`proxy.runtime.net` reads exactly one key out of this blob -- `httpProxyUrl`,
-the outbound proxy every server-initiated fetch routes through. It is read
-defensively (a missing key, a wrong type, a damaged file all degrade to "no
-proxy") and never written back from the server side. The alternative was a
-second configuration surface with its own file, endpoint and settings panel for
-a single string, which costs more than the coupling does.
+THE EXCEPTIONS
+Two keys are read server-side, both credentials the client already owns and
+neither written back from here: `httpProxyUrl` (`proxy.runtime.net`), the
+outbound proxy every server-initiated fetch routes through, and `chubToken`
+(`proxy.media.extractors`), without which Chub's gallery API answers 401 for a
+download the server runs on its own thread. Both are read defensively -- a
+missing key, a wrong type, a damaged file all degrade to "not configured".
 
-That is the whole exception. Nothing else in the server may read this file: one
-key is a documented seam, two is the beginning of a schema.
+The alternative in each case was a second configuration surface, with its own
+file, endpoint and settings panel, for one string. That is the whole list, and
+it should stay short: two documented seams are a seam, a third is a schema.
 """
 
 from __future__ import annotations

@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """Boot-and-browse smoke test for the React archive client.
 
-The successor to `web/tests/smoke.py`, which drove the vendored frontend. Kept
+The successor to `web/tests/smoke.py`, which drove the vendored frontend and
+died with it at the cut-over (the file is on the `legacy-web` branch). Kept
 as a real browser gate rather than folded into vitest because that is what it is
 for: vitest runs components against MSW, and every regression this file has
 actually caught -- a missing route, a thumbnail path that 404s, a static asset
@@ -25,7 +26,7 @@ BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000").rstrip("/
 LABEL = sys.argv[2] if len(sys.argv) > 2 else "run"
 
 # Where the app is mounted during the overlap. One line to change at cut-over.
-APP = f"{BASE}/next/"
+APP = f"{BASE}/"
 
 IGNORE = [re.compile(r"favicon")]
 
@@ -253,7 +254,7 @@ def drive(page, result: dict) -> None:
     # picture; this is the regression check for that.
     notes_card = find_card_with_notes_image()
     if notes_card:
-        page.goto(f"{BASE}/next/characters/{notes_card}?tab=notes",
+        page.goto(f"{BASE}/characters/{notes_card}?tab=notes",
                    wait_until="networkidle", timeout=30_000)
         page.wait_for_selector("iframe[title='Creator notes']", timeout=15_000)
         page.wait_for_timeout(1200)

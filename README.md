@@ -416,31 +416,33 @@ is verified live.
 
 ## Status
 
-`uv run pytest` green (565). Server-side JSON refactor complete; datacat + Chub.ai
+`uv run pytest` green. Server-side JSON refactor complete; datacat + Chub.ai
 bulk import live; live end-to-end verification of the userscript export flows is
 pending.
 
-Mid-migration to a standalone **character archive** that runs beside SillyTavern
-rather than inside it. Landed: `data/` holds the archive (3,839 cards), the
-read-only browse API above, 100% thumbnail coverage, CharacterLibrary's frontend
-vendored into `web/` against that API, bundle `.zip` export, on-disk UI settings
-(`data/settings.json`), the local responder that replaced `mlx_client.py` — the
-MLX upstream was the last thing tying the server to a second macOS-only process
-— and, on top of that, the **container** above: builds land in the archive,
-every writable path folded under `data/`, and the whole thing runs from one
-image with one mount.
+A standalone **character archive** that runs beside SillyTavern rather than
+inside it. Landed: `data/` holds the archive (3,868 cards), the browse and write
+API above, 100% thumbnail coverage, on-disk UI settings (`data/settings.json`),
+the local responder that replaced `mlx_client.py` — the MLX upstream was the
+last thing tying the server to a second macOS-only process — and, on top of
+that, the **container** above: builds land in the archive, every writable path
+folded under `data/`, and the whole thing runs from one image with one mount.
 
-**In progress: the UI rewrite** (`docs/UI_REWRITE_PLAN.md`). `web/` — 68k lines
-of vendored CharacterLibrary, still a SillyTavern extension underneath — is
-being replaced by a React client in `frontend/`, built against `/api/v1` and
-nothing else. The two run side by side until cut-over: `web/` keeps `/`, the new
-one answers under `/next`.
+**The UI rewrite is done** (`docs/UI_REWRITE_PLAN.md`, `docs/UI_PARITY_LEDGER.md`).
+`web/` — 68k lines of vendored CharacterLibrary, still a SillyTavern extension
+underneath — was replaced by the React client in `frontend/`, built against
+`/api/v1` and nothing else, and deleted at the Stage 7 cut-over. The client now
+owns `/`. The old directory is preserved on the **`legacy-web` branch**, which
+is where the "ported from `web/...`" comments throughout `proxy/` and
+`frontend/src/` resolve — and, until `POST /api/v1/bundle` exists, where a
+bundle `.zip` gets restored from.
 
 ```
-make run              # the server, as always -- serves /next from frontend/dist
+make run              # the server -- serves the client from frontend/dist at /
 make frontend-dev     # the client on :5173, /api proxied to :8000
 make api-schema       # regenerate the typed client after any route change
 make frontend-test frontend-typing frontend-lint
+make frontend-smoke   # the browser gate, against a running server
 ```
 
 Deliberately out of scope unless a real need surfaces: reconstructing lorebook

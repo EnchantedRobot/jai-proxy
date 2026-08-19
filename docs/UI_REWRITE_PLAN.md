@@ -1,10 +1,11 @@
 # UI rewrite — replacing `web/` with a React archive client
 
-**Status:** in progress — Stages 0–6 done and verified end to end against the
-real archive (see the pre-cut-over pass in §5), Stage 7 (cut-over) next.
-Authority for the work; supersedes the Phase 3D
-(`library-sections` → modules) and Phase 6 (UI simplification) plans, both of
-which were incremental improvements to a frontend this plan deletes.
+**Status:** DONE — Stages 0–7 shipped and verified end to end against the real
+archive. The cut-over landed 2026-08-19: `web/` is deleted, the client owns
+`/`, and the old directory is preserved on the **`legacy-web`** branch.
+Authority for the work; superseded the Phase 3D (`library-sections` → modules)
+and Phase 6 (UI simplification) plans, both of which were incremental
+improvements to a frontend this plan deleted.
 
 **Design target:** `docs/mockups/d-archive.html`. Its decisions are settled and
 are not relitigated here — four tabs, one chip strip, full-page detail, tag
@@ -932,8 +933,9 @@ move. 987 pytest (+6) + 154 vitest (+6) green, tsc / oxlint / prettier / build c
 schema regenerated, smoke exits 0 with zero console errors and zero failed
 requests.
 
-**Stage 6B — parity repair. Parts A–D DONE (2026-08-19); 5 decisions open.**
-Stage 7 is on hold. A fifth round of gaps surfaced *after* two sessions spent
+**Stage 6B — parity repair. Parts A–D DONE (2026-08-19).** It held Stage 7
+until its five open decisions were closed (all are, below). A fifth round of
+gaps surfaced *after* two sessions spent
 verifying that Stages 1–6 matched this plan, and every one of them had the same
 shape: **a stage deferred something, the later stage shipped without mentioning
 it, and §5.2 never gained the entry.** The plan then read as complete. Prose
@@ -1023,14 +1025,71 @@ phase Stage 6B's own sweep surfaced and did not close: `providerGallery`, one of
 legacy's four download phases, is still neither ported nor recorded as dropped.
 See `docs/UI_PARITY_LEDGER.md`.
 
-**Stage 7 — cut-over.** One commit:
-- `frontend` base flips to `/`, mounted at `/`.
-- `rm -rf web/`; delete the `web/` mount, `NoCacheStaticFiles`, `WEB_DIR`, the
-  `web/` COPY in the Dockerfile, the `cd web && node --test` half of `make
-  test-js`.
-- One-off script prunes the dead keys from `data/settings.json`.
-- `isHostShaped` and the 501 stubs in `proxy/api/v1/` are reviewed for whether
-  anything still calls them.
+**Stage 7 — cut-over. DONE 2026-08-19.** `web/` is gone; the client owns `/`.
+
+Everything the stage listed, and what each turned out to involve:
+
+- **`frontend` base flips to `/`.** `vite.config.ts` only; `main.tsx` already
+  derived the router basename from `BASE_URL`, so the flip needed no route
+  changes. `frontend/tests/smoke.py` drops its `/next/` prefix.
+- **`rm -rf web/`** — 115 files, deleted with `git rm` after confirming all 115
+  are on the **`legacy-web` branch** (local and `origin/legacy-web`, cut from
+  `main` at `56ef9b9`). That branch is now the address the ~30 "ported from
+  `web/…`" comments across `proxy/` and `frontend/src/` resolve against, and
+  where a bundle `.zip` restore happens until §5.3's writer exists. The
+  provenance comments are deliberately left in place.
+- **The mount.** `WEB_DIR` and `NoCacheStaticFiles` are gone with it (the
+  cache trap they worked around was the hand-bumped `MODULE_VERSION`'s, which
+  content-hashed assets retire). The client's assets move to `/assets` and its
+  shell route to `/{full_path:path}`, registered last.
+- **One thing the plan did not anticipate: the catch-all needed a guard.** A
+  route matching every path also matches `/api/v1/charcters`, which would have
+  answered 200 with an HTML body — a typo'd endpoint reported to the client as
+  a JSON parse failure, and invisible to the smoke gate's "no failed requests"
+  check. `SERVER_OWNED_PREFIXES` (proxy/server.py) 404s inside any prefix the
+  routers claim, and derives that set **from the routers themselves** rather
+  than a hand-written list, so adding a router protects it automatically. The
+  `include_router` calls became one `ROUTERS` tuple to make that derivable.
+- **`data/settings.json` pruned**, by `scripts/prune_settings.py` — read-only
+  by default, timestamped backup on `--apply`, idempotent. 124 keys → 9: the
+  provider credentials and `httpProxyUrl` the client reads flat, plus `ui2`.
+  The rest was six cut providers' credentials, a theme customizer, a mobile
+  mode and a duplicate scanner's thresholds. **One migration rather than a
+  drop:** `tagDictionaryDelta` is real user work and changed namespace in the
+  rewrite (root → `ui2.`), so it is moved, and only when `ui2` holds none.
+- **`isHostShaped` and the 501 stubs: nothing to review.** Both lived entirely
+  in `web/archive-api.js` — `grep` finds no 501 anywhere in `proxy/` — so they
+  died with the file rather than needing a decision.
+- **Stale claims about `web/` in the server's prose, fixed rather than left.**
+  Four comments asserted a *live* coupling to a file that no longer exists
+  (`/api/v1`'s "the translation lives in archive-api.js", `CHUB_AVATAR_BASE`'s
+  "keep the two in sync", DataCat's `DC_SESSION_API_BASE`, the CORS proxy's
+  caller list). Each now names its real counterpart in `frontend/src/`. While
+  there: `ui_settings.py`'s docstring claimed exactly one server-side reader of
+  the blob, and there are two — `proxy.media.extractors` reads `chubToken`.
+
+**§5.1 #6 discharged, as a dry run, against the real archive.** The old
+tag-tools were checked out of `legacy-web` and run beside the new TypeScript
+over the *same* inputs: all 3,869 cards as `useAllCardTags` fetches them, and
+the real stored 38-override delta. The base dictionary is byte-identical
+between the two trees. Old and new agree exactly — **168 renames, 50 removals**
+— and so does the plan taken through the editor path the page actually posts
+(`buildEditorState` → `rebuildMapping` → `buildApplyPayload`), which is the
+property that matters: what you previewed is what lands on disk. Nothing was
+written; the harness was temporary and is not committed.
+
+**Verified:** 1,048 pytest, 42 node (`make test-js`, one tree now), 173 vitest,
+tsc / oxlint / prettier / production build clean, `api-schema` regenerates with
+no diff. The smoke gate drives the real 3,869-card archive at `/` and exits 0
+with **zero console errors and zero failed requests** — every page, deep links,
+prev/next, an editor open, a reversible favourite toggle, both Discover
+providers, a preview, and Settings' proxy test / userscript generation /
+rescan.
+
+**Still open, and it is a run rather than a decision:** one full `scope=all`
+bulk localize over the archive — also the first real-world exercise of the chub
+and mega extractors. It writes GBs over hours, so it wants a deliberate start,
+not a cut-over side effect. See the ledger.
 
 ### 5.1 Definition of parity
 

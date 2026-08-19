@@ -17,8 +17,8 @@ const queryClient = new QueryClient({
   },
 })
 
-// Vite's BASE_URL is '/next/' during the overlap and '/' after cut-over
-// (vite.config.ts). Deriving the router's basename from it means the flip is
+// Vite's BASE_URL is '/' since the cut-over (vite.config.ts), and was '/next/'
+// during the overlap. Deriving the router's basename from it means the flip is
 // one line in one file, and deep links keep working on both sides of it.
 const basename = import.meta.env.BASE_URL.replace(/\/$/, '')
 

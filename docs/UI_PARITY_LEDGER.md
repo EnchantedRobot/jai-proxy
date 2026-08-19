@@ -3,6 +3,10 @@
 Every user-visible capability of the old `web/` UI and of the mock, with its
 status in the new `frontend/` app.
 
+`web/` was deleted at the Stage 7 cut-over (2026-08-19). Every `web/…` path
+below still resolves — on the **`legacy-web`** branch, which exists to keep
+this file checkable: `git show legacy-web:web/modules/…`.
+
 ## Why this file exists
 
 Five rounds of "missed" work all had the same shape: a stage deferred something
@@ -97,7 +101,7 @@ Re-run sweeps 2 and 4 before any future cut-over sign-off.
 |---|---|---|
 | Consolidation editor, buckets, find, New canonical, Reset, Apply | `shipped` | `pages/TagsPage.tsx`, `components/tags/` |
 | `tag-analysis` / `tag-delta` / dictionary | `shipped` | Ported verbatim, 80-test suite (§1.3 items 2-3) |
-| Tag apply against the real archive | `open` | §5.1 #6 — the dry-run comparison was never run for real. Blocks cut-over. |
+| Tag apply against the real archive | `shipped` | §5.1 #6, discharged 2026-08-19 as a **dry run**: the old tag-tools checked out of `legacy-web` and run beside the new TypeScript over the same 3,869 cards and the same real 38-override delta. Identical plan — 168 renames, 50 removals — and identical again through the editor path the page posts. Base dictionary byte-identical between the trees. Nothing written. |
 
 ## Discover / providers
 
@@ -214,6 +218,9 @@ Decided 2026-08-19, not blocking Stage 7:
 
 ## Open rows blocking Stage 7
 
+**Stage 7 cut over on 2026-08-19 with 0 open rows.** What follows is the count
+as it stood, kept because how the number moved is the useful part.
+
 Counted 2026-08-18: 17 open rows. Stage 6B Parts B, C and D closed 12. Four
 more decided 2026-08-19 (dropped: card size, badge toggle, gallery shortcut
 button, import from URL — see rows above and the backlog note). The remaining
@@ -232,9 +239,10 @@ providers, and two Following feeds that returned 20 cards and 0. A row is only
 worth what the sweep behind it was. Sweep 4 exists so the next section that
 looks complete has been checked against something.
 
-**2 need a real run, not a decision:**
+**1 needs a real run, not a decision** (tag apply, the other one, was
+discharged as a dry run at the cut-over — see the Tags row):
 
-- Tag apply against the real archive (§5.1 #6)
-- One full `scope=all` bulk localize against the 3,868-card archive — now
-  also the first real-world exercise of the chub and mega extractors, since
-  neither has run outside pytest yet
+- One full `scope=all` bulk localize against the archive — also the first
+  real-world exercise of the chub and mega extractors, since neither has run
+  outside pytest yet. Hours of network and GBs of writes, so it wants a
+  deliberate start rather than riding along with a cut-over.

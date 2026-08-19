@@ -14,22 +14,20 @@ compile:
 test:
 	uv run python -m pytest -q
 
-# Run the JavaScript unit tests (node:test, no deps). Two trees, run separately
-# because each resolves its fixtures relative to its own directory: the
-# userscripts (userscript/tests/) and the browser's archive adapter
-# (web/tests/).
+# Run the userscripts' unit tests (node:test, no deps). Resolves its fixtures
+# relative to userscript/, hence the cd. The browser client has its own suite --
+# `make frontend-test`, vitest, below.
 test-js:
 	cd userscript && node --test
-	cd web && node --test
 
 run:
 	uv run python -m proxy.server
 
 # ---------------------------------------------------------------------------
-# frontend/ -- the React client that replaces web/ (docs/UI_REWRITE_PLAN.md).
-# Served by Vite on :5173 in dev and from frontend/dist by the server itself in
-# the container; during the overlap it lives under /next, and web/ still owns
-# "/".
+# frontend/ -- the browser client (docs/UI_REWRITE_PLAN.md). Served by Vite on
+# :5173 in dev and from frontend/dist by the server itself otherwise, at the
+# root. It replaced the vendored web/ frontend at the Stage 7 cut-over; that
+# directory lives on the `legacy-web` branch now.
 # ---------------------------------------------------------------------------
 
 frontend-install:

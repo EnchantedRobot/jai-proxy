@@ -6,9 +6,10 @@ harmless. Declaring them `async` would block the event loop for the duration of 
 stat sweep or a 1.2 MB read, which is precisely the workload this API is made of.
 
 This is the archive's own contract, deliberately not SillyTavern's. Teaching it
-to answer `/characters/edit-attribute` would relocate the compatibility burden
-rather than end it; the translation lives in `web/archive-api.js`, on the client,
-in one deletable file.
+to answer `/characters/edit-attribute` would have relocated the compatibility
+burden rather than ended it, so the translation lived on the client, in one
+deletable file (`web/archive-api.js`) -- and was duly deleted with it. The
+browser client calls these routes as they are.
 
 The routes are grouped by resource across `characters`, `galleries`, `media`,
 `system`, `network`, `userscripts` and `discover`; anything two of them need

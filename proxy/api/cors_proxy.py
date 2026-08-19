@@ -1,16 +1,16 @@
-"""`GET|POST /proxy/{url}` -- the passthrough the vendored frontend has been
-calling into a 404 ever since the pivot.
+"""`GET|POST /proxy/{url}` -- the passthrough a provider fetch falls back to.
 
 WHY THIS EXISTS
 CharacterLibrary was written as a SillyTavern extension, and SillyTavern shipped
-a CORS-proxy middleware at exactly this path. Sixteen call sites still reach for
-it: `fetchWithProxy` in `web/modules/providers/provider-utils.js`, all seven
-gallery extractors, three Chub modules and the media-localization section. Every
-one of them tries the provider directly first and falls back here when the
-browser's CORS policy (or a provider that simply doesn't send the header) makes
-the direct leg impossible. With no route answering, that fallback returned a 404
-HTML page -- which the media pipeline then classified as a permanently dead URL,
-marking characters "media complete" having never fetched a byte.
+a CORS-proxy middleware at exactly this path, which sixteen call sites in the old
+frontend reached for. Every one of them tried the provider directly first and
+fell back here when the browser's CORS policy (or a provider that simply doesn't
+send the header) made the direct leg impossible. After the pivot no route
+answered, so that fallback returned a 404 HTML page -- which the media pipeline
+then classified as a permanently dead URL, marking characters "media complete"
+having never fetched a byte. The client is a different program now and the
+fallback is a deliberate one (`fetchWithFallback`, frontend/src/lib/providers/
+shared.ts), but the route and the reason for it are unchanged.
 
 So this is a bug fix that predates the proxy feature, and it is also where the
 configured outbound proxy earns most of its keep: browsing Chub and running the

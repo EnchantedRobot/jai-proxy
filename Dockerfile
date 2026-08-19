@@ -2,7 +2,7 @@
 # image and uv's are multi-arch -- so this builds natively on arm64 (a Mac) and
 # amd64 (a NAS or a VPS) without a variant per host.
 
-# --- frontend builder: the React client, compiled to static assets -----------
+# --- frontend builder: the browser client, compiled to static assets ---------
 # node:24-alpine and not the host's node: this stage only has to run Vite, and
 # pinning it here means the image never depends on what a developer's machine
 # happens to have installed.
@@ -56,10 +56,8 @@ RUN useradd --create-home --uid 1000 app
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY proxy/ ./proxy/
-COPY web/ ./web/
-# The new client's built output only -- no node_modules, no sources. Serving it
-# is proxy/server.py's FRONTEND_DIST; during the overlap it answers under
-# /next, and web/ above still owns "/".
+# The client's built output only -- no node_modules, no sources. Serving it is
+# proxy/server.py's FRONTEND_DIST, and it answers at the root.
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 # Source fragments only, not the compiled bundles: the server concatenates them
 # per request with the user's server URL and tag filter substituted in
