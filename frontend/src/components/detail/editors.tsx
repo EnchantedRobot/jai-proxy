@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react'
-import { Plus, X } from 'lucide-react'
-import type { LoreEntry } from '@/lib/card'
+import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 /**
@@ -103,87 +102,6 @@ export function InlineTagEditor({
         placeholder="Add a tag…"
         className="min-w-[120px] flex-1 bg-transparent px-1.5 py-1 text-[12px] text-text outline-none placeholder:text-faint"
       />
-    </div>
-  )
-}
-
-/**
- * The lorebook editor: one card per entry with its trigger keys and content,
- * add and remove. Reordering and the entries' advanced routing (`position`,
- * `probability`, `selectiveLogic`) are left untouched — `setLoreEntries` merges
- * these edits onto the raw entry, so those fields survive a save unread.
- */
-export function LoreEntryEditor({
-  entries,
-  onChange,
-}: {
-  entries: LoreEntry[]
-  onChange: (entries: LoreEntry[]) => void
-}) {
-  const patch = (index: number, next: Partial<LoreEntry>) =>
-    onChange(entries.map((e, i) => (i === index ? { ...e, ...next } : e)))
-
-  const add = () =>
-    onChange([
-      ...entries,
-      {
-        id: (entries.at(-1)?.id ?? -1) + 1,
-        keys: [],
-        secondaryKeys: [],
-        content: '',
-        comment: '',
-        enabled: true,
-        constant: false,
-        insertionOrder: entries.length,
-      },
-    ])
-
-  return (
-    <div className="mt-2.5 flex flex-col gap-2.5">
-      {entries.map((entry, index) => (
-        <div
-          key={index}
-          className="rounded-xl border border-sage-line bg-surface p-3"
-        >
-          <div className="flex items-center gap-2.5">
-            <input
-              value={entry.keys.join(', ')}
-              onChange={(e) =>
-                patch(index, {
-                  keys: e.target.value
-                    .split(',')
-                    .map((k) => k.trim())
-                    .filter(Boolean),
-                })
-              }
-              placeholder="trigger keys, comma-separated"
-              className="flex-1 rounded-lg border border-line bg-raised px-2.5 py-1.5 font-mono text-[11.5px] text-sage outline-none focus:border-sage"
-            />
-            <button
-              type="button"
-              onClick={() => onChange(entries.filter((_, i) => i !== index))}
-              className="grid size-7 flex-none place-items-center rounded-lg border border-line text-faint hover:border-bad/50 hover:text-bad"
-              aria-label="Remove entry"
-            >
-              <X className="size-3.5" />
-            </button>
-          </div>
-          <textarea
-            value={entry.content}
-            onChange={(e) => patch(index, { content: e.target.value })}
-            placeholder="Entry text…"
-            rows={3}
-            className="mt-2 w-full resize-y rounded-lg border border-line bg-raised px-2.5 py-2 text-[13px] leading-[1.6] text-[#c3cacd] outline-none focus:border-sage"
-          />
-        </div>
-      ))}
-      <button
-        type="button"
-        onClick={add}
-        className="flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-line py-2.5 text-[12.5px] text-muted hover:border-sage-line hover:text-sage"
-      >
-        <Plus className="size-3.5" /> Add entry
-      </button>
     </div>
   )
 }

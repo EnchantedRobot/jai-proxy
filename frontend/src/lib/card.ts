@@ -23,6 +23,7 @@ export function str(card: CardData, key: string): string {
 /** A lorebook entry, as much of it as the detail view reads. */
 export interface LoreEntry {
   id: number
+  name: string
   keys: string[]
   secondaryKeys: string[]
   content: string
@@ -41,6 +42,7 @@ export function loreEntries(card: CardData): LoreEntry[] {
     const e = (entry ?? {}) as CardData
     return {
       id: typeof e.id === 'number' ? e.id : index,
+      name: typeof e.name === 'string' ? e.name : '',
       keys: strings(e.keys),
       secondaryKeys: strings(e.secondary_keys),
       content: typeof e.content === 'string' ? e.content : '',

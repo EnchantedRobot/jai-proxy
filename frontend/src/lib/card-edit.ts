@@ -1,4 +1,4 @@
-import type { CardData, LoreEntry } from './card'
+import type { CardData } from './card'
 
 /**
  * Building the replacement `data` object for a whole-card `PUT`.
@@ -50,38 +50,4 @@ export function setTags(data: CardData, tags: string[]): CardData {
     kept.push(tag)
   }
   return { ...data, tags: kept }
-}
-
-/**
- * Rewrite the lorebook entries in place, preserving every entry field the editor
- * does not touch.
- *
- * The entries array off the card is the source of truth for the untouched keys
- * (`position`, `probability`, `selectiveLogic` and the rest that never surface
- * in the UI), so each edited entry is merged onto the raw one at its index — a
- * blind rebuild from the typed `LoreEntry` shape would drop them. `keys`/
- * `secondary_keys` are the underscore spellings the V3 card uses.
- */
-export function setLoreEntries(data: CardData, entries: LoreEntry[]): CardData {
-  const book = data.character_book
-  if (!book || typeof book !== 'object') return data
-  const bookObj = book as CardData
-  const raw = Array.isArray(bookObj.entries) ? bookObj.entries : []
-  const next = entries.map((entry, index) => {
-    const original =
-      raw[index] && typeof raw[index] === 'object'
-        ? (raw[index] as CardData)
-        : {}
-    return {
-      ...original,
-      keys: entry.keys,
-      secondary_keys: entry.secondaryKeys,
-      content: entry.content,
-      comment: entry.comment,
-      enabled: entry.enabled,
-      constant: entry.constant,
-      insertion_order: entry.insertionOrder,
-    }
-  })
-  return { ...data, character_book: { ...bookObj, entries: next } }
 }

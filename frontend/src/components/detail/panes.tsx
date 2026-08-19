@@ -21,11 +21,11 @@ import {
   type GalleryFile,
   type LoreEntry,
 } from '@/lib/card'
-import { setField, setGreetings, setLoreEntries } from '@/lib/card-edit'
+import { setField, setGreetings } from '@/lib/card-edit'
 import { cn } from '@/lib/utils'
 import { CreatorNotes } from './CreatorNotes'
 import { EditActions, EditButton, useEdit } from './edit-context'
-import { InlineTextField, LoreEntryEditor } from './editors'
+import { InlineTextField } from './editors'
 import { Lightbox } from './Lightbox'
 import { MediaDiscovery } from './MediaDiscovery'
 import { ClampedProse, EmptyState, ProseBox, Section } from './Section'
@@ -75,7 +75,9 @@ export function OverviewPane({ card }: { card: CardDetail }) {
           <Stat value={formatDate(card.create_date)} label="created" />
         </div>
       </Section>
-      <DescriptionSection data={data} />
+      <CardTextSection data={data} field="description" title="Description" />
+      <CardTextSection data={data} field="scenario" title="Scenario" />
+      <CardTextSection data={data} field="personality" title="Personality" />
       {/* No "First message" here. It is greeting 1, which the Greetings tab
           already shows in full and is the only place it can be edited --
           rendering it twice made a long greeting dominate Overview and left two
@@ -84,41 +86,44 @@ export function OverviewPane({ card }: { card: CardDetail }) {
   )
 }
 
-function DescriptionSection({ data }: { data: CardDetail['card'] }) {
+/**
+ * One of the card's three main prose fields (description, scenario,
+ * personality). Always rendered, even when the field is empty -- an empty
+ * field is still worth showing, as an empty text box ready for an edit,
+ * rather than hidden behind a separate empty state. Long text clamps to 20
+ * lines with a click to expand, same as a long greeting.
+ */
+function CardTextSection({
+  data,
+  field,
+  title,
+}: {
+  data: CardDetail['card']
+  field: string
+  title: string
+}) {
   const { editing, save } = useEdit()
-  const description = str(data, 'description')
-  const isEditing = editing === 'description'
-  // Editable even when currently empty, so a description can be written onto a
-  // card that arrived without one; the read-only empty state is only shown when
-  // no editor could open it.
-  if (!description && !isEditing)
-    return (
-      <Section
-        title="Description"
-        action={<EditButton section="description" />}
-      >
-        <EmptyState>This card has no description.</EmptyState>
-      </Section>
-    )
+  const value = str(data, field)
+  const isEditing = editing === field
   return (
     <Section
-      title="Description"
-      count={description ? `(${formatTokens(description.length)})` : undefined}
-      action={<EditButton section="description" />}
+      title={title}
+      count={value ? `(${formatTokens(value.length)})` : undefined}
+      action={<EditButton section={field} />}
     >
       {isEditing ? (
-        <DescriptionEditor
-          initial={description}
-          onSave={(value) => save(setField(data, 'description', value))}
+        <TextFieldEditor
+          initial={value}
+          onSave={(next) => save(setField(data, field, next))}
         />
       ) : (
-        <ProseBox>{description}</ProseBox>
+        <ClampedProse lines={20}>{value}</ClampedProse>
       )}
     </Section>
   )
 }
 
-function DescriptionEditor({
+function TextFieldEditor({
   initial,
   onSave,
 }: {
@@ -256,39 +261,17 @@ function GreetingsEditor({
 // ---- Lorebook --------------------------------------------------------------
 
 export function LorebookPane({ card }: { card: CardDetail }) {
-  const { editing, save } = useEdit()
   const entries = loreEntries(card.card)
   const name = lorebookName(card.card)
-  const isEditing = editing === 'lore'
-
-  // Editing needs a `character_book` to write into; `setLoreEntries` is a no-op
-  // on a card that never had one, so the editor is only offered where there is a
-  // book (even an empty one) to add entries to.
-  const canEdit = !!card.card.character_book
-  const action = canEdit ? <EditButton section="lore" /> : undefined
-
-  if (isEditing)
-    return (
-      <Section title={name || 'Lorebook'} action={action}>
-        <LoreEditorBody
-          initial={entries}
-          onSave={(next) => save(setLoreEntries(card.card, next))}
-        />
-      </Section>
-    )
 
   if (entries.length === 0)
     return (
-      <Section title={name || 'Lorebook'} action={action}>
+      <Section title={name || 'Lorebook'}>
         <EmptyState>No lorebook on this card.</EmptyState>
       </Section>
     )
   return (
-    <Section
-      title={name || 'Lorebook'}
-      count={`${entries.length} entries`}
-      action={action}
-    >
+    <Section title={name || 'Lorebook'} count={`${entries.length} entries`}>
       <div className="mt-2 flex flex-col gap-2">
         {entries.map((entry) => (
           <LoreEntryRow key={entry.id} entry={entry} />
@@ -298,59 +281,60 @@ export function LorebookPane({ card }: { card: CardDetail }) {
   )
 }
 
-/** One lorebook entry, collapsed to a 2-line preview until clicked open. The
- *  read view previously had no way to see a truncated entry's full text --
- *  this is that affordance. */
+/**
+ * One lorebook entry. `name` is the entry's title, `comment` is a short
+ * description of it, `keys` are what makes it fire, and `content` is what
+ * actually gets sent to the LLM when it does. Collapsed, the comment
+ * truncates to one line and keys/content show a short preview; the chevron
+ * expands to the full keys list and content.
+ */
 function LoreEntryRow({ entry }: { entry: LoreEntry }) {
   const [open, setOpen] = useState(false)
+  const title = entry.name || entry.comment || 'Untitled entry'
   return (
     <button
       type="button"
       onClick={() => setOpen(!open)}
-      className="flex items-start gap-3 rounded-xl border border-line-soft bg-surface px-[13px] py-[11px] text-left hover:border-sage-line"
+      className="flex flex-col gap-1 rounded-xl border border-line-soft bg-surface px-[13px] py-[11px] text-left hover:border-sage-line"
     >
-      <span
-        className={cn(
-          'flex-none font-mono text-[11.5px] text-sage',
-          open
-            ? 'w-[150px] whitespace-normal break-words'
-            : 'w-[150px] truncate',
-        )}
-        title={entry.keys.join(', ')}
-      >
-        {entry.keys.join(', ') || entry.comment || '—'}
-      </span>
-      <span
-        className={cn(
-          'flex-1 text-[13px] whitespace-pre-wrap text-[#c3cacd]',
-          !open && 'line-clamp-2',
-        )}
-      >
-        {entry.content || 'Entry text…'}
-      </span>
-      <ChevronDown
-        className={cn(
-          'mt-0.5 size-3.5 flex-none text-faint transition-transform',
-          open && 'rotate-180',
-        )}
-      />
+      <div className="flex items-start gap-3">
+        <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-[#d2d8da]">
+          {title}
+        </span>
+        <ChevronDown
+          className={cn(
+            'mt-0.5 size-3.5 flex-none text-faint transition-transform',
+            open && 'rotate-180',
+          )}
+        />
+      </div>
+      {entry.comment && (
+        <div
+          className={cn('text-[12px] text-faint italic', !open && 'truncate')}
+        >
+          {entry.comment}
+        </div>
+      )}
+      <div className="mt-1 flex items-start gap-3">
+        <span
+          className={cn(
+            'w-[150px] flex-none font-mono text-[11.5px] text-sage',
+            open ? 'whitespace-normal break-words' : 'line-clamp-2',
+          )}
+          title={entry.keys.join(', ')}
+        >
+          {entry.keys.join(', ') || '—'}
+        </span>
+        <span
+          className={cn(
+            'flex-1 text-[13px] whitespace-pre-wrap text-[#c3cacd]',
+            !open && 'line-clamp-2',
+          )}
+        >
+          {entry.content || 'Entry text…'}
+        </span>
+      </div>
     </button>
-  )
-}
-
-function LoreEditorBody({
-  initial,
-  onSave,
-}: {
-  initial: LoreEntry[]
-  onSave: (entries: LoreEntry[]) => void
-}) {
-  const [drafts, setDrafts] = useState<LoreEntry[]>(initial)
-  return (
-    <>
-      <LoreEntryEditor entries={drafts} onChange={setDrafts} />
-      <SaveRow onSave={() => onSave(drafts)} />
-    </>
   )
 }
 

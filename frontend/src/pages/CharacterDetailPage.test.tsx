@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import { server } from '@/test/msw-server'
 import { card, renderApp } from '@/test/render'
 import { Route, Routes } from 'react-router'
@@ -57,11 +57,26 @@ const listHandler = (items = [detailCard({ id: 'Abbie_0d162f5f.png' })]) =>
     HttpResponse.json({ total: items.length, limit: 100, offset: 0, items }),
   )
 
+/** The Description section's own Edit button, scoped so a click can't land on
+ *  Scenario's or Personality's -- Overview shows all three now. */
+function descriptionEditButton() {
+  const heading = screen.getByRole('heading', { name: /^Description/ })
+  return within(heading.closest('section') as HTMLElement).getByRole(
+    'button',
+    { name: /^Edit$/ },
+  )
+}
+
 describe('CharacterDetailPage', () => {
-  it('renders the overview: tagline and description, but NOT the first greeting', async () => {
+  it('renders the overview: tagline, description, scenario, personality, but NOT the first greeting', async () => {
     // The tagline is the page blurb (`page_name`) when it differs from the name.
     server.use(
-      detailHandler(detailCard({ page_name: 'wry and watchful' })),
+      detailHandler(
+        detailCard({
+          page_name: 'The reluctant guardian',
+          card: { scenario: 'A storm strands them together.' },
+        }),
+      ),
       listHandler(),
     )
     renderDetail('/characters/Abbie_0d162f5f.png')
@@ -69,13 +84,29 @@ describe('CharacterDetailPage', () => {
     expect(
       await screen.findByRole('heading', { name: 'Abbie', level: 1 }),
     ).toBeInTheDocument()
-    expect(screen.getByText('wry and watchful')).toBeInTheDocument()
+    expect(screen.getByText('The reluctant guardian')).toBeInTheDocument()
     expect(screen.getByText('A long description of Abbie.')).toBeInTheDocument()
+    expect(
+      screen.getByText('A storm strands them together.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('wry and watchful')).toBeInTheDocument()
     // Stage 6B D7: greeting 1 belongs to the Greetings tab, which shows it in
     // full and is the only place it can be edited. Overview used to render it
     // too, so a long greeting swamped the tab and two copies could disagree
     // mid-edit.
     expect(screen.queryByText('You again.')).not.toBeInTheDocument()
+  })
+
+  it('shows an empty prose field, not an empty-state placeholder, for a missing scenario', async () => {
+    // The fixture card carries no `scenario` at all.
+    server.use(detailHandler(), listHandler())
+    renderDetail('/characters/Abbie_0d162f5f.png')
+    await screen.findByRole('heading', { name: 'Abbie', level: 1 })
+
+    expect(
+      screen.getByRole('heading', { name: /^Scenario/ }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/no scenario/i)).not.toBeInTheDocument()
   })
 
   it('switches tabs: Greetings lists every greeting, Info shows card.json', async () => {
@@ -141,7 +172,7 @@ describe('CharacterDetailPage', () => {
     renderDetail('/characters/Abbie_0d162f5f.png')
     await screen.findByRole('heading', { name: 'Abbie', level: 1 })
 
-    await userEvent.click(screen.getByRole('button', { name: /^Edit$/ }))
+    await userEvent.click(descriptionEditButton())
     const box = screen.getByRole('textbox')
     await userEvent.clear(box)
     await userEvent.type(box, 'A rewritten description.')
@@ -170,7 +201,7 @@ describe('CharacterDetailPage', () => {
     renderDetail('/characters/Abbie_0d162f5f.png')
     await screen.findByRole('heading', { name: 'Abbie', level: 1 })
 
-    await userEvent.click(screen.getByRole('button', { name: /^Edit$/ }))
+    await userEvent.click(descriptionEditButton())
     await userEvent.click(screen.getByRole('button', { name: /^Save$/ }))
 
     // The editor stays open (a textbox is still present) and a toast explains why.
@@ -240,7 +271,7 @@ describe('CharacterDetailPage', () => {
     await screen.findByRole('heading', { name: 'Abbie', level: 1 })
     await waitFor(() => expect(screen.getByText('1 of 2')).toBeInTheDocument())
 
-    await userEvent.click(screen.getByRole('button', { name: /^Edit$/ }))
+    await userEvent.click(descriptionEditButton())
     const box = screen.getByRole('textbox')
     await userEvent.clear(box)
     await userEvent.type(box, 'jack and kate')
