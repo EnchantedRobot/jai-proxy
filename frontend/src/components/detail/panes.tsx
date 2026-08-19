@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, Plus } from 'lucide-react'
+import { Check, ChevronDown, Copy, Plus } from 'lucide-react'
 import { CardTile } from '@/components/CardTile'
 import { CardGrid } from '@/components/CardGrid'
 import {
@@ -505,12 +505,31 @@ export function InfoPane({ card }: { card: CardDetail }) {
           ]}
         />
       </Section>
-      <Section title="card.json">
+      <Section title="card.json" action={<CopyJsonButton data={data} />}>
         <ProseBox className="max-h-[420px] overflow-auto font-mono text-[12.5px] leading-[1.6]">
           {JSON.stringify(data, null, 2)}
         </ProseBox>
       </Section>
     </>
+  )
+}
+
+function CopyJsonButton({ data }: { data: unknown }) {
+  const [copied, setCopied] = useState(false)
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard.writeText(JSON.stringify(data, null, 2))
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      }}
+      className="flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[11.5px] text-muted hover:text-text"
+    >
+      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+      {copied ? 'Copied' : 'Copy to Clipboard'}
+    </button>
   )
 }
 

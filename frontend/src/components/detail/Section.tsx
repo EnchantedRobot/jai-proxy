@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { formatTokens } from '@/lib/card'
 import { cn } from '@/lib/utils'
 
 /**
@@ -115,9 +114,7 @@ export function ClampedProse({
           onClick={() => setExpanded((value) => !value)}
           className="mt-1.5 text-[12.5px] text-faint hover:text-sage"
         >
-          {expanded
-            ? 'Show less'
-            : `Show more · ${formatTokens(children.length)}`}
+          {expanded ? 'Show less' : 'Show more'}
         </button>
       )}
     </div>

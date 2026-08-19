@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { ImageUp, Star, Trash2 } from 'lucide-react'
+import { ImageUp, Pencil, Star, Trash2 } from 'lucide-react'
 import type { CardDetail } from '@/hooks/use-character-detail'
 import {
   useDeleteCharacter,
@@ -18,11 +18,14 @@ import {
   AlertDialogFooter,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { RenameDialog } from './RenameDialog'
 
 /**
- * The portrait's own actions: favourite, replace image, delete. These sit
- * outside the section edit model — a star is a targeted write, and the avatar
- * is a separate endpoint.
+ * The portrait's own actions: favourite, replace image, rename, delete. These
+ * sit outside the section edit model — a star is a targeted write, the avatar
+ * is a separate endpoint, and name/creator have no section of their own for an
+ * inline editor to expand into (the header stays clean, read-only prose; the
+ * rename affordance lives down here instead).
  *
  * The mock's "⋯ More · export, duplicate, delete" is gone (Stage 6B D5). Of its
  * three promised items, Export *is* the Download button above and Duplicate has
@@ -46,6 +49,7 @@ export function PortraitActions({
   const fileRef = useRef<HTMLInputElement>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [alsoGallery, setAlsoGallery] = useState(false)
+  const [renaming, setRenaming] = useState<'name' | 'creator' | null>(null)
 
   const onFile = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -107,6 +111,21 @@ export function PortraitActions({
 
       <button
         type="button"
+        onClick={() => setRenaming('name')}
+        className="flex h-[34px] items-center justify-center gap-2 rounded-[10px] text-[12.5px] text-faint hover:bg-raised hover:text-sage"
+      >
+        <Pencil className="size-3.5" /> Rename character
+      </button>
+      <button
+        type="button"
+        onClick={() => setRenaming('creator')}
+        className="flex h-[34px] items-center justify-center gap-2 rounded-[10px] text-[12.5px] text-faint hover:bg-raised hover:text-sage"
+      >
+        <Pencil className="size-3.5" /> Rename creator
+      </button>
+
+      <button
+        type="button"
         onClick={() => {
           setAlsoGallery(false)
           setConfirmOpen(true)
@@ -115,6 +134,22 @@ export function PortraitActions({
       >
         <Trash2 className="size-4" /> Delete card
       </button>
+
+      <RenameDialog
+        field="name"
+        title="Rename character"
+        value={card.name}
+        open={renaming === 'name'}
+        onOpenChange={(next) => setRenaming(next ? 'name' : null)}
+      />
+      <RenameDialog
+        field="creator"
+        title="Rename creator"
+        value={card.creator}
+        allowEmpty
+        open={renaming === 'creator'}
+        onOpenChange={(next) => setRenaming(next ? 'creator' : null)}
+      />
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
