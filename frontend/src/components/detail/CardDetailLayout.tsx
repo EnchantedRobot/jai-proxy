@@ -70,11 +70,12 @@ export function CardDetailLayout({
           has to live on this inner wrapper, not on the container the grid sits
           in. `overflow: hidden` makes an element the nearest scrollport for
           anything `position: sticky` inside it, and the portrait column is
-          sticky: clipping the container made the portrait resolve `top` against
-          a box that never scrolls, so it hung 42px down its own column whenever
-          the pane was tall enough to leave room, and sat flush when it wasn't.
-          That is the jump between tabs. Clipping only the backdrop leaves the
-          viewport as the portrait's scrollport, where sticky behaves.
+          sticky. Clipping the container therefore made the portrait resolve
+          `top: 76px` against a box that never scrolls: it hung a full 76px down
+          its own column on any tab whose pane left that much room, and sat
+          flush on the short ones (Lorebook, Gallery). That is the jump between
+          tabs. Clipping only the backdrop hands the portrait back to the real
+          scrollport — AppShell's scroll region — where sticky behaves.
         */}
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
           <div
