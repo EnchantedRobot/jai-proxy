@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus } from 'lucide-react'
+import { ChevronDown, Plus } from 'lucide-react'
 import { CardTile } from '@/components/CardTile'
 import { CardGrid } from '@/components/CardGrid'
 import {
@@ -9,9 +9,10 @@ import {
   type CardDetail,
 } from '@/hooks/use-character-detail'
 import {
+  estimateTokens,
   formatBytes,
-  formatCount,
   formatDate,
+  formatTokens,
   greetings,
   loreEntries,
   lorebookName,
@@ -21,11 +22,13 @@ import {
   type LoreEntry,
 } from '@/lib/card'
 import { setField, setGreetings, setLoreEntries } from '@/lib/card-edit'
+import { cn } from '@/lib/utils'
 import { CreatorNotes } from './CreatorNotes'
 import { EditActions, EditButton, useEdit } from './edit-context'
 import { InlineTextField, LoreEntryEditor } from './editors'
 import { Lightbox } from './Lightbox'
-import { EmptyState, ProseBox, Section } from './Section'
+import { MediaDiscovery } from './MediaDiscovery'
+import { ClampedProse, EmptyState, ProseBox, Section } from './Section'
 
 /** Save / Cancel row shared by the editors, right-aligned under the field. */
 function SaveRow({
@@ -51,7 +54,6 @@ export function OverviewPane({ card }: { card: CardDetail }) {
   // page title is often just the character's name).
   const tagline =
     card.page_name && card.page_name !== card.name ? card.page_name : ''
-  const first = greetings(data)[0] ?? ''
 
   return (
     <>
@@ -65,8 +67,8 @@ export function OverviewPane({ card }: { card: CardDetail }) {
       <Section title="At a glance">
         <div className="mt-2.5 grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2.5">
           <Stat
-            value={`${(card.description_chars / 1000).toFixed(1)}k`}
-            label="description chars"
+            value={estimateTokens(card.description_chars).toLocaleString()}
+            label="description tokens"
           />
           <Stat value={card.greetings} label="greetings" />
           <Stat value={card.lore_entries} label="lore entries" />
@@ -74,11 +76,10 @@ export function OverviewPane({ card }: { card: CardDetail }) {
         </div>
       </Section>
       <DescriptionSection data={data} />
-      {first && (
-        <Section title="First message">
-          <ProseBox>{first}</ProseBox>
-        </Section>
-      )}
+      {/* No "First message" here. It is greeting 1, which the Greetings tab
+          already shows in full and is the only place it can be edited --
+          rendering it twice made a long greeting dominate Overview and left two
+          copies that could disagree mid-edit (Stage 6B D7). */}
     </>
   )
 }
@@ -100,7 +101,11 @@ function DescriptionSection({ data }: { data: CardDetail['card'] }) {
       </Section>
     )
   return (
-    <Section title="Description" action={<EditButton section="description" />}>
+    <Section
+      title="Description"
+      count={description ? `(${formatTokens(description.length)})` : undefined}
+      action={<EditButton section="description" />}
+    >
       {isEditing ? (
         <DescriptionEditor
           initial={description}
@@ -188,9 +193,10 @@ export function GreetingsPane({ card }: { card: CardDetail }) {
         <Section
           key={index}
           title={index === 0 ? 'Greeting 1 · primary' : `Greeting ${index + 1}`}
+          count={`(${formatTokens(greeting.length)})`}
           action={index === 0 ? <EditButton section="greetings" /> : undefined}
         >
-          <ProseBox>{greeting}</ProseBox>
+          <ClampedProse>{greeting}</ClampedProse>
         </Section>
       ))}
     </>
@@ -285,23 +291,50 @@ export function LorebookPane({ card }: { card: CardDetail }) {
     >
       <div className="mt-2 flex flex-col gap-2">
         {entries.map((entry) => (
-          <div
-            key={entry.id}
-            className="flex items-baseline gap-3 rounded-xl border border-line-soft bg-surface px-[13px] py-[11px]"
-          >
-            <span
-              className="w-[150px] flex-none truncate font-mono text-[11.5px] text-sage"
-              title={entry.keys.join(', ')}
-            >
-              {entry.keys.join(', ') || entry.comment || '—'}
-            </span>
-            <span className="line-clamp-2 text-[13px] text-[#c3cacd]">
-              {entry.content || 'Entry text…'}
-            </span>
-          </div>
+          <LoreEntryRow key={entry.id} entry={entry} />
         ))}
       </div>
     </Section>
+  )
+}
+
+/** One lorebook entry, collapsed to a 2-line preview until clicked open. The
+ *  read view previously had no way to see a truncated entry's full text --
+ *  this is that affordance. */
+function LoreEntryRow({ entry }: { entry: LoreEntry }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={() => setOpen(!open)}
+      className="flex items-start gap-3 rounded-xl border border-line-soft bg-surface px-[13px] py-[11px] text-left hover:border-sage-line"
+    >
+      <span
+        className={cn(
+          'flex-none font-mono text-[11.5px] text-sage',
+          open
+            ? 'w-[150px] whitespace-normal break-words'
+            : 'w-[150px] truncate',
+        )}
+        title={entry.keys.join(', ')}
+      >
+        {entry.keys.join(', ') || entry.comment || '—'}
+      </span>
+      <span
+        className={cn(
+          'flex-1 text-[13px] whitespace-pre-wrap text-[#c3cacd]',
+          !open && 'line-clamp-2',
+        )}
+      >
+        {entry.content || 'Entry text…'}
+      </span>
+      <ChevronDown
+        className={cn(
+          'mt-0.5 size-3.5 flex-none text-faint transition-transform',
+          open && 'rotate-180',
+        )}
+      />
+    </button>
   )
 }
 
@@ -330,18 +363,27 @@ export function GalleryPane({ card }: { card: CardDetail }) {
 
   if (!card.gallery.exists)
     return (
-      <EmptyState>No gallery has been downloaded for this card.</EmptyState>
+      <>
+        <MediaDiscovery cardId={card.id} />
+        <EmptyState>No gallery has been downloaded for this card.</EmptyState>
+      </>
     )
   if (gallery.isPending)
     return <p className="mt-4 text-center text-faint">reading gallery…</p>
   if (files.length === 0)
-    return <EmptyState>The gallery folder is empty.</EmptyState>
+    return (
+      <>
+        <MediaDiscovery cardId={card.id} />
+        <EmptyState>The gallery folder is empty.</EmptyState>
+      </>
+    )
 
   return (
     <Section
       title={`${files.length} files`}
       count={formatBytes(gallery.data!.bytes)}
     >
+      <MediaDiscovery cardId={card.id} />
       <div className="mt-2.5 grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-2.5">
         {files.map((file, index) => (
           <GalleryThumb
@@ -471,12 +513,8 @@ export function InfoPane({ card }: { card: CardDetail }) {
       <Section title="Content">
         <InfoRows
           rows={[
-            [
-              'Description',
-              `${formatCount(card.description_chars)} chars`,
-              true,
-            ],
-            ['Prompt weight', `${formatCount(card.prompt_chars)} chars`, true],
+            ['Description', formatTokens(card.description_chars), true],
+            ['Prompt weight', formatTokens(card.prompt_chars), true],
             ['Greetings', String(card.greetings), true],
             ['Lore entries', String(card.lore_entries), true],
             ['Example dialogue', card.has_example_dialogue ? 'yes' : 'none'],

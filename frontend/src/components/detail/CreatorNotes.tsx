@@ -26,11 +26,13 @@ import DOMPurify from 'dompurify'
  * height — without it the notes would sit in a fixed-height box with a
  * scrollbar. The parent cannot read the opaque-origin iframe's document, so the
  * iframe measures itself and posts its height out; the parent trusts only a
- * number, from this iframe, and clamps it between MIN and MAX.
+ * number, from this iframe, and grows to fit it exactly, the same as any other
+ * prose block on the page (Description, Greetings). There is no upper clamp —
+ * a cap silently clips whatever note is long enough to hit it, with no
+ * scrollbar and no indication anything is missing.
  */
 
 const MIN_HEIGHT = 60
-const MAX_HEIGHT = 640
 
 /** DOMPurify config: permissive for rich styling, closed to anything active. */
 const PURIFY_CONFIG = {
@@ -177,8 +179,52 @@ const MEASURE_SCRIPT = `
   report();
 `
 
+/** Percent-encodes a URL for `/proxy/{url}`, matching `proxyEncode` in the
+ *  legacy web/ frontend (web/library-sections/30-media-localization-feature.js)
+ *  -- `encodeURIComponent` alone leaves `!'()*` unescaped, and cors_proxy.py
+ *  reads the whole thing back as one path segment. */
+function proxyEncode(url: string): string {
+  return encodeURIComponent(url).replace(
+    /[!'()*]/g,
+    (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase(),
+  )
+}
+
+/**
+ * Route every embedded image through the server's `/proxy/{url}` passthrough
+ * rather than hotlinking the source directly.
+ *
+ * The notes iframe is sandboxed without `allow-same-origin` (see the module
+ * doc above), which gives it an opaque origin -- and some source CDNs (e.g.
+ * saucepan.ai) answer with `Cross-Origin-Resource-Policy: same-origin`, which
+ * an opaque origin can never satisfy. The browser drops the image outright,
+ * no error the iframe can recover from. Routing through our own origin's
+ * `/proxy` sidesteps it: cors_proxy.py strips that header off the reply, since
+ * it is describing the upstream's policy, not ours.
+ */
+function proxyImages(html: string): string {
+  const container = document.createElement('div')
+  container.innerHTML = html
+  container
+    .querySelectorAll('img[src^="http://"], img[src^="https://"]')
+    .forEach((img) => {
+      const src = img.getAttribute('src')
+      if (src) img.setAttribute('src', `/proxy/${proxyEncode(src)}`)
+    })
+  return container.innerHTML
+}
+
 const BASE_STYLES = `
   html { color-scheme: dark; }
+  /* The frame is sized to its content by the measure script below, so it never
+     needs to scroll itself. Any scrollbar it does show is therefore an
+     artefact -- and under color-scheme:dark an empty dark track reads as a
+     stray shadow down the right-hand edge (Stage 6B D2). Suppress the
+     scrollbar rather than the overflow, so content a pixel or two wide than
+     the measure is still reachable by the page's own scroll. */
+  html, body { scrollbar-width: none; -ms-overflow-style: none; }
+  html::-webkit-scrollbar, body::-webkit-scrollbar { width: 0; height: 0; }
+  html { overflow-y: hidden; }
   body {
     margin: 0; padding: 4px 2px;
     font: 14.5px/1.68 'Figtree', 'Segoe UI', system-ui, sans-serif;
@@ -211,6 +257,13 @@ function buildDocument(notes: string): string {
   )
 }
 
+/** Real HTML tag names only -- matches PURIFY_CONFIG.ALLOWED_TAGS so a hit
+ *  here is guaranteed to survive sanitization as a structural element. */
+const HTML_TAG_PATTERN = new RegExp(
+  `<\\/?(?:${PURIFY_CONFIG.ALLOWED_TAGS.join('|')})(?:[\\s/>]|$)`,
+  'i',
+)
+
 /**
  * Whether the notes look like HTML or markdown/plain text.
  *
@@ -218,19 +271,37 @@ function buildDocument(notes: string): string {
  * mappers flatten to markdown. A markdown body dropped into an iframe as-is
  * would show its literal `**` and `#`, so it is escaped and given minimal
  * block/inline formatting first.
+ *
+ * A naive "contains `<...>`" test false-positives on markdown notes that use
+ * angle brackets as plain text -- e.g. JanitorAI creator notes advertising
+ * plugin tokens like `<SYMBOLS=943F533B>` or a placeholder `<blank>` --
+ * which sent real markdown down the raw-HTML path unconverted. Requiring the
+ * bracketed name to be a real tag (from the same whitelist DOMPurify uses)
+ * avoids that: those tokens aren't HTML tags, so they fall through to
+ * markdownToHtml and render as literal, escaped text instead.
  */
 function looksLikeHtml(notes: string): boolean {
-  return /<\/?[a-z][\s\S]*>/i.test(notes)
+  return HTML_TAG_PATTERN.test(notes)
 }
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-/** Just enough markdown to read a note: paragraphs, headings, bold, italics, links. */
+/** Just enough markdown to read a note: paragraphs, headings, bold, italics,
+ *  links, images. Images must be matched before links -- `![alt](url)`
+ *  contains a valid `[alt](url)` link, and the link pattern would otherwise
+ *  eat it first and leave a stray `!` beside an anchor instead of a picture.
+ *  `html_to_md` (proxy/text/html_md.py) is what produces this syntax for every
+ *  source that flattens creator notes to markdown, so an image-bearing note
+ *  from any of them depends on this ordering to render at all. */
 function markdownToHtml(md: string): string {
   const inline = (line: string) =>
     escapeHtml(line)
+      .replace(
+        /!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g,
+        '<img src="$2" alt="$1" loading="lazy">',
+      )
       .replace(
         /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
         '<a href="$2" target="_blank" rel="noreferrer noopener">$1</a>',
@@ -255,7 +326,7 @@ export function CreatorNotes({ notes }: { notes: string }) {
 
   const html = looksLikeHtml(notes) ? notes : markdownToHtml(notes)
   const clean = DOMPurify.sanitize(html, PURIFY_CONFIG) as unknown as string
-  const srcDoc = buildDocument(clean)
+  const srcDoc = buildDocument(proxyImages(clean))
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -264,7 +335,7 @@ export function CreatorNotes({ notes }: { notes: string }) {
       const reported = (event.data as { __notesHeight?: unknown })
         ?.__notesHeight
       if (typeof reported === 'number' && Number.isFinite(reported)) {
-        setHeight(Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, reported)))
+        setHeight(Math.max(MIN_HEIGHT, reported))
       }
     }
     window.addEventListener('message', onMessage)
@@ -278,7 +349,7 @@ export function CreatorNotes({ notes }: { notes: string }) {
       sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
       srcDoc={srcDoc}
       className="block w-full rounded-xl border border-line-soft bg-surface"
-      style={{ height, maxHeight: MAX_HEIGHT }}
+      style={{ height, boxSizing: 'content-box' }}
     />
   )
 }

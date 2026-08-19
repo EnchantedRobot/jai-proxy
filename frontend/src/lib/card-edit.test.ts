@@ -5,7 +5,11 @@ import { setField, setGreetings, setLoreEntries, setTags } from './card-edit'
 
 describe('setField', () => {
   it('replaces one key and leaves the rest', () => {
-    const next = setField({ name: 'Abbie', description: 'old' }, 'description', 'new')
+    const next = setField(
+      { name: 'Abbie', description: 'old' },
+      'description',
+      'new',
+    )
     expect(next).toEqual({ name: 'Abbie', description: 'new' })
   })
 

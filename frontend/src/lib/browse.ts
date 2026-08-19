@@ -12,7 +12,7 @@ export type Card = components['schemas']['CardOut']
  */
 
 /** A chip that is on or off. The tag chips are separate — they have three states. */
-export type Flag = 'fav' | 'lore' | 'greets' | 'new' | 'untagged'
+export type Flag = 'fav' | 'lore' | 'greets' | 'new' | 'untagged' | 'media'
 
 /** Click a tag once to require it, again to exclude it, again to drop it. */
 export type TagMode = 'inc' | 'exc'
@@ -33,6 +33,7 @@ export const FLAG_LABELS: Record<Flag, string> = {
   greets: 'Multiple greetings',
   new: 'Added this week',
   untagged: 'Untagged',
+  media: 'Needs media',
 }
 
 /** The chips the strip always shows, in the mock's order. */
@@ -78,16 +79,46 @@ export function readState(params: URLSearchParams): BrowseState {
   }
 }
 
-export function writeState(state: BrowseState): URLSearchParams {
+/**
+ * The browse state as a query string.
+ *
+ * `defaultSort` is the sort the page would apply anyway when the URL is silent
+ * — `ui2.defaultSort` from Settings, or `name`. Only *that* value is omitted,
+ * which is what lets a user whose default is "Recently added" still pick
+ * "Name": it is no longer the default, so it is written down. Omitting a
+ * hardcoded `name` instead made that click a no-op, because the page read the
+ * empty URL and re-applied the stored default over it.
+ */
+export function writeState(
+  state: BrowseState,
+  defaultSort = 'name',
+): URLSearchParams {
   const params = new URLSearchParams()
   if (state.q) params.set('q', state.q)
   if (state.scope !== 'all') params.set('scope', state.scope)
-  if (state.sort !== 'name') params.set('sort', state.sort)
+  if (state.sort !== defaultSort) params.set('sort', state.sort)
   for (const flag of state.flags) params.append('flag', flag)
   for (const [tag, mode] of state.tags) {
     params.append(mode === 'inc' ? 'tag' : 'xtag', tag)
   }
   return params
+}
+
+/**
+ * The querystring a card tile carries onto its detail link, so prev/next can
+ * rebuild the exact set the grid was showing.
+ *
+ * Everything the browse URL may legitimately leave out has to be spelled out
+ * here, because the detail page reads this string alone — it has no settings
+ * context and no route context. Two things get lost otherwise: the sort, when
+ * it is the stored default, and the `fav` flag on `/favorites`, which the route
+ * pins rather than the URL. Both left the detail page rebuilding a different
+ * set, where the card is not found at all and prev/next silently dies.
+ */
+export function tileSearch(state: BrowseState): string {
+  const params = writeState(state)
+  params.set('sort', state.sort)
+  return `?${params}`
 }
 
 export function isFiltered(state: BrowseState): boolean {
@@ -125,6 +156,7 @@ export function toQuery(state: BrowseState) {
     ...(state.flags.has('lore') ? { has_lorebook: true } : {}),
     ...(state.flags.has('greets') ? { min_greetings: 2 } : {}),
     ...(state.flags.has('untagged') ? { untagged: true } : {}),
+    ...(state.flags.has('media') ? { needs_media: true } : {}),
     ...(state.flags.has('new') ? { added_after: weekAgo() } : {}),
   }
 }

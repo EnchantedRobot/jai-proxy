@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { ImageUp, MoreHorizontal, Star, Trash2 } from 'lucide-react'
+import { ImageUp, Star, Trash2 } from 'lucide-react'
 import type { CardDetail } from '@/hooks/use-character-detail'
 import {
   useDeleteCharacter,
@@ -9,12 +9,6 @@ import {
 } from '@/hooks/use-card-mutations'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,10 +20,15 @@ import {
 } from '@/components/ui/alert-dialog'
 
 /**
- * The portrait's own actions: favourite, replace image, and the More menu whose
- * only live item is Delete (Duplicate has no endpoint and Export is the Download
- * button above — docs/UI_REWRITE_PLAN.md §3.12). These sit outside the section
- * edit model: a star is a targeted write, and the avatar is a separate endpoint.
+ * The portrait's own actions: favourite, replace image, delete. These sit
+ * outside the section edit model — a star is a targeted write, and the avatar
+ * is a separate endpoint.
+ *
+ * The mock's "⋯ More · export, duplicate, delete" is gone (Stage 6B D5). Of its
+ * three promised items, Export *is* the Download button above and Duplicate has
+ * no endpoint, so the menu had been wrapping a single Delete in an extra click
+ * for two stages. Delete is now a plain button; the confirm dialog, which is
+ * what actually guards the action, is unchanged.
  */
 export function PortraitActions({
   card,
@@ -106,27 +105,16 @@ export function PortraitActions({
         onChange={onFile}
       />
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className="flex h-[34px] items-center justify-center gap-2 rounded-[10px] text-[12.5px] text-faint hover:bg-raised hover:text-text"
-          >
-            <MoreHorizontal className="size-4" /> More
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="center" className="min-w-[200px]">
-          <DropdownMenuItem
-            destructive
-            onSelect={() => {
-              setAlsoGallery(false)
-              setConfirmOpen(true)
-            }}
-          >
-            <Trash2 className="size-4" /> Delete card
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <button
+        type="button"
+        onClick={() => {
+          setAlsoGallery(false)
+          setConfirmOpen(true)
+        }}
+        className="flex h-[34px] items-center justify-center gap-2 rounded-[10px] text-[12.5px] text-faint hover:bg-raised hover:text-bad"
+      >
+        <Trash2 className="size-4" /> Delete card
+      </button>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>

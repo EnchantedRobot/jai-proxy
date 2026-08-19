@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router'
 import { ChipStrip } from '@/components/ChipStrip'
 import { CardGrid } from '@/components/CardGrid'
@@ -7,9 +7,11 @@ import { RecentShelf } from '@/components/RecentShelf'
 import { SortPopover } from '@/components/SortPopover'
 import { useGridColumns } from '@/hooks/use-grid-columns'
 import { useArchiveStats, useCharacters } from '@/hooks/use-characters'
+import { useSettings, useUpdateUi2 } from '@/hooks/use-settings'
 import {
   isFiltered,
   readState,
+  tileSearch,
   writeState,
   type BrowseState,
 } from '@/lib/browse'
@@ -24,19 +26,35 @@ import {
  */
 export function CharactersPage({ favorites = false }: { favorites?: boolean }) {
   const [params, setParams] = useSearchParams()
-  const [shelfHidden, setShelfHidden] = useState(false)
   const gridRef = useRef<HTMLDivElement>(null)
   const columns = useGridColumns(gridRef)
+  const settings = useSettings()
+  const updateUi2 = useUpdateUi2()
 
   const urlState = readState(params)
-  const state: BrowseState = favorites
-    ? { ...urlState, flags: new Set(urlState.flags).add('fav') }
-    : urlState
+  // Settings §3.7's "default sort" only applies when the URL is silent about
+  // it -- an explicit `?sort=` (a bookmark, the shelf's "See all") always
+  // wins, exactly like `?tab=` beats nothing on the detail page.
+  const defaultSort = settings.data?.ui2?.defaultSort ?? 'name'
+  const state: BrowseState = {
+    ...(favorites
+      ? { ...urlState, flags: new Set(urlState.flags).add('fav') }
+      : urlState),
+    sort: !params.has('sort') && defaultSort ? defaultSort : urlState.sort,
+  }
+  // The shelf's own Hide button and the Settings toggle write the same key, so
+  // either one turns it off for good rather than just this session (the gap
+  // Stage 1 left open). Undefined (nothing saved yet, or still loading) reads
+  // as shown -- the pre-Stage-6 default.
+  const shelfHidden = settings.data?.ui2?.showRecentShelf === false
 
   const setState = (next: BrowseState) => {
     // Replace rather than push: filtering is a running adjustment, and pushing
     // every chip click would make Back walk through each of them one at a time.
-    setParams(writeState(next), { replace: true })
+    // `defaultSort` goes in so that picking the sort the user has *stored* as
+    // their default clears `sort=` from the URL, while picking any other one --
+    // including plain "Name" -- writes it down and actually takes effect.
+    setParams(writeState(next, defaultSort), { replace: true })
   }
 
   const stats = useArchiveStats()
@@ -101,7 +119,12 @@ export function CharactersPage({ favorites = false }: { favorites?: boolean }) {
 
       <div className="mx-auto max-w-[1560px] px-5">
         {showShelf && (
-          <RecentShelf columns={columns} onHide={() => setShelfHidden(true)} />
+          <RecentShelf
+            columns={columns}
+            onHide={() =>
+              updateUi2.mutate({ key: 'showRecentShelf', value: false })
+            }
+          />
         )}
 
         {error && <p className="py-16 text-center text-bad">{error.message}</p>}
@@ -113,7 +136,7 @@ export function CharactersPage({ favorites = false }: { favorites?: boolean }) {
 
         <CardGrid ref={gridRef} className="pt-[22px] pb-[90px]">
           {cards.map((card) => (
-            <CardTile key={card.id} card={card} />
+            <CardTile key={card.id} card={card} search={tileSearch(state)} />
           ))}
         </CardGrid>
 

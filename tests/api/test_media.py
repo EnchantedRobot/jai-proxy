@@ -379,6 +379,44 @@ def test_prune_thumbs_unknown_folder_removes_nothing(client, populated_archive):
     assert resp.json()["removed"] == 0
 
 
+# --------------------------------------------------------------------------
+# POST /characters/{id}/media/scan -- salvage item 1 (UI_REWRITE_PLAN.md
+# §1.3, §3.4), the server-side discovery preview.
+# --------------------------------------------------------------------------
+
+
+def test_scan_finds_embedded_and_lorebook_urls_separately(client, archive_dirs):
+    from tests.conftest import card_png, jai_extensions
+
+    (archive_dirs["characters"] / "Scan_77778888.png").write_bytes(
+        card_png(
+            "Scan",
+            description="see https://cdn.example.com/desc.png",
+            character_book={"entries": [{"keys": ["a"], "content": "https://cdn.example.com/lore.png"}]},
+            extensions=jai_extensions("77778888-0000-0000-0000-000000000000", gallery_id="DDDDDDDDDDDD"),
+        )
+    )
+    client.post("/api/v1/refresh")
+
+    resp = client.post("/api/v1/characters/Scan_77778888.png/media/scan")
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "embedded": ["https://cdn.example.com/desc.png"],
+        "lorebook": ["https://cdn.example.com/lore.png"],
+    }
+
+
+def test_scan_finds_nothing_in_a_card_with_no_urls(client, populated_archive):
+    resp = client.post("/api/v1/characters/Cleo_33334444.png/media/scan")
+    assert resp.status_code == 200
+    assert resp.json() == {"embedded": [], "lorebook": []}
+
+
+def test_scan_unknown_card_is_404(client):
+    resp = client.post("/api/v1/characters/DoesNotExist_00000000.png/media/scan")
+    assert resp.status_code == 404
+
+
 # ------------------------------------------------------------------
 # POST /media/jobs -- 3C-2, the job runner (docs/PHASE_3C_PLAN.md §7)
 # ------------------------------------------------------------------
@@ -506,6 +544,32 @@ def test_cancel_stops_a_job_before_it_finishes_every_item(client, populated_arch
     assert body["done"] < 5
 
 
+def test_media_job_discover_scans_the_card_instead_of_taking_items(client, archive_dirs, stub_download_item):
+    from tests.conftest import card_png, jai_extensions
+
+    (archive_dirs["characters"] / "Scan_77778888.png").write_bytes(
+        card_png(
+            "Scan",
+            description="see https://cdn.example.com/desc.png",
+            character_book={"entries": [{"keys": ["a"], "content": "https://cdn.example.com/lore.png"}]},
+            extensions=jai_extensions("77778888-0000-0000-0000-000000000000", gallery_id="DDDDDDDDDDDD"),
+        )
+    )
+    client.post("/api/v1/refresh")
+
+    resp = client.post(
+        "/api/v1/media/jobs",
+        json={"card_id": "Scan_77778888.png", "discover": True, "items": [{"url": "https://ignored.example.com/x.png"}]},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 2
+
+    body = _poll_job(client, resp.json()["job_id"])
+    assert body["state"] == "done"
+    urls = {call["url"] for call in stub_download_item}
+    assert urls == {"https://cdn.example.com/desc.png", "https://cdn.example.com/lore.png"}
+
+
 def test_list_media_jobs_filters_by_card_and_active(client, populated_archive, stub_download_item):
     r1 = client.post(
         "/api/v1/media/jobs",
@@ -527,3 +591,291 @@ def test_list_media_jobs_filters_by_card_and_active(client, populated_archive, s
 
     resp = client.get("/api/v1/media/jobs", params={"active": True})
     assert resp.json() == []
+
+
+# ---------------------------------------------------------------------------
+# The "Needs media" filter on GET /characters (docs/UI_REWRITE_PLAN.md §3.3).
+# ---------------------------------------------------------------------------
+
+
+def _write_manifest(gallery_dir, *, dead: dict[str, str] | None = None, errors: int = 0) -> None:
+    """A manifest for a gallery that has had a media run."""
+    manifest = media_manifest.empty_manifest()
+    media_manifest.record_saved(manifest, "https://cdn.example.com/ok.png", "localized_media_0_ok.webp", "abc")
+    for url, reason in (dead or {}).items():
+        media_manifest.record_dead(manifest, url, reason)
+    media_manifest.append_run(manifest, {"at": media_manifest.now_iso(), "saved": 1, "skipped": 0, "errors": errors})
+    media_manifest.save_manifest(gallery_dir, manifest)
+
+
+def test_needs_media_finds_cards_whose_manifest_carries_dead_urls(client, populated_archive):
+    gallery_dir = populated_archive["galleries"] / "Abbie_kzbYR2QbpncC"
+    _write_manifest(gallery_dir, dead={"https://cdn.example.com/gone.png": "404"})
+
+    resp = client.get("/api/v1/characters", params={"needs_media": True, "limit": 0})
+
+    assert resp.status_code == 200
+    assert [c["id"] for c in resp.json()["items"]] == ["Abbie_0d162f5f.png"]
+
+
+def test_needs_media_finds_a_run_that_reported_errors(client, populated_archive):
+    gallery_dir = populated_archive["galleries"] / "Abbie_kzbYR2QbpncC"
+    _write_manifest(gallery_dir, errors=2)
+
+    resp = client.get("/api/v1/characters", params={"needs_media": True, "limit": 0})
+
+    assert [c["id"] for c in resp.json()["items"]] == ["Abbie_0d162f5f.png"]
+
+
+def test_a_clean_run_does_not_need_media(client, populated_archive):
+    gallery_dir = populated_archive["galleries"] / "Abbie_kzbYR2QbpncC"
+    _write_manifest(gallery_dir)
+
+    assert client.get("/api/v1/characters", params={"needs_media": True, "limit": 0}).json()["items"] == []
+    # And its complement returns everything, including the never-scanned cards.
+    resp = client.get("/api/v1/characters", params={"needs_media": False, "limit": 0})
+    assert len(resp.json()["items"]) == 3
+
+
+def test_a_card_never_scanned_is_not_claimed_to_need_media(client, populated_archive):
+    # No manifest written at all: whether Cleo has remote URLs is a question
+    # only /media/scan can answer, and the list path does not guess.
+    resp = client.get("/api/v1/characters", params={"needs_media": True, "limit": 0})
+
+    assert resp.json()["items"] == []
+
+
+def test_needs_media_composes_with_the_other_filters(client, populated_archive):
+    gallery_dir = populated_archive["galleries"] / "Abbie_kzbYR2QbpncC"
+    _write_manifest(gallery_dir, dead={"https://cdn.example.com/gone.png": "404"})
+
+    # Abbie needs media but is not tagged Male, so the AND is empty.
+    resp = client.get("/api/v1/characters", params={"needs_media": True, "tag": "Male", "limit": 0})
+    assert resp.json()["items"] == []
+
+    resp = client.get("/api/v1/characters", params={"needs_media": True, "tag": "Vampire", "limit": 0})
+    assert [c["id"] for c in resp.json()["items"]] == ["Abbie_0d162f5f.png"]
+
+
+def test_omitting_needs_media_pays_no_manifest_io(client, populated_archive, monkeypatch):
+    """The filter is opt-in: an ordinary list call must not read manifests."""
+    reads: list = []
+    real = media_manifest.load_manifest
+    monkeypatch.setattr(
+        "proxy.api.v1.characters.media_manifest.load_manifest",
+        lambda gallery_dir: (reads.append(gallery_dir), real(gallery_dir))[1],
+    )
+
+    client.get("/api/v1/characters", params={"limit": 0})
+
+    assert reads == []
+
+
+# ---------------------------------------------------------------------------
+# POST /media/jobs {scope: "all"} -- bulk localize (UI_REWRITE_PLAN.md Stage 6B)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def stub_discovery(monkeypatch):
+    """One media URL per card, so a batch has something to do. The fixture
+    cards carry no URLs of their own; discovery itself is covered by
+    tests/media/test_discovery.py."""
+
+    def fake(data):
+        return ([f"https://cdn.example.com/{data.get('name', 'x')}.png"], [])
+
+    monkeypatch.setattr(v1_media.media_discovery, "find_character_media_urls", fake)
+
+
+def _submit_batch(client, **body) -> str:
+    resp = client.post("/api/v1/media/jobs", json={"scope": "all", **body})
+    assert resp.status_code == 200, resp.text
+    return resp.json()["job_id"]
+
+
+def test_batch_scope_visits_every_card(client, populated_archive, stub_download_item, stub_discovery):
+    body = _poll_job(client, _submit_batch(client))
+
+    assert body["state"] == "done"
+    assert body["scope"] == "all"
+    # A batch counts cards, not URLs -- `unit` is how a client knows which.
+    assert body["unit"] == "cards"
+    assert body["cards_total"] == 3
+    assert body["cards_done"] == 3
+    assert body["cards_skipped"] == 0
+    assert body["current_card_id"] is None
+    assert {call["url"] for call in stub_download_item} == {
+        "https://cdn.example.com/Abbie.png",
+        "https://cdn.example.com/Bella.png",
+        "https://cdn.example.com/Cleo.png",
+    }
+
+
+def test_batch_skips_cards_whose_last_run_was_clean(client, populated_archive, stub_download_item, stub_discovery):
+    # Abbie's gallery has a manifest with a clean run, so skip_complete (the
+    # default) should pass over it entirely.
+    _write_manifest(populated_archive["galleries"] / "Abbie_kzbYR2QbpncC")
+
+    body = _poll_job(client, _submit_batch(client))
+
+    assert body["cards_skipped"] == 1
+    assert body["cards_done"] == 2
+    # The point of skipping: no work was done for that card at all.
+    assert all("Abbie" not in call["url"] for call in stub_download_item)
+
+
+def test_batch_skip_complete_false_visits_the_clean_card_anyway(client, populated_archive, stub_download_item, stub_discovery):
+    _write_manifest(populated_archive["galleries"] / "Abbie_kzbYR2QbpncC")
+
+    body = _poll_job(client, _submit_batch(client, skip_complete=False))
+
+    assert body["cards_skipped"] == 0
+    assert body["cards_done"] == 3
+    assert any("Abbie" in call["url"] for call in stub_download_item)
+
+
+def test_batch_creates_no_gallery_folder_for_a_card_with_no_media(client, populated_archive, stub_download_item, monkeypatch):
+    """Trap 1: `_shared.gallery_dir_for_card` mints a gallery_id, rewrites the
+    PNG and mkdirs. Calling it per card would leave an empty folder behind for
+    every card in the archive, so the planner must resolve it only *after*
+    discovery finds something."""
+    monkeypatch.setattr(v1_media.media_discovery, "find_character_media_urls", lambda data: ([], []))
+    galleries = populated_archive["galleries"]
+    before = {p.name for p in galleries.iterdir()}
+
+    body = _poll_job(client, _submit_batch(client))
+
+    assert body["cards_skipped"] == 3
+    assert body["cards_done"] == 0
+    assert {p.name for p in galleries.iterdir()} == before
+    assert stub_download_item == []
+
+
+def test_batch_saves_the_dead_ledger_once_per_batch_not_once_per_card(
+    client, populated_archive, stub_download_item, stub_discovery, monkeypatch
+):
+    """Trap 3: the dead ledger is one global file. Saving it per card would
+    mean thousands of atomic rewrites of the same few thousand entries."""
+    from proxy.media import jobs as media_jobs_module
+
+    saves = []
+    real_save = media_jobs_module.media_manifest.save_dead_ledger
+    monkeypatch.setattr(
+        media_jobs_module.media_manifest,
+        "save_dead_ledger",
+        lambda ledger: (saves.append(1), real_save(ledger))[1],
+    )
+
+    _poll_job(client, _submit_batch(client))
+
+    # Three cards, but the ledger is owned by the batch: one save at the end.
+    assert len(saves) == 1
+
+
+def test_batch_cancel_stops_on_a_card_boundary(client, populated_archive, stub_discovery, monkeypatch):
+    """Cancel is cooperative and checked between cards, so every card that did
+    run keeps its manifest."""
+    started: list[str] = []
+
+    async def fake(client_, gallery_dir, folder_name, *, url, filename_hint, prefix, index, index_state, manifest, ledger, thumbnail_store, fetch_gate=None):
+        started.append(url)
+        outcome = media_writer.DownloadOutcome("saved", url, file=f"localized_media_{index}_x.webp", bytes=1)
+        media_manifest.record_saved(manifest, url, outcome.file, "deadbeef")
+        return outcome
+
+    monkeypatch.setattr(v1_media.media_writer, "download_item", fake)
+
+    job_id = _submit_batch(client)
+    client.post(f"/api/v1/media/jobs/{job_id}/cancel")
+    body = _poll_job(client, job_id)
+
+    assert body["state"] in ("cancelled", "done")
+    if body["state"] == "cancelled":
+        assert body["cards_done"] + body["cards_skipped"] < body["cards_total"]
+
+
+def test_scope_card_without_card_id_is_422(client, populated_archive):
+    resp = client.post("/api/v1/media/jobs", json={"items": []})
+    assert resp.status_code == 422
+
+
+def test_single_card_job_still_counts_items_not_cards(client, populated_archive, stub_download_item):
+    """The single-card path is unchanged by the batch work: it still reports
+    `unit: items` and leaves the batch counters at zero."""
+    resp = client.post(
+        "/api/v1/media/jobs",
+        json={"card_id": "Bella_11112222.png", "items": [{"url": "https://cdn.example.com/a.png"}]},
+    )
+    body = _poll_job(client, resp.json()["job_id"])
+
+    assert body["scope"] == "card"
+    assert body["unit"] == "items"
+    assert body["total"] == 1
+    assert body["done"] == 1
+    assert body["cards_total"] == 0
+
+
+def test_discover_resolves_external_album_pages_into_the_job(client, populated_archive, stub_download_item, monkeypatch):
+    """Stage 6B C3: the extGallery phase. A card linking a catbox album should
+    download the album's files, not the album page."""
+    from proxy.media import extractors as media_extractors
+
+    monkeypatch.setattr(
+        v1_media.media_discovery,
+        "collect_card_text_chunks",
+        lambda data: (["gallery: https://catbox.moe/c/abc123"], []),
+    )
+    monkeypatch.setattr(
+        v1_media.media_discovery, "find_character_media_urls", lambda data: ([], [])
+    )
+    monkeypatch.setattr(
+        media_extractors,
+        "resolve_gallery_urls",
+        lambda client_, urls: [
+            media_extractors.GalleryImage("https://files.catbox.moe/a.png", "a.png"),
+            media_extractors.GalleryImage("https://files.catbox.moe/b.png", "b.png"),
+        ],
+    )
+
+    resp = client.post(
+        "/api/v1/media/jobs",
+        json={"card_id": "Bella_11112222.png", "discover": True},
+    )
+    body = _poll_job(client, resp.json()["job_id"])
+
+    assert body["state"] == "done"
+    assert {call["url"] for call in stub_download_item} == {
+        "https://files.catbox.moe/a.png",
+        "https://files.catbox.moe/b.png",
+    }
+
+
+def test_discover_resolves_a_chub_sourced_cards_own_gallery(client, populated_archive, stub_download_item, monkeypatch):
+    """Stage 6B: the `chub` extractor. Triggered by the card's own
+    `extensions.chub.id`, not a link in its text -- unlike extGallery, this
+    should still fire even when the card's own prose has no gallery URL."""
+    from proxy.media import extractors as media_extractors
+
+    monkeypatch.setattr(v1_media.media_discovery, "find_character_media_urls", lambda data: ([], []))
+    monkeypatch.setattr(v1_media.media_discovery, "collect_card_text_chunks", lambda data: ([], []))
+    monkeypatch.setattr(v1_media.chub_source, "card_id", lambda data: "9999")
+    seen_ids = []
+    monkeypatch.setattr(
+        media_extractors,
+        "resolve_chub_gallery",
+        lambda client_, project_id: (
+            seen_ids.append(project_id)
+            or [media_extractors.GalleryImage("https://cdn.chub.ai/a.webp", "a.webp")]
+        ),
+    )
+
+    resp = client.post(
+        "/api/v1/media/jobs",
+        json={"card_id": "Bella_11112222.png", "discover": True},
+    )
+    body = _poll_job(client, resp.json()["job_id"])
+
+    assert body["state"] == "done"
+    assert seen_ids == ["9999"]
+    assert {call["url"] for call in stub_download_item} == {"https://cdn.chub.ai/a.webp"}

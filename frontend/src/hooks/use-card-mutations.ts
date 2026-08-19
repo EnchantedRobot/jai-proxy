@@ -26,7 +26,7 @@ export class StaleWriteError extends Error {
  * `['stats']`, and the detail's Related rows on `['related', …]`. A card edit
  * can move any of them, so all four are refetched after one lands.
  */
-function invalidateArchive(client: ReturnType<typeof useQueryClient>) {
+export function invalidateArchive(client: ReturnType<typeof useQueryClient>) {
   for (const key of [['characters'], ['facets'], ['stats'], ['related']])
     void client.invalidateQueries({ queryKey: key })
 }

@@ -8,7 +8,7 @@ import {
 import { useCharacters } from '@/hooks/use-characters'
 import { readState } from '@/lib/browse'
 import { sourceLabel, formatDate, formatBytes } from '@/lib/card'
-import { cn } from '@/lib/utils'
+import { cn, isTypingTarget } from '@/lib/utils'
 import {
   GalleryPane,
   InfoPane,
@@ -99,6 +99,14 @@ export function CharacterDetailPage() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // J/K are bare letters, so they collide with typing. Stage 3 put
+      // textareas and tag inputs on this page, and without this guard a
+      // description containing "j" navigated to the next card mid-edit and
+      // took the unsaved draft with it.
+      if (isTypingTarget(event.target)) return
+      // A shortcut, not a modified chord: ⌘K opens search, and Alt/Ctrl+K are
+      // the terminal-style bindings a browser or OS may already own.
+      if (event.metaKey || event.ctrlKey || event.altKey) return
       if (event.key === 'j') go(1)
       else if (event.key === 'k') go(-1)
     }
@@ -112,9 +120,11 @@ export function CharacterDetailPage() {
     return <p className="py-24 text-center text-bad">{detail.error.message}</p>
 
   const { card, etag } = detail.data
-  const thumb = avatarBust
-    ? `${card.thumb_url}?v=${avatarBust}`
-    : card.thumb_url
+  // The portrait column renders at up to 280 CSS px wide (2:3, so 420 tall);
+  // the inherited avatar cache is a fixed 96x144 sized for the grid tile, and
+  // stretching that into this much bigger box is what made the portrait look
+  // blurry. Ask for a size that stays sharp at typical device pixel ratios.
+  const thumb = `${card.thumb_url}?size=840${avatarBust ? `&v=${avatarBust}` : ''}`
   const backSearch = new URLSearchParams(params)
   backSearch.delete('tab')
 
@@ -196,7 +206,7 @@ export function CharacterDetailPage() {
 
               <HeaderTags card={card} />
 
-              <nav className="mt-6 flex gap-5 overflow-x-auto border-b border-line">
+              <nav className="mt-6 flex gap-5 overflow-x-auto overflow-y-hidden border-b border-line">
                 {PANES.map((pane) => (
                   <button
                     key={pane}

@@ -3,6 +3,7 @@ import {
   isFiltered,
   readState,
   sortLabel,
+  tileSearch,
   toQuery,
   weekAgo,
   writeState,
@@ -42,6 +43,21 @@ describe('the browse state in the URL', () => {
     expect(writeState(state()).toString()).toBe('')
   })
 
+  it('writes a sort down whenever it is not the stored default', () => {
+    // The bug this pins: with "Recently added" saved as the default sort,
+    // picking "Name" wrote nothing to the URL, so the page read an empty URL
+    // and re-applied the default over the top -- the click did nothing at all.
+    expect(writeState(state({ sort: 'name' }), '-added').get('sort')).toBe(
+      'name',
+    )
+    expect(writeState(state({ sort: '-added' }), '-added').get('sort')).toBe(
+      null,
+    )
+    expect(writeState(state({ sort: '-lore' }), '-added').get('sort')).toBe(
+      '-lore',
+    )
+  })
+
   it('ignores a flag or scope it does not recognise', () => {
     // The query string is user-editable and survives across deploys, so a stale
     // or hand-typed value has to degrade to the default rather than filter on
@@ -50,6 +66,40 @@ describe('the browse state in the URL', () => {
 
     expect(parsed.flags.size).toBe(0)
     expect(parsed.scope).toBe('all')
+  })
+})
+
+describe('the querystring a tile carries to the detail page', () => {
+  // The detail page rebuilds the browse set from this string alone, to walk
+  // prev/next through it. Anything the browse URL is allowed to omit has to be
+  // spelled out here, or the page rebuilds a *different* set, fails to find the
+  // card in it, and silently shows no pager and dead J/K keys.
+  it('always names the sort, even when the URL may omit it', () => {
+    const params = new URLSearchParams(tileSearch(state({ sort: 'name' })))
+
+    expect(params.get('sort')).toBe('name')
+  })
+
+  it("carries the route's pinned favourites flag", () => {
+    // /favorites pins the filter on the route, not in the URL.
+    const params = new URLSearchParams(
+      tileSearch(state({ flags: new Set(['fav']), sort: '-added' })),
+    )
+
+    expect(params.getAll('flag')).toEqual(['fav'])
+    expect(params.get('sort')).toBe('-added')
+  })
+
+  it('round-trips back into the same state the grid was showing', () => {
+    const grid = state({
+      q: 'elf',
+      scope: 'name',
+      sort: '-lore',
+      flags: new Set(['lore']),
+      tags: new Map([['Female', 'inc']] as const),
+    })
+
+    expect(readState(new URLSearchParams(tileSearch(grid)))).toEqual(grid)
   })
 })
 
@@ -71,7 +121,7 @@ describe('the API query it builds', () => {
 
   it('maps each chip to the parameter that answers it', () => {
     const query = toQuery(
-      state({ flags: new Set(['fav', 'lore', 'greets', 'untagged']) }),
+      state({ flags: new Set(['fav', 'lore', 'greets', 'untagged', 'media']) }),
     )
 
     expect(query).toMatchObject({
@@ -79,6 +129,7 @@ describe('the API query it builds', () => {
       has_lorebook: true,
       min_greetings: 2,
       untagged: true,
+      needs_media: true,
     })
   })
 

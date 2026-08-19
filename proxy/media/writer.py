@@ -59,7 +59,7 @@ from PIL import Image, ImageSequence
 from proxy.cards import edit
 from proxy.archive import thumbs
 from proxy.config import settings
-from proxy.media import guard as media_guard, manifest as media_manifest, names as media_names
+from proxy.media import guard as media_guard, manifest as media_manifest, mega as media_mega, names as media_names
 
 logger = logging.getLogger("jai_proxy.media.writer")
 
@@ -642,12 +642,18 @@ async def download_item(
     if dead_here:
         return DownloadOutcome("skipped", url, reason=dead_here.get("reason", "known dead"))
 
-    # 1. Guard, before anything touches the network.
-    safety = media_guard.is_url_safe_for_download(url)
-    if not safety.ok:
-        media_manifest.record_failure(ledger, url, permanent=True, status=None, message=safety.reason)
-        media_manifest.record_dead(manifest, url, safety.reason)
-        return DownloadOutcome("skipped", url, reason=safety.reason, permanent=True)
+    is_mega = media_mega.is_mega_url(url)
+
+    # 1. Guard, before anything touches the network. A `mega://` reference
+    # isn't a fetchable address -- it's a token this server resolves to a
+    # real MEGA storage URL just before fetching, and the guard runs against
+    # *that* URL inside `media_mega.fetch_and_decrypt` instead.
+    if not is_mega:
+        safety = media_guard.is_url_safe_for_download(url)
+        if not safety.ok:
+            media_manifest.record_failure(ledger, url, permanent=True, status=None, message=safety.reason)
+            media_manifest.record_dead(manifest, url, safety.reason)
+            return DownloadOutcome("skipped", url, reason=safety.reason, permanent=True)
 
     # Cross-character dead ledger -- a URL confirmed gone on another card.
     if media_manifest.is_dead(ledger, url):
@@ -677,16 +683,20 @@ async def download_item(
     # to the network, so only this half is gated when a batch runs items
     # concurrently. A skip must never queue behind someone else's slow fetch.
     async with _gate(fetch_gate):
-        # `getaddrinfo` is a blocking call -- on the event loop it would stall
-        # every other item in the batch, so it goes to a thread.
-        dns_reason = await asyncio.to_thread(_preflight_dns, url)
-        if dns_reason:
-            media_manifest.record_failure(ledger, url, permanent=True, status=None, message=dns_reason)
-            media_manifest.record_dead(manifest, url, dns_reason)
-            return DownloadOutcome("skipped", url, reason=dns_reason, permanent=True)
+        if not is_mega:
+            # `getaddrinfo` is a blocking call -- on the event loop it would
+            # stall every other item in the batch, so it goes to a thread.
+            dns_reason = await asyncio.to_thread(_preflight_dns, url)
+            if dns_reason:
+                media_manifest.record_failure(ledger, url, permanent=True, status=None, message=dns_reason)
+                media_manifest.record_dead(manifest, url, dns_reason)
+                return DownloadOutcome("skipped", url, reason=dns_reason, permanent=True)
 
         # 4. Fetch.
-        body, content_type, error = await _fetch(client, url)
+        if is_mega:
+            body, content_type, error = await media_mega.fetch_and_decrypt(client, url)
+        else:
+            body, content_type, error = await _fetch(client, url)
 
     if body is None:
         status = int(error.split(" ", 1)[1]) if error and error.startswith("HTTP ") else None
@@ -750,6 +760,12 @@ async def download_batch(
     file index each item is named from still comes from its *input* position,
     so filenames are unaffected by how the run interleaves.
 
+    An item may carry its own `"prefix"`, overriding this call's `prefix` for
+    that one item -- `_discovered_items` (proxy/api/v1/media.py) uses this so
+    a `discover=true` job can mix embedded, lorebook, and gallery-extractor
+    items (each its own dedupe-priority class, see media_names.PREFIX_PRIORITY)
+    in one batch without misclassifying any of them.
+
     Concurrency is safe here without a lock precisely because only the fetch
     awaits: `finish_item` -- hash dedupe, write, thumbnail, manifest record --
     is synchronous from start to finish, so it cannot interleave with another
@@ -792,7 +808,7 @@ async def download_batch(
                 folder_name,
                 url=url,
                 filename_hint=item.get("filename"),
-                prefix=prefix,
+                prefix=item.get("prefix") or prefix,
                 index=start_index + position,
                 index_state=index_state,
                 manifest=manifest,

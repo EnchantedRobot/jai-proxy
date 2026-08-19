@@ -17,6 +17,8 @@ dependencies = [
     "pillow>=11.0",
     "pydantic-settings>=2.6",
     "rich>=15.0.0",
+    # MEGA gallery decrypt (AES ECB/CBC/CTR) -- stdlib has no raw AES.
+    "pycryptodome>=3.21",
 ]
 
 [project.scripts]

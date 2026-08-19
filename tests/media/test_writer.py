@@ -1147,3 +1147,82 @@ def test_gallery_index_ignores_leftover_audio_and_video(gallery_dir):
     index_state = media_writer.GalleryIndex.build(gallery_dir)
 
     assert index_state._names == ["localized_media_3_art.webp"]
+
+
+# ---- mega dispatch -----------------------------------------------------------
+#
+# A `mega://` reference isn't a fetchable URL -- these prove `download_item`
+# routes it around the ordinary guard/DNS-preflight/fetch and through
+# `media_mega.fetch_and_decrypt` instead, ending up through the exact same
+# sniff/normalize/dedupe/write/thumbnail steps as everything else.
+
+
+@pytest.mark.asyncio
+async def test_download_item_mega_url_fetches_and_decrypts(gallery_dir, thumbnail_store):
+    from Crypto.Cipher import AES
+    from Crypto.Util import Counter
+
+    from proxy.media import mega as media_mega
+
+    png = _png_bytes()
+    file_key = os.urandom(16)
+    nonce = os.urandom(8)
+    encrypted = AES.new(file_key, AES.MODE_CTR, counter=Counter.new(64, prefix=nonce, initial_value=0)).encrypt(png)
+    pseudo_url = media_mega._build_pseudo_url("folderXYZ", "handle1", file_key, nonce, len(png))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "g.api.mega.co.nz" in str(request.url):
+            return httpx.Response(200, json=[{"g": "https://gfs1.userstorage.mega.co.nz/dl/handle1"}])
+        if request.url.host == "gfs1.userstorage.mega.co.nz":
+            return httpx.Response(200, content=encrypted)
+        return httpx.Response(404)
+
+    manifest = media_manifest.empty_manifest()
+    ledger: dict = {}
+    index_state = media_writer.GalleryIndex.build(gallery_dir)
+
+    async with _client_for(handler) as client:
+        outcome = await media_writer.download_item(
+            client,
+            gallery_dir,
+            "gallery",
+            url=pseudo_url,
+            filename_hint="photo.png",
+            prefix="localized_media",
+            index=1,
+            index_state=index_state,
+            manifest=manifest,
+            ledger=ledger,
+            thumbnail_store=thumbnail_store,
+        )
+
+    assert outcome.status == "saved"
+    written = gallery_dir / outcome.file
+    assert written.is_file()
+    assert written.read_bytes()[:4] == b"RIFF"  # normalized to webp, like any other image
+    assert pseudo_url in manifest["files"]
+
+
+@pytest.mark.asyncio
+async def test_download_item_mega_api_error_is_a_skip_not_a_crash(gallery_dir, thumbnail_store):
+    from proxy.media import mega as media_mega
+
+    pseudo_url = media_mega._build_pseudo_url("folderXYZ", "handle1", os.urandom(16), os.urandom(8), 10)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[-9])
+
+    manifest = media_manifest.empty_manifest()
+    ledger: dict = {}
+    index_state = media_writer.GalleryIndex.build(gallery_dir)
+
+    async with _client_for(handler) as client:
+        outcome = await media_writer.download_item(
+            client, gallery_dir, "gallery",
+            url=pseudo_url, filename_hint="photo.png",
+            prefix="localized_media", index=1, index_state=index_state,
+            manifest=manifest, ledger=ledger, thumbnail_store=thumbnail_store,
+        )
+
+    assert outcome.status == "error"
+    assert list(gallery_dir.iterdir()) == []

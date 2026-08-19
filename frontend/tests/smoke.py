@@ -16,6 +16,8 @@ any assertion below.
 import json
 import re
 import sys
+import urllib.parse
+import urllib.request
 
 from playwright.sync_api import sync_playwright
 
@@ -76,6 +78,40 @@ def tiles(page) -> int:
     return page.eval_on_selector_all("a[href*='/characters/']", "els => els.length")
 
 
+def api(path: str):
+    with urllib.request.urlopen(f"{BASE}{path}", timeout=15) as resp:
+        return json.load(resp)
+
+
+def find_card_with_notes_image(checked_limit: int = 400) -> str | None:
+    """A real card whose creator notes carry an image -- markdown `![alt](url)`
+    (what most sources flatten to, proxy/text/html_md.py) or a literal `<img`
+    (Chub's laid-out HTML). Found live rather than hardcoded, so the check
+    keeps working as the archive changes. Bounded: this used to be exactly the
+    kind of note that silently rendered as text-only (a stray `!` beside a
+    mangled link), so it is worth a real assertion, not just an iframe-mounted
+    check."""
+    offset = 0
+    checked = 0
+    while checked < checked_limit:
+        page = api(f"/api/v1/characters?limit=100&offset={offset}")
+        items = page["items"]
+        if not items:
+            return None
+        for item in items:
+            if not item.get("has_creator_notes"):
+                continue
+            checked += 1
+            detail = api(f"/api/v1/characters/{urllib.parse.quote(item['id'])}")
+            notes = detail.get("card", {}).get("creator_notes") or ""
+            if "![" in notes or "<img" in notes:
+                return item["id"]
+            if checked >= checked_limit:
+                return None
+        offset += 100
+    return None
+
+
 def drive(page, result: dict) -> None:
     page.goto(APP, wait_until="networkidle", timeout=60_000)
     page.wait_for_selector("a[href*='/characters/']", timeout=60_000)
@@ -120,13 +156,35 @@ def drive(page, result: dict) -> None:
     result["sorted_url"] = page.url
 
     # --- the tag catalogue behind + Filter ---
+    # The whole vocabulary, not a top-N slice: the popover has its own search
+    # box, so a capped list makes a rare tag look nonexistent rather than merely
+    # unlisted. Compared against /facets so a re-introduced cap fails here.
     page.click("button:text-is('＋ Filter')")
     page.wait_for_timeout(900)
     result["tag_options"] = page.eval_on_selector_all(
         "[role=dialog] button, [data-radix-popper-content-wrapper] button",
         "els => els.length")
+    every_tag = len(api("/api/v1/facets?limit=0")["tags"])
+    result["tag_catalogue_complete"] = result["tag_options"] >= every_tag
+    if not result["tag_catalogue_complete"]:
+        raise AssertionError(
+            f"+ Filter lists {result['tag_options']} entries for {every_tag} tags -- truncated")
+
+    # The "Needs media" filter (§3.3): a real manifest-backed count, matched
+    # against the same question asked of the API directly.
+    page.click("text=Needs media")
+    page.wait_for_timeout(1500)
     page.keyboard.press("Escape")
-    page.wait_for_timeout(300)
+    page.wait_for_timeout(500)
+    needs_media = api("/api/v1/characters?needs_media=true&limit=0")["total"]
+    result["needs_media_cards"] = needs_media
+    shown = re.search(r"([\d,]+) shown", page.inner_text("body"))
+    result["needs_media_chip_agrees"] = bool(shown) and shown.group(1).replace(",", "") == str(needs_media)
+    if not result["needs_media_chip_agrees"]:
+        raise AssertionError(
+            f"Needs media chip shows {shown.group(1) if shown else '?'}, API says {needs_media}")
+    page.click("button:text-is('All')")
+    page.wait_for_timeout(800)
 
     # --- search overlay ---
     page.keyboard.press("Meta+k")
@@ -178,6 +236,24 @@ def drive(page, result: dict) -> None:
     result["notes_iframe"] = page.eval_on_selector_all(
         "iframe[title='Creator notes']", "els => els.length")
 
+    # A real image actually decodes inside the notes iframe -- not just that
+    # the frame mounted. Markdown-flattened notes (`![alt](url)`, the common
+    # case) once rendered as a stray "!" beside a mangled link instead of a
+    # picture; this is the regression check for that.
+    notes_card = find_card_with_notes_image()
+    if notes_card:
+        page.goto(f"{BASE}/next/characters/{notes_card}?tab=notes",
+                   wait_until="networkidle", timeout=30_000)
+        page.wait_for_selector("iframe[title='Creator notes']", timeout=15_000)
+        page.wait_for_timeout(1200)
+        frame = page.query_selector("iframe[title='Creator notes']").content_frame()
+        loaded = frame.eval_on_selector_all(
+            "img", "els => els.filter(e => e.complete && e.naturalWidth > 0).length")
+        total = frame.eval_on_selector_all("img", "els => els.length")
+        result["notes_image_card"] = notes_card
+        result["notes_images_found"] = total
+        result["notes_images_loaded"] = loaded
+
     # prev/next: J steps to the next card in the browse set.
     page.query_selector("nav button:has-text('Overview')").click()
     page.wait_for_timeout(300)
@@ -205,6 +281,24 @@ def drive(page, result: dict) -> None:
         edit.click()
         page.wait_for_selector("textarea", timeout=10_000)
         result["editor_opens"] = True
+
+        # J/K page between cards, and they are bare letters, so they collide
+        # with typing. Typing a word carrying one into an open editor used to
+        # navigate away and take the unsaved draft with it -- still no write
+        # here, the draft is abandoned by Cancel below.
+        editing_url = page.url
+        page.focus("textarea")
+        grew_from = len(page.input_value("textarea"))
+        page.keyboard.type("jack and kate")
+        page.wait_for_timeout(800)
+        result["editor_survives_jk"] = (
+            page.url == editing_url
+            and page.query_selector("textarea") is not None
+            and len(page.input_value("textarea")) == grew_from + 13)
+        if not result["editor_survives_jk"]:
+            raise AssertionError(
+                f"typing in the editor navigated: {editing_url} -> {page.url}")
+
         page.click("button:has-text('Cancel')")
         page.wait_for_timeout(400)
         result["editor_closes"] = page.query_selector("textarea") is None
@@ -270,6 +364,69 @@ def drive(page, result: dict) -> None:
         result["tags_apply_dialog"] = True
         page.click("button:text-is('Cancel')")
         page.wait_for_timeout(400)
+
+    # --- Discover: provider browse (Stage 5) ---
+    # Non-mutating on purpose -- "Get" is a real write plus a real provider
+    # fetch, and both /build-chub and /build-datacat already have pytest
+    # coverage (tests/api/test_acquisition.py). This gate proves the page's
+    # own mechanics: it reaches a real provider, the have-guard round-trips
+    # through our own /api/v1/characters/have, and the tile grid renders.
+    page.goto(APP, wait_until="networkidle", timeout=60_000)
+    page.wait_for_selector("a[href*='/characters/']", timeout=60_000)
+    page.click("a:text-is('Discover')")
+    page.wait_for_selector("text=add straight to the archive", timeout=15_000)
+    page.wait_for_timeout(1500)
+    result["discover_chub_results"] = page.eval_on_selector_all(
+        "img", "els => els.length")
+
+    page.fill("input[placeholder='Search Chub…']", "elf")
+    page.wait_for_timeout(2500)
+    result["discover_chub_search_count"] = page.inner_text("text=/results/")
+
+    page.click("button:text-is('DataCat')")
+    page.wait_for_timeout(2500)
+    result["discover_datacat_loaded"] = page.eval_on_selector_all(
+        "img", "els => els.length") >= 0  # reached without throwing
+
+    page.click("button:text-is('Hide cards I have')")
+    page.wait_for_timeout(1000)
+    result["discover_hide_have_toggled"] = "border-sage-line" in (
+        page.get_attribute("button:text-is('Hide cards I have')", "class") or "")
+
+    # --- Settings (Stage 6) ---
+    # Deliberately careful about what actually gets clicked: Library's Default
+    # sort and Providers' proxy Save both write to the one settings blob that
+    # also holds the old UI's Chub/DataCat tokens (§3.7), and this gate may run
+    # against a real archive -- so this only ever reads them, plus the two
+    # writes that are genuinely safe to fire for real: a userscript Generate
+    # (writes nothing, just compiles text) and a Maintenance Rescan (re-reads
+    # the archive off disk, changes no card).
+    page.goto(f"{APP}settings/library", wait_until="networkidle", timeout=30_000)
+    page.wait_for_selector("h2", timeout=15_000)
+    page.wait_for_timeout(500)
+    result["settings_sections"] = page.eval_on_selector_all(
+        "nav a", "els => els.map(e => e.textContent.trim())")[-5:]
+
+    page.click("nav a:has-text('Providers')")
+    page.wait_for_timeout(500)
+    page.click("button:has-text('Test')")
+    page.wait_for_selector("text=/not configured|active|failed|IP did not change/",
+                            timeout=10_000)
+    result["settings_proxy_test_ran"] = True
+
+    page.click("nav a:has-text('Userscripts')")
+    page.wait_for_timeout(800)
+    gen = page.query_selector("button:has-text('Generate')")
+    if gen:
+        gen.click()
+        page.wait_for_selector("pre", timeout=15_000)
+        result["settings_userscript_generated"] = len(page.inner_text("pre")) > 0
+
+    page.click("nav a:has-text('Maintenance')")
+    page.wait_for_timeout(500)
+    page.click("button:has-text('Rescan')")
+    page.wait_for_selector("text=/Rescanned:/", timeout=10_000)
+    result["settings_rescan_ran"] = True
 
 
 if __name__ == "__main__":

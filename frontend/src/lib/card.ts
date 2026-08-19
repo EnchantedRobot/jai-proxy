@@ -121,3 +121,17 @@ export function formatDate(iso: string | undefined | null): string {
 export function formatCount(n: number): string {
   return n.toLocaleString()
 }
+
+/**
+ * Rough prompt-token estimate from a character count, at the standard
+ * `1 token ≈ 4 characters` rule of thumb used by SillyTavern and most LLM
+ * tooling. This is intentionally not a real tokenizer -- just enough to give
+ * a "how big is this" sense at display time.
+ */
+export function estimateTokens(chars: number): number {
+  return Math.round(chars / 4)
+}
+
+export function formatTokens(chars: number): string {
+  return `${formatCount(estimateTokens(chars))} tokens`
+}

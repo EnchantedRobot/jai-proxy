@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Outlet } from 'react-router'
+import { useProviderSettings } from '@/hooks/use-settings'
+import { setSavedDatacatToken } from '@/lib/providers/datacat'
+import { BackToTop } from './BackToTop'
 import { SearchOverlay } from './SearchOverlay'
 import { TopBar } from './TopBar'
 import { Toaster } from './ui/Toaster'
@@ -14,6 +17,16 @@ import { Toaster } from './ui/Toaster'
  */
 export function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const { datacatToken } = useProviderSettings()
+
+  // Publish the saved DataCat token to the provider module before anything
+  // dials DataCat. The server holds its session in memory only, so without
+  // this a restart quietly replaces the saved identity with a new anonymous
+  // one (Stage 6B B3).
+  useEffect(() => {
+    setSavedDatacatToken(datacatToken)
+  }, [datacatToken])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -29,9 +42,18 @@ export function AppShell() {
   return (
     <>
       <TopBar onSearch={() => setSearchOpen(true)} />
-      <div className="absolute inset-0 top-[60px] overflow-x-hidden overflow-y-auto">
+      {/* `scrollbar-gutter: stable` reserves the scrollbar's width whether or
+          not it is showing. Without it, a route whose content crosses the
+          viewport height gains a scrollbar and everything centred in the layout
+          jumps sideways -- most visibly the detail page's portrait (Stage 6B
+          D1). */}
+      <div
+        ref={scrollRef}
+        className="absolute inset-0 top-[60px] overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]"
+      >
         <Outlet />
       </div>
+      <BackToTop scrollRef={scrollRef} />
       <SearchOverlay open={searchOpen} onOpenChange={setSearchOpen} />
       <Toaster />
     </>

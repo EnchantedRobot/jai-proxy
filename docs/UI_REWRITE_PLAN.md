@@ -1,6 +1,8 @@
 # UI rewrite — replacing `web/` with a React archive client
 
-**Status:** in progress — Stages 0–3 done, Stage 4 next. Authority for the work; supersedes the Phase 3D
+**Status:** in progress — Stages 0–6 done and verified end to end against the
+real archive (see the pre-cut-over pass in §5), Stage 7 (cut-over) next.
+Authority for the work; supersedes the Phase 3D
 (`library-sections` → modules) and Phase 6 (UI simplification) plans, both of
 which were incremental improvements to a frontend this plan deletes.
 
@@ -288,6 +290,10 @@ over description prose — see §3.9.
 card with a manifest. The client fetches it once, caches it, and intersects
 ids. A dedicated filter parameter would put manifest I/O inside the hot list
 path for a chip that is used occasionally.
+
+**RESOLVED at the pre-cut-over pass (2026-08-18): built as `needs_media=true`.**
+The first of the two options below, with the manifest read hoisted out of the
+per-record predicate. See the verification-pass entry in §5.
 
 **Stage 1 note:** an id intersection does not compose with server-side paging.
 The grid asks for cards 100–199 of the *filtered* set; a client that then
@@ -716,14 +722,306 @@ Verified: 145 vitest + 964 pytest green, tsc / oxlint / prettier / build clean,
 schema stable, live smoke passes with zero console errors and zero failed
 requests. Next is Stage 5 — Discover + media (salvage items 1, 5, 6).
 
-**Stage 5 — Discover + media.**
-Provider browse at mock fidelity, `have` guard, add-to-archive. Media discovery
-ported to Python (§3.4), the scan/job UI, gallery download. Salvage items 1, 5,
-6.
+**Stage 5 — Discover + media. DONE (2026-08-18).**
+Provider browse at mock fidelity, the `have` guard, add-to-archive, and the
+media scan/job UI — salvage items 1, 5, 6.
 
-**Stage 6 — Settings.**
-Settings route with its sections, userscript generator, proxy test, stats.
-This is the last stage before cut-over; Activity is dropped (§3.6).
+Server (§3.4, §3.8 — three additions, all small):
+- `proxy/media/discovery.py` — salvage item 1, `extractMediaUrls` /
+  `collectCardTextChunks` / `findCharacterMediaUrls` ported to Python
+  verbatim (regexes, order, and the "truncated twin" dedupe step included).
+  `tests/media/test_discovery.py` ports `web/tests/media-urls.test.js` case
+  for case as the acceptance suite the plan named.
+- `POST /characters/{id}/media/scan` — the dry-run preview, split into
+  `embedded`/`lorebook`. `POST /media/jobs` gained `discover: bool`: true
+  scans server-side and downloads everything found (both surfaces, one
+  manifest run) instead of taking an explicit `items` list.
+- `POST /characters/have` — the `/api/v1` peer of the userscript's own
+  `/existing`, one call to the same `deps.png_writer.existing` fragment
+  match. Backs Discover's "hide cards I have" and its duplicate guard.
+
+17 new pytest (scan, discover-job, have-guard, plus the 11-case discovery
+unit suite); 981 total, all green. `/build-chub` and `/build-datacat`
+(§3.8) needed no changes — they already take raw provider JSON from the
+browser and were already tested (`tests/api/test_acquisition.py`).
+
+Client (`frontend/src/`):
+- `lib/providers/{shared,chub,datacat}.ts` — salvage item 5, the request
+  shapes as knowledge rather than moved code. Chub's `/search` (page-based)
+  and DataCat's `recent-public` (offset-based, through the existing
+  `dc-init`/`dc-proxy` session) at Discover's fidelity, not `web/`'s full
+  provider stack — JanitorAI Supabase auth, MeiliSearch, Hampter page-2+,
+  and DataCat script hydration are all left out as out of scope for "search
+  and add a card." `shared.ts` carries salvage item 6 (the two tag-filter
+  traps) as comments, since Discover does no server-side tag filtering to
+  carry them in code.
+- `hooks/use-discover.ts` — `useDiscoverSearch` (one query shape over both
+  providers' different pagination), `useHaveGuard` (`POST
+  /characters/have` over the currently-loaded page), `useAddChubToArchive`
+  / `useAddDatacatToArchive` (re-fetch the full record, then `POST
+  /build-chub` / `/build-datacat`).
+- `pages/DiscoverPage.tsx` + `components/DiscoverTile.tsx` — provider
+  toggle, hide-have toggle, search box, sort (Chub only), infinite scroll,
+  a Have badge and hover Get button per tile. Following (the settings-backed
+  creator list) is left for Settings, per §3.8.
+- `hooks/use-media-discovery.ts` + `components/detail/MediaDiscovery.tsx` —
+  the scan/job UI: Find media → shows a count → Download → polls `GET
+  /media/jobs/{id}` (`refetchInterval`, not a hand-rolled timer) → toasts a
+  summary and invalidates the detail + gallery caches. Lives at the top of
+  `GalleryPane`, shown whether or not a gallery folder exists yet (the
+  common real case).
+
+Verified live against the real 3,868-card archive: Chub search (real
+network, real results, real "N already in the archive" count from a live
+`/characters/have` round trip), DataCat load, both toggles — zero console
+errors, zero failed requests, screenshot matched the mock. A real card's
+scan (`3M1LY_b8e0b075.png`) found the one embedded URL a server-side script
+independently confirmed. "Get" and "Download" were deliberately not
+exercised live (a real write plus a real provider fetch); both write paths
+have deterministic pytest coverage instead, the same split Stage 4 used for
+Tags.
+
+One build fix worth recording: DataCat's session is server-held and starts
+empty, so the very first `dc-proxy` call of a page load would always 401
+before a reactive retry-after-401 could recover it — noisy in the console
+even though harmless. `dcFetch` now warms the session with one `dc-init`
+before the first call, and still falls back to bootstrap-and-retry for a
+later 401 (an expired held token).
+
+145 vitest + 981 pytest green, tsc / oxlint / production build clean, schema
+regenerated and committed. Next is Stage 6 — Settings, the last stage before
+cut-over.
+
+**Stage 6 — Settings. DONE (2026-08-18).**
+Settings route with its sections, userscript generator, proxy test, stats — no
+server changes at all: every section reads/writes routes that already existed
+(`/settings`, `/stats`, `/proxy/status`, `/userscripts`, `/refresh`).
+
+Five sections shipped, not the mock's seven: **Library** (default sort,
+"Recently added" shelf visibility — both now real settings, not session
+state), **Archive & storage** (live `/stats`: cards, bytes, galleries, broken
+count, data directory), **Providers** (Chub/DataCat enable toggles that
+Discover now reads, the outbound-proxy URL field wired to a live `/proxy/status`
+Test plus a Save that writes it back), **Userscripts** (the real bridge
+picker → `/userscripts` list → `POST /userscripts/{key}` → copy/download,
+salvaging the generator the way §1.3 always intended, just server-side
+already), **Maintenance** (live index stats + a real `POST /refresh`).
+
+Dropped, both named explicitly rather than left dead in the nav: **Media**
+(the mock's rows — download-on-import, images-only, concurrent downloads —
+describe fixed server policy with no per-request knob behind them; see
+[[jai_proxy_images_only_policy]]) and **About** (nothing in the API tracks a
+version to show). Building either would have been a control wired to
+nothing, which is exactly what §0's salvage rule exists to prevent. This also
+resolves open question 5 (NSFW blur): **dropped**, not built — there is still
+no NSFW signal in the API to key a toggle off.
+
+Two settings that changed real app behaviour, not just their own page:
+
+- **Default sort and shelf visibility now round-trip through Settings.**
+  `CharactersPage` applies `ui2.defaultSort` whenever the URL carries no
+  `sort=` of its own (an explicit link still wins), and the shelf's own Hide
+  button now writes `ui2.showRecentShelf: false` through the same
+  `useUpdateUi2` mutation the Settings toggle uses — closing the exact gap
+  Stage 1 left open ("the shelf's Hide is session state... Stage 6").
+- **The Providers toggle actually changes Discover.** A provider switched off
+  disappears from Discover's chip row, and if it was the active one the page
+  falls back to whichever provider is still on. `httpProxyUrl` writes at the
+  blob's **root**, not under `ui2` — the one documented exception
+  (`proxy/runtime/net.py`'s `SETTINGS_KEY`), because that is the flat key the
+  server itself reads.
+
+Verified live against the real 3,868-card archive, including a real
+configured outbound proxy in this environment (`state: ok`, proxy and direct
+IPs genuinely differed): every section renders, Test hit the live
+`/proxy/status`, Generate produced a real 60,757-byte compiled bridge, Rescan
+ran a real `/refresh` and updated the stats shown — zero console errors, zero
+failed requests. 151 vitest (+3, `CreatorNotes.test.tsx` below) + 981 pytest
+green, tsc/oxlint/prettier/build clean.
+
+**A real bug, found and fixed while doing the once-over Matt asked for
+alongside this stage:** `CreatorNotes.tsx`'s markdown fallback (used by every
+source that flattens notes to markdown — JanitorAI, saucepan, datacat,
+JannyAI, i.e. most cards) never handled image syntax. `html_to_md`
+(`proxy/text/html_md.py`) emits `![alt](url)` for every `<img>`; the frontend's
+hand-rolled `markdownToHtml` only matched `[text](url)` links, so an image
+note rendered as a stray `!` beside a mangled anchor — exactly what Matt saw
+("only text... no images"). Fixed by matching `![alt](url)` into `<img>`
+*before* the link pattern runs (it would otherwise consume the inner
+`[alt](url)` first). Verified against a real card
+(`3M1LY_b8e0b075.png`, found live by scanning the archive for notes containing
+`![`) — the image now actually decodes inside the sandboxed iframe. The
+smoke gate (`frontend/tests/smoke.py`) now finds such a card itself on every
+run and asserts an image loads inside the notes iframe, not just that the
+iframe mounted, so this class of bug fails the gate next time.
+
+The other half of the once-over — whether the detail page's seven tabs
+render correctly — did **not** reproduce: driven live (`3M1LY`, and again via
+the smoke gate's `Violet`), all seven tabs switch content, update `?tab=`, and
+carry zero console errors. Most likely a stale build served during an earlier
+manual check ([[jai_proxy_static_cache_trap]] — a hard reload does not bypass
+a stale lazily-imported chunk); nothing in the current tab-bar code
+(`CharacterDetailPage.tsx`) shows a mechanism for what was seen. Left as
+resolved-by-non-reproduction rather than a fix with no diff behind it.
+
+**Pre-cut-over verification pass. DONE (2026-08-18).**
+A session spent only on checking that Stages 1–6 were built the way they were
+planned, run before Stage 7 because two earlier things marked "done" turned out
+not to be (the creator-notes images, found at Stage 6). Every page driven live
+against the real 3,868-card archive with both frontends still mounted. Four real
+defects found and fixed; each one now has a regression test that fails without
+its fix.
+
+1. **`ui2.defaultSort` silently broke two shipped behaviours.** One root cause —
+   the grid's *effective* sort never reached the URL — with two symptoms, both
+   reproduced live. Picking "Name" from the Sort popover did nothing whenever
+   the stored default was anything else (`writeState` dropped `sort=name` as
+   "the default", the page read the empty URL and re-applied the stored default
+   over the top). And a card opened from a default-sorted grid got no pager and
+   dead J/K, because `CardTile` carried a querystring with no ordering in it and
+   the detail page fell back to name-sort, where the card is not in the first
+   page at all. Fixed by making the omitted value the *stored* default rather
+   than a hardcoded `name`, and by giving tiles an explicit `tileSearch(state)`
+   that always names the sort. That also fixes a third case never noticed
+   because favourites is empty on this archive: `/favorites` pins its filter on
+   the route, so its tiles carried no `flag=fav` either and prev/next walked the
+   whole archive.
+
+2. **J/K paged the card while you were typing into it.** Stage 3 put textareas
+   and tag inputs on the page Stage 2 had already given a bare `window` keydown
+   listener, and nothing rechecked the pair. Typing any word containing a "j"
+   into a description navigated away and discarded the unsaved draft. Guarded
+   with `isTypingTarget` (`lib/utils.ts`) plus a modifier check; the lightbox now
+   swallows J/K as well as arrows, since paging the card underneath an open
+   viewer leaves it showing another card's images.
+
+3. **The "Needs media" chip had been dropped without a decision.** §3.3 deferred
+   it to Stage 5; Stage 5 never mentioned it, and it was not in §5.2's list of
+   deliberate losses either — the one mock filter that was neither built nor
+   consciously cut. Now `needs_media` on `GET /characters`, taking §3.3's
+   "manifest I/O, but only when the chip is on" option: the set is computed once
+   and applied *after* the cheap predicates, never inside `_matches`. The
+   definition is evidence-based — the last run reported errors, or the manifest
+   carries dead URLs (31 cards here) — because deciding whether a *never-scanned*
+   card has remote media would mean re-reading every card's prose, which is
+   exactly the work the list path exists not to do. `/media/scan` still answers
+   that, one card at a time.
+
+4. **The ＋ Filter tag list was capped at 400 of 631 tags.** The popover has its
+   own search box, so the 231 rare tags below the cap read as nonexistent rather
+   than merely unlisted. `/facets` already treats `limit=0` as "all".
+
+**§5.1 #3 discharged on a real card.** `Adelwyn_b56ba353.png` (9 tags, 4 lore
+entries, 3 greetings) was edited through the real UI — description, tags,
+greetings, lorebook, then favourited — as five separate whole-card writes. The
+139 pixel chunks came through **byte-identical** (same SHA-256 before and
+after); only the intended fields moved; lore keys, entry count, extensions and
+provenance all survived; `scripts/check_cards.py` reported the result clean. The
+card was then restored to its original bytes and the archive left exactly as
+found (3,868 cards, 0 unreadable, 0 favourites).
+
+Two notes rather than defects: the smoke gate's `discover_chub_results` is
+recorded after a fixed wait and can read 0 while the page is in fact fine, so it
+proves nothing either way; and Chub is geo-blocked from this machine directly,
+which is invisible in the app because the browser falls back to `/proxy`.
+
+The gate now covers all four fixes: `tag_catalogue_complete` and
+`needs_media_chip_agrees` check the UI against the API's own answer, and
+`editor_survives_jk` types into an open editor and asserts the page did not
+move. 987 pytest (+6) + 154 vitest (+6) green, tsc / oxlint / prettier / build clean,
+schema regenerated, smoke exits 0 with zero console errors and zero failed
+requests.
+
+**Stage 6B — parity repair. Parts A–D DONE (2026-08-19); 5 decisions open.**
+Stage 7 is on hold. A fifth round of gaps surfaced *after* two sessions spent
+verifying that Stages 1–6 matched this plan, and every one of them had the same
+shape: **a stage deferred something, the later stage shipped without mentioning
+it, and §5.2 never gained the entry.** The plan then read as complete. Prose
+cannot be checked against prose, which is why two verification passes missed
+what a ten-minute mechanical sweep of the mock found.
+
+The structural fix is `docs/UI_PARITY_LEDGER.md` — one row per user-visible
+capability, seeded by script from §1.2, from every control in
+`docs/mockups/d-archive.html`, and from every provider capability flag in
+`web/modules/providers/`. **A stage may not be marked DONE while it owns an
+`open` row, and `dropped` requires a reason in the row.** Building it
+immediately surfaced two further silent losses nobody had named (the Library
+card-size control and the tile badge-count toggle) and one open question that
+was never closed (Import from URL, §6 Q4, "decide at Stage 5").
+
+What Stage 6B closes, in order:
+
+- **A — the ledger itself**, because it is what makes the rest checkable.
+- **B — provider parity.** `chubToken` (the URQL_TOKEN, sent as
+  `Authorization: Bearer`; *not* GraphQL — it is only the name of chub.ai's
+  localStorage key). Chub Following as a read-only timeline feed plus the
+  follows list, with follow/unfollow left to chub.ai. The DataCat token
+  lifecycle, wiring the three server routes that already exist and are called by
+  nothing. DataCat Following built properly on our side, since it is local
+  settings data tied to no account — and `data/settings.json` already holds a
+  real `datacatFollowedCreators` list to carry over. Discover tag include/exclude
+  chips, reusing `FilterPopover`/`ChipStrip` rather than building new UI, and
+  client-side only per the two standing traps. Per-provider NSFW (Chub currently
+  hardcodes `nsfw:'true', nsfl:'true'` over the saved setting) and
+  `providerExcludeTags`.
+- **C — media.** Bulk localize returns as a **server-side batch job**
+  (`POST /media/jobs {scope:"all"}`) rather than `web/`'s browser loop, so a
+  3,868-card run survives the tab closing; one job record, cards sequential,
+  because the single serial worker *is* the lock that keeps two runs off the same
+  manifest. The Media settings section comes back for the two rows with real
+  capability behind them (Bulk Localize, Rescan dead URLs) — it was dropped on a
+  reading that named three dead toggles and missed the fourth, live row.
+- **D — seven detail-page defects** found by using the app: scrollbar-gutter
+  layout shift, a stray shadow beside the creator-notes iframe, the lightbox
+  rendering under the fixed bars, no back-to-top, a dropdown menu wrapping a
+  single Delete item, uncollapsed long greetings, and the first greeting rendered
+  twice (Overview and Greetings).
+
+**Gallery extractors, measured rather than argued.** §3.4 dropped all seven up
+front. They are confirmed *separate* from the localize pipeline — one optional
+phase of four — so the card's own `embedded` + `lorebook` media always worked and
+nothing was thrown away. A scan of all 3,868 cards for album-page links:
+
+| extractor | cards | verdict |
+|---|---|---|
+| mega | 61 | port |
+| catbox album (`/c/`) | 23 | port |
+| imgchest (`/p/`) | 19 | port |
+| imgbb album | 15 | port |
+| postimg gallery | 11 | port |
+| gdrive | 2 | drop — cookie-dependent, negligible |
+| imgbox album (`/g/`) | **0** | **not needed** |
+
+122 unique cards (3.2%) carry any external album link. Two expectations
+corrected by the numbers: **imgbox needs no extractor at all** (all 11 cards
+mentioning it use direct `images2.imgbox.com/...` URLs the `embedded` phase
+already handles), and catbox splits — 285 cards use direct `files.catbox.moe/...`
+URLs that always worked, only 23 use album pages.
+
+Catbox, imgchest, imgbb and postimg shipped as `proxy/media/extractors.py`,
+wired in as the `extGallery` phase of `_discovered_items` so a single-card
+Download and a whole-archive run cannot disagree about what a card's media is.
+Parsing is pure (HTML in, images out) and fetching is synchronous, because both
+callers are on a worker thread rather than the event loop.
+
+**Mega did not ship, and is not a fifth extractor.** Every other host resolves
+to a plain URL the download pipeline can already fetch; Mega's files are
+*encrypted*, so it needs its API protocol, a crypto dependency (AES ECB/CBC/CTR
+— the stdlib has none), and a decrypt step inside the download path. That is a
+pipeline change. It is the largest single host by card count (61), and it is
+recorded `open` in the ledger rather than half-built.
+
+**Verified:** 1,016 pytest (+29), 170 vitest (+16), tsc / oxlint / prettier /
+production build clean, schema regenerated. What is *not* yet verified is
+anything live — Following against a real Chub token, a real DataCat session, and
+one full `scope=all` run against the 3,868-card archive all remain to be driven
+before cut-over.
+
+**Still open, all decisions rather than code:** card size, tile badge-count
+toggle, "Open gallery" shortcut, Import from URL (§6 Q4), and mega. Plus one
+phase Stage 6B's own sweep surfaced and did not close: `providerGallery`, one of
+legacy's four download phases, is still neither ported nor recorded as dropped.
+See `docs/UI_PARITY_LEDGER.md`.
 
 **Stage 7 — cut-over.** One commit:
 - `frontend` base flips to `/`, mounted at `/`.
@@ -758,11 +1056,19 @@ Cut-over is allowed when, on the real 3,839-card archive:
 
 ### 5.2 Deliberate losses
 
+**`docs/UI_PARITY_LEDGER.md` is the authority; this section is a summary.** The
+ledger has a row for every capability, not only the lost ones, which is the
+point — a list of things we *chose* to drop cannot reveal the things we dropped
+without noticing. Five rounds of missed work got in through exactly that gap.
+Add new losses to the ledger first, with a reason, and summarise here second.
+
 Named here so they are decisions and not discoveries: bundle restore until the
 server-side writer lands (§5.3), the Activity feed (§3.6), the advanced filter
 builder, the theme customizer, client-side whole-archive duplicate scanning,
 batch transfer to SillyTavern, charLore, provider-link management UI, the seven
-gallery extractors, description-scoped search, card duplication.
+gallery extractors, description-scoped search, card duplication, NSFW blur
+(open question 5), and the Settings mock's Media and About sections (Stage 6 —
+both would have been controls with no real capability behind them).
 
 ### 5.3 Bundle (.zip) restore — deferred past cut-over (decided 2026-08-18)
 
@@ -808,10 +1114,9 @@ Still open, both minor and both late:
 
 4. **Import from URL** (§3.10) — deferred. Worth a small guarded server route,
    or is Discover enough? Decide at Stage 5.
-5. **NSFW blur.** The Settings mock has "Blur NSFW thumbnails until hover", but
-   there is no NSFW signal in the API — it would have to key off a tag
-   (`NSFW`), which the Tags page is in the business of renaming. Keep it as a
-   tag-driven toggle, or drop the row? Decide at Stage 6.
+5. **NSFW blur** — RESOLVED at Stage 6: **dropped**. Still no NSFW signal in
+   the API to key a toggle off; building the row would have been a control
+   wired to nothing.
 
 And one with a standing recommendation:
 

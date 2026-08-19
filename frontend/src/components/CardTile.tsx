@@ -66,7 +66,13 @@ export function CardTile({
           </span>
         )}
         <img
-          src={card.thumb_url}
+          // The grid track's min width is 158px (CardGrid) and tiles routinely
+          // render wider than that as auto-fill stretches the last column, so
+          // the inherited 96x144 avatar cache -- built for a much smaller old-UI
+          // tile -- upscales visibly. 560 is roughly 2x a typical rendered
+          // height, the same retina-margin CharacterDetailPage uses for the
+          // portrait.
+          src={`${card.thumb_url}?size=560`}
           alt=""
           loading="lazy"
           className="size-full object-cover transition-transform duration-[450ms] ease-[cubic-bezier(.2,.7,.3,1)] group-hover:scale-105"

@@ -160,6 +160,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/characters/have": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Which of these provider card ids are already in the archive
+         * @description The `/api/v1` peer of `POST /existing` (`proxy/api/capture.py`) -- same
+         *     id-fragment match, same `deps.png_writer.existing`, exposed here so
+         *     Discover (UI_REWRITE_PLAN.md §3.8) doesn't have to reach into the
+         *     userscript's own route namespace for "hide cards I have" and the
+         *     pre-import duplicate guard.
+         */
+        post: operations["characters_have_api_v1_characters_have_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tags/apply": {
         parameters: {
             query?: never;
@@ -538,6 +562,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/characters/{card_id}/media/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discover a card's remote media URLs, without downloading
+         * @description Salvage item 1 (UI_REWRITE_PLAN.md §1.3, §3.4) -- the server-side walk
+         *     that replaces the browser scanning a card's own fields. A dry run: it
+         *     finds URLs, it does not fetch them, so the UI can show a count before the
+         *     user commits to a job.
+         */
+        post: operations["scan_character_media_api_v1_characters__card_id__media_scan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/media/jobs": {
         parameters: {
             query?: never;
@@ -555,6 +602,11 @@ export interface paths {
          *     hands over a resolved URL list -- but the download itself runs as a
          *     detached background task instead of over this request's own connection,
          *     so it survives the tab closing. Poll `GET /media/jobs/{id}` for progress.
+         *
+         *     `discover=true` (UI_REWRITE_PLAN.md §3.4) skips the browser's list
+         *     entirely: the server re-scans the card's own text (the same walk
+         *     `POST .../media/scan` previews) and downloads everything it finds,
+         *     embedded and lorebook URLs together, under one manifest run.
          */
         post: operations["submit_media_job_api_v1_media_jobs_post"];
         delete?: never;
@@ -1602,6 +1654,27 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /**
+         * CharactersHaveIn
+         * @description `POST /characters/have` body -- provider card ids (Chub project ids,
+         *     DataCat character ids, ...), not archive filenames.
+         */
+        CharactersHaveIn: {
+            /** Ids */
+            ids?: string[];
+        };
+        /**
+         * CharactersHaveOut
+         * @description Which of the submitted provider ids already have a card on disk.
+         *     UI_REWRITE_PLAN.md §3.8 -- Discover's "hide cards I have" and its
+         *     pre-import duplicate guard both key off this, the same `_<id8>` fragment
+         *     match `POST /existing` (the userscript's own route) already answers
+         *     from.
+         */
+        CharactersHaveOut: {
+            /** Have */
+            have?: string[];
+        };
         /** ChubBuildRequest */
         ChubBuildRequest: {
             /** Node */
@@ -1986,7 +2059,7 @@ export interface components {
             /** Job Id */
             job_id: string;
             /** Card Id */
-            card_id: string;
+            card_id?: string | null;
             /** Phase */
             phase: string;
             /** Prefix */
@@ -2016,6 +2089,43 @@ export interface components {
             reason?: string | null;
             /** Bytes */
             bytes?: number | null;
+            /**
+             * Scope
+             * @default card
+             * @enum {string}
+             */
+            scope: "card" | "all";
+            /**
+             * Unit
+             * @description What total/done count. A scope="all" job counts cards; a single-card job counts URLs.
+             * @default items
+             * @enum {string}
+             */
+            unit: "items" | "cards";
+            /**
+             * Cards Total
+             * @default 0
+             */
+            cards_total: number;
+            /**
+             * Cards Done
+             * @default 0
+             */
+            cards_done: number;
+            /**
+             * Cards Skipped
+             * @description Cards passed over because their last run was clean.
+             * @default 0
+             */
+            cards_skipped: number;
+            /** Current Card Id */
+            current_card_id?: string | null;
+            /**
+             * Events Dropped
+             * @description Events discarded by the ring buffer on a long run; the manifest, not this list, is the record of what happened.
+             * @default 0
+             */
+            events_dropped: number;
         };
         /**
          * MediaJobSubmitIn
@@ -2023,12 +2133,43 @@ export interface components {
          *     synchronous `POST /characters/{id}/media`, but queued and run in the
          *     background instead of streamed over the request's own connection
          *     (docs/PHASE_3C_PLAN.md §7, "3C-2 -- the job runner").
+         *
+         *     `discover=true` is UI_REWRITE_PLAN.md §3.4's alternative to an explicit
+         *     `items` list: the server re-scans the card's own text for media URLs
+         *     (the same walk `POST .../media/scan` previews) and downloads whatever it
+         *     finds, in one job. `items` is ignored in that mode.
+         *
+         *     `scope="all"` is Stage 6B's bulk localize: the same run over every card in
+         *     the archive, sequentially, inside one job. It implies `discover` -- there is
+         *     no per-card item list to supply -- and `items`/`card_id` are ignored.
          */
         MediaJobSubmitIn: {
-            /** Card Id */
-            card_id: string;
+            /**
+             * Scope
+             * @description "card" downloads one card (card_id required); "all" walks the whole archive.
+             * @default card
+             * @enum {string}
+             */
+            scope: "card" | "all";
+            /**
+             * Card Id
+             * @description Required when scope is "card".
+             */
+            card_id?: string | null;
             /** Items */
-            items: components["schemas"]["MediaItemIn"][];
+            items?: components["schemas"]["MediaItemIn"][];
+            /**
+             * Discover
+             * @description Scan the card server-side instead of taking an explicit item list.
+             * @default false
+             */
+            discover: boolean;
+            /**
+             * Skip Complete
+             * @description scope="all" only: skip cards whose last run finished with no errors.
+             * @default true
+             */
+            skip_complete: boolean;
             /**
              * Prefix
              * @description Filename prefix and dedupe-priority class: localized_media, lorebook_media, extgallery, or <provider>gallery.
@@ -2093,6 +2234,20 @@ export interface components {
             skipped: number;
             /** Errors */
             errors: number;
+        };
+        /**
+         * MediaScanOut
+         * @description `POST /characters/{id}/media/scan` -- a dry run of the same discovery
+         *     `discover=true` jobs use, so the UI can show "43 images found" before
+         *     committing to a download. `embedded` and `lorebook` are already deduped
+         *     against each other -- a URL in both surfaces is reported only in
+         *     `embedded`.
+         */
+        MediaScanOut: {
+            /** Embedded */
+            embedded: string[];
+            /** Lorebook */
+            lorebook: string[];
         };
         /**
          * MediaStatusEntryOut
@@ -2383,6 +2538,8 @@ export interface operations {
                 min_greetings?: number | null;
                 /** @description Cards acquired at or after this ISO-8601 instant, compared against `linked_at`. Cards with no stamp are excluded. */
                 added_after?: string | null;
+                /** @description `true` for cards whose media was attempted and did not fully come down -- the last run reported errors, or the manifest carries dead URLs. Costs a manifest read per card, so it is only paid when asked for. A card that has never been scanned counts as not needing media: whether it has any is a question only `/characters/{id}/media/scan` can answer. */
+                needs_media?: boolean | null;
                 /** @description `ok` lists parseable cards (the default), `broken` the ones that fail to parse, `all` both. */
                 health?: "ok" | "broken" | "all";
                 /** @description One of name, creator, added, created, modified, size, greetings, lore, description, prompt. Prefix with `-` to reverse. */
@@ -2646,6 +2803,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BulkTagsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    characters_have_api_v1_characters_have_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CharactersHaveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharactersHaveOut"];
                 };
             };
             /** @description Validation Error */
@@ -3174,6 +3364,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    scan_character_media_api_v1_characters__card_id__media_scan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                card_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaScanOut"];
                 };
             };
             /** @description Validation Error */

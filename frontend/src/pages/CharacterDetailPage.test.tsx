@@ -58,7 +58,7 @@ const listHandler = (items = [detailCard({ id: 'Abbie_0d162f5f.png' })]) =>
   )
 
 describe('CharacterDetailPage', () => {
-  it('renders the overview: tagline, description and first greeting', async () => {
+  it('renders the overview: tagline and description, but NOT the first greeting', async () => {
     // The tagline is the page blurb (`page_name`) when it differs from the name.
     server.use(
       detailHandler(detailCard({ page_name: 'wry and watchful' })),
@@ -71,7 +71,11 @@ describe('CharacterDetailPage', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('wry and watchful')).toBeInTheDocument()
     expect(screen.getByText('A long description of Abbie.')).toBeInTheDocument()
-    expect(screen.getByText('You again.')).toBeInTheDocument()
+    // Stage 6B D7: greeting 1 belongs to the Greetings tab, which shows it in
+    // full and is the only place it can be edited. Overview used to render it
+    // too, so a long greeting swamped the tab and two copies could disagree
+    // mid-edit.
+    expect(screen.queryByText('You again.')).not.toBeInTheDocument()
   })
 
   it('switches tabs: Greetings lists every greeting, Info shows card.json', async () => {
@@ -119,18 +123,19 @@ describe('CharacterDetailPage', () => {
   })
 
   it('edits the description: whole-card PUT with the read’s If-Match', async () => {
-    let put: { body: { card: Record<string, unknown> }; ifMatch: string | null } | null =
-      null
+    let put: {
+      body: { card: Record<string, unknown> }
+      ifMatch: string | null
+    } | null = null
     server.use(
       detailHandler(),
       listHandler(),
       http.put('*/api/v1/characters/:id', async ({ request }) => {
         const body = (await request.json()) as { card: Record<string, unknown> }
         put = { body, ifMatch: request.headers.get('If-Match') }
-        return HttpResponse.json(
-          detailCard({ card: { ...body.card } }),
-          { headers: { ETag: '"abc-2"' } },
-        )
+        return HttpResponse.json(detailCard({ card: { ...body.card } }), {
+          headers: { ETag: '"abc-2"' },
+        })
       }),
     )
     renderDetail('/characters/Abbie_0d162f5f.png')
@@ -169,7 +174,9 @@ describe('CharacterDetailPage', () => {
     await userEvent.click(screen.getByRole('button', { name: /^Save$/ }))
 
     // The editor stays open (a textbox is still present) and a toast explains why.
-    expect(await screen.findByText(/changed since you opened it/i)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/changed since you opened it/i),
+    ).toBeInTheDocument()
     expect(screen.getByRole('textbox')).toBeInTheDocument()
   })
 
@@ -181,7 +188,10 @@ describe('CharacterDetailPage', () => {
       http.post('*/api/v1/characters/:id/favorite', async ({ request }) => {
         const body = (await request.json()) as { value: boolean }
         posted = body.value
-        return HttpResponse.json({ id: 'Abbie_0d162f5f.png', favorite: body.value })
+        return HttpResponse.json({
+          id: 'Abbie_0d162f5f.png',
+          favorite: body.value,
+        })
       }),
     )
     renderDetail('/characters/Abbie_0d162f5f.png')
@@ -191,6 +201,53 @@ describe('CharacterDetailPage', () => {
     await waitFor(() => expect(posted).toBe(true))
     expect(
       await screen.findByRole('button', { name: /^Favourited$/ }),
+    ).toBeInTheDocument()
+  })
+
+  it('J pages to the next card in the neighbour set', async () => {
+    const a = detailCard({ id: 'a.png', name: 'Abbie' })
+    const b = detailCard({ id: 'b.png', name: 'Bella' })
+    server.use(
+      http.get('*/api/v1/characters/:id', ({ params }) =>
+        HttpResponse.json(params.id === 'b.png' ? b : a),
+      ),
+      listHandler([a, b]),
+    )
+    renderDetail('/characters/a.png')
+    await screen.findByRole('heading', { name: 'Abbie', level: 1 })
+    await waitFor(() => expect(screen.getByText('1 of 2')).toBeInTheDocument())
+
+    await userEvent.keyboard('j')
+
+    expect(
+      await screen.findByRole('heading', { name: 'Bella', level: 1 }),
+    ).toBeInTheDocument()
+  })
+
+  it('J and K do nothing while a field is being edited', async () => {
+    // The regression: J/K are bare letters bound at the window, so typing a
+    // word containing one into the description paged to the next card and threw
+    // the unsaved draft away.
+    const a = detailCard({ id: 'a.png', name: 'Abbie' })
+    const b = detailCard({ id: 'b.png', name: 'Bella' })
+    server.use(
+      http.get('*/api/v1/characters/:id', ({ params }) =>
+        HttpResponse.json(params.id === 'b.png' ? b : a),
+      ),
+      listHandler([a, b]),
+    )
+    renderDetail('/characters/a.png')
+    await screen.findByRole('heading', { name: 'Abbie', level: 1 })
+    await waitFor(() => expect(screen.getByText('1 of 2')).toBeInTheDocument())
+
+    await userEvent.click(screen.getByRole('button', { name: /^Edit$/ }))
+    const box = screen.getByRole('textbox')
+    await userEvent.clear(box)
+    await userEvent.type(box, 'jack and kate')
+
+    expect(box).toHaveValue('jack and kate')
+    expect(
+      screen.getByRole('heading', { name: 'Abbie', level: 1 }),
     ).toBeInTheDocument()
   })
 

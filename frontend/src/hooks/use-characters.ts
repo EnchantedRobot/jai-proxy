@@ -59,7 +59,11 @@ export function useTagFacets() {
     staleTime: 5 * 60_000,
     queryFn: () =>
       unwrap(
-        apiClient.GET('/api/v1/facets', { params: { query: { limit: 400 } } }),
+        // The whole vocabulary, not a top-N slice. The popover has its own
+        // search box, so a cap silently made rare tags unfindable rather than
+        // merely unlisted -- on this archive 231 of 631 tags fell off a
+        // 400-tag limit, every one of them a tag a card actually carries.
+        apiClient.GET('/api/v1/facets', { params: { query: { limit: 0 } } }),
         'could not read the tag list',
       ),
   })

@@ -37,6 +37,8 @@ from proxy.api.schemas import (
     CardListOut,
     CardOut,
     CardWriteIn,
+    CharactersHaveIn,
+    CharactersHaveOut,
     DeletedOut,
     FavoriteIn,
     FavoriteOut,
@@ -47,6 +49,7 @@ from proxy.api.schemas import (
 from proxy.api.v1 import _shared
 from proxy.archive import catalog
 from proxy.cards import edit, gallery, intake, pngtools
+from proxy.media import manifest as media_manifest
 from proxy.config import settings
 
 logger = logging.getLogger("jai_proxy.api")
@@ -141,6 +144,41 @@ _SCOPES: dict[str, Callable[[catalog.CardSummary], str]] = {
     "creator": lambda r: r.creator.casefold(),
     "tags": lambda r: " ".join(r.tags).casefold(),
 }
+
+
+def _cards_needing_media() -> set[str]:
+    """Filenames whose media was attempted and did not fully come down.
+
+    The chip §3.3 deferred, and the shape it settled on: manifest I/O, paid only
+    when the filter is actually asked for, and applied *after* the cheap
+    predicates have narrowed the set -- never inside `_matches`, which runs per
+    record on every list call.
+
+    "Needs media" is evidence-based on purpose: a card whose last run reported
+    errors, or that carries dead URLs. A card nobody has ever scanned is not
+    claimed to need anything, because deciding that would mean re-reading every
+    card's prose to discover URLs -- exactly the work the list path exists not to
+    do. `POST /characters/{id}/media/scan` is where that question gets answered,
+    one card at a time.
+    """
+    idx = _shared.index()
+    needing: set[str] = set()
+    for record in idx.cards():
+        folder = gallery.resolve_folder(
+            settings.galleries_dir, gallery.folder_name(record.name, record.gallery_id)
+        )
+        if not folder:
+            continue
+        gallery_dir = settings.galleries_dir / folder
+        try:
+            media_manifest.manifest_path(gallery_dir).stat()
+        except OSError:
+            continue
+        manifest = media_manifest.load_manifest(gallery_dir)
+        last_run = manifest["runs"][-1] if manifest["runs"] else None
+        if (last_run and last_run.get("errors", 0)) or manifest["dead"]:
+            needing.add(record.filename)
+    return needing
 
 
 def _matches(
@@ -252,6 +290,15 @@ def list_characters(
         None,
         description="Cards acquired at or after this ISO-8601 instant, compared against `linked_at`. Cards with no stamp are excluded.",
     ),
+    needs_media: bool | None = Query(
+        None,
+        description=(
+            "`true` for cards whose media was attempted and did not fully come down -- the last run "
+            "reported errors, or the manifest carries dead URLs. Costs a manifest read per card, so it "
+            "is only paid when asked for. A card that has never been scanned counts as not needing "
+            "media: whether it has any is a question only `/characters/{id}/media/scan` can answer."
+        ),
+    ),
     health: Literal["ok", "broken", "all"] = Query(
         "ok",
         description="`ok` lists parseable cards (the default), `broken` the ones that fail to parse, `all` both.",
@@ -297,6 +344,10 @@ def list_characters(
             added_after=added_after,
         )
     ]
+
+    if needs_media is not None:
+        needing = _cards_needing_media()
+        matched = [r for r in matched if (r.filename in needing) == needs_media]
 
     descending = sort.startswith("-")
     key_name = _SORTS.get(sort.lstrip("-"))
@@ -636,6 +687,16 @@ def bulk_tags(body: BulkTagsIn) -> BulkTagsOut:
     if changed:
         catalog.index().refresh(force=True)
     return BulkTagsOut(changed=changed, unchanged=unchanged, failed=failed)
+
+
+@router.post("/characters/have", response_model=CharactersHaveOut, summary="Which of these provider card ids are already in the archive")
+def characters_have(body: CharactersHaveIn) -> CharactersHaveOut:
+    """The `/api/v1` peer of `POST /existing` (`proxy/api/capture.py`) -- same
+    id-fragment match, same `deps.png_writer.existing`, exposed here so
+    Discover (UI_REWRITE_PLAN.md §3.8) doesn't have to reach into the
+    userscript's own route namespace for "hide cards I have" and the
+    pre-import duplicate guard."""
+    return CharactersHaveOut(have=sorted(deps.png_writer.existing(body.ids)))
 
 
 @router.post("/tags/apply", response_model=TagsApplyOut, summary="Apply a tag rename/removal plan across the archive")

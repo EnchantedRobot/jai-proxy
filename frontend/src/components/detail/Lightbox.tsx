@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import type { GalleryFile } from '@/lib/card'
 
@@ -31,8 +32,19 @@ export function Lightbox({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-      else if (event.key === 'ArrowRight') {
+      if (event.key === 'Escape') {
+        onClose()
+        return
+      }
+      // Arrows step the gallery. J/K are swallowed rather than acted on: they
+      // page the *card* underneath, and doing that while a lightbox is open
+      // leaves the viewer showing images that belong to a card that is no
+      // longer on screen.
+      if (event.key === 'j' || event.key === 'k') {
+        event.stopPropagation()
+        return
+      }
+      if (event.key === 'ArrowRight') {
         event.stopPropagation()
         step(1)
       } else if (event.key === 'ArrowLeft') {
@@ -40,18 +52,23 @@ export function Lightbox({
         step(-1)
       }
     }
-    // Capture phase so the detail page's window-level J/K/arrow handler does
-    // not also fire while the lightbox owns the keyboard.
+    // Capture phase so the detail page's window-level J/K handler does not also
+    // fire while the lightbox owns the keyboard.
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [step, onClose])
 
+  // The page scrolls inside a container in `AppShell`, and the detail route
+  // stacks a fixed top bar over a sticky back-bar. Rendering the viewer inline
+  // left it competing with those for stacking order, so a tall image showed
+  // *through* and under them. A portal to <body> takes it out of that subtree
+  // entirely, and `z-60` clears both bars (Stage 6B D3).
   const file = files[index]
   if (!file) return null
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/88 backdrop-blur-sm"
+      className="fixed inset-0 z-60 flex items-center justify-center bg-black/88 backdrop-blur-sm"
       onClick={onClose}
     >
       <button
@@ -109,6 +126,7 @@ export function Lightbox({
       <span className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 font-mono text-[12px] text-muted">
         {index + 1} / {files.length}
       </span>
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -12,8 +12,8 @@ import {
 import { useTagFacets } from '@/hooks/use-characters'
 import { FLAG_LABELS, type BrowseState, type Flag } from '@/lib/browse'
 
-/** Flags in the popover, including the two that are not preset chips. */
-const FLAGS: Flag[] = ['fav', 'lore', 'greets', 'new', 'untagged']
+/** Flags in the popover, including the three that are not preset chips. */
+const FLAGS: Flag[] = ['fav', 'lore', 'greets', 'new', 'untagged', 'media']
 
 /**
  * ＋ Filter: every flag, and the tag catalogue with archive-wide counts.
