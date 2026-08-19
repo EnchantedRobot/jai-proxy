@@ -61,10 +61,6 @@ class DiscoverPreviewIn(BaseModel):
         default=None,
         description="DataCat's `GET /api/characters/{id}` detail payload, with `scripts[]` already hydrated. Required for provider=datacat.",
     )
-    download: dict[str, Any] | None = Field(
-        default=None,
-        description="DataCat's `/download` response, which fills in fields the detail payload leaves empty on a repaired Saucepan card. Preferred when present, exactly as `/build-datacat` prefers it.",
-    )
 
 
 class DiscoverPreviewOut(BaseModel):
@@ -156,9 +152,7 @@ def _datacat_preview(req: DiscoverPreviewIn) -> DiscoverPreviewOut:
     lands.
     """
     character = req.character or {}
-    v2 = datacat.build_v2_from_download(req.download, character) if req.download else None
-    if v2 is None:
-        v2 = datacat.build_v2_from_character(character)
+    v2 = datacat.build_v2_from_character(character)
     if v2 is None:
         raise HTTPException(status_code=422, detail="datacat: no usable character data")
 

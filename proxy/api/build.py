@@ -505,16 +505,9 @@ async def build_datacat(req: DatacatBuildRequest) -> BuildResponse:
     /build and /build-saucepan -- build_card + fetch_avatar_and_write directly
     (not _assemble_and_write) so the built card is available afterward to
     populate the filename/card response fields the browser needs (see
-    BuildResponse's docstring).
-
-    /download often fills in fields the detail payload leaves empty for a
-    repaired Saucepan card, so it wins when present; datacat.
-    build_v2_from_character is the fallback (and the only source when the
-    browser didn't fetch /download at all, e.g. for a plain JanitorAI row)."""
+    BuildResponse's docstring)."""
     character = req.character or {}
-    v2 = datacat.build_v2_from_download(req.download, character) if req.download else None
-    if v2 is None:
-        v2 = datacat.build_v2_from_character(character)
+    v2 = datacat.build_v2_from_character(character)
     if v2 is None:
         return BuildResponse(ok=False, warnings=["datacat: no usable character data"])
 

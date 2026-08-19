@@ -227,6 +227,13 @@ def _fetch_mega(client: httpx.Client, url: str) -> list[GalleryImage]:
 # ---- chub (first-party gallery, not a page link) -----------------------------
 
 _CHUB_GALLERY_API = "https://gateway.chub.ai/api/gallery/project/{id}?limit=100&count=false"
+_CHUB_ORIGIN = "https://chub.ai"
+_CHUB_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "application/json",
+    "Origin": _CHUB_ORIGIN,
+    "Referer": f"{_CHUB_ORIGIN}/",
+}
 
 
 def _chub_token() -> str | None:
@@ -252,7 +259,7 @@ def resolve_chub_gallery(client: httpx.Client, project_id: str) -> list[GalleryI
     `find_gallery_urls`/`resolve_gallery_urls`."""
     if not project_id:
         return []
-    headers = {"Accept": "application/json"}
+    headers = dict(_CHUB_HEADERS)
     token = _chub_token()
     if token:
         headers["Authorization"] = f"Bearer {token}"

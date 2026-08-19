@@ -47,7 +47,10 @@ def test_eve_profile_fields():
     assert pf.scenario.startswith("{{char}} is an android struggling to learn emotion")
     assert "--- " not in pf.scenario
     assert pf.mes_example.startswith("<START> {{char}}:")
-    assert pf.creator_notes == "What if the machine is more humane than the human?"
+    # blurb leads, then one markdown image per portrait (11 for Eve)
+    assert pf.creator_notes.startswith("What if the machine is more humane than the human?")
+    assert pf.creator_notes.count("![") == 11
+    assert "![The Three Bullies](https://saucepan.ai/cdn/370f5b18-a180-4259-b9f8-17e46113cd00/highres)" in pf.creator_notes
 
 
 def test_eve_greetings_drop_blank_placeholder():
@@ -81,6 +84,32 @@ def test_eve_avatar_and_meta():
     assert m.companion_id(raw) == "04a0c1ac-187b-4aa0-8f5b-885533be748d"
     assert m.is_open(raw) is True
     assert m.creator_id(raw) == "cba8693b-3a04-42fe-883d-27df186ca711"
+
+
+def test_eve_portrait_gallery():
+    raw = load(EVE)
+    gallery = m.portrait_urls(raw)
+    assert len(gallery) == 11
+    assert gallery[0] == (
+        "The Three Bullies",
+        "https://saucepan.ai/cdn/370f5b18-a180-4259-b9f8-17e46113cd00/highres",
+    )
+    # avatar and gallery images are distinct ids -- no accidental collision
+    assert m.avatar_url(raw) not in [url for _, url in gallery]
+
+
+def test_portrait_gallery_empty_when_locked():
+    raw = load(EVE)
+    raw["companion"]["companion"]["unlocked_portraits"] = False
+    assert m.portrait_urls(raw) == []
+    pf = m.to_profile_fields(raw)
+    assert pf.creator_notes == "What if the machine is more humane than the human?"
+
+
+def test_portrait_gallery_empty_when_no_portraits():
+    raw = load(TARYN)
+    raw["companion"]["companion"]["portraits"] = []
+    assert m.portrait_urls(raw) == []
 
 
 # ---------------------------------------------------------------------------

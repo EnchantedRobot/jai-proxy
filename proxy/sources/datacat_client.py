@@ -220,7 +220,6 @@ _DC_ALLOWED_PATHS = [
     re.compile(r"^/api/characters/fresh\b"),
     re.compile(r"^/api/characters/recent-public\b"),
     re.compile(r"^/api/characters/[a-f0-9-]+$"),
-    re.compile(r"^/api/characters/[a-f0-9-]+/download\b"),
     re.compile(r"^/api/creators/[a-f0-9-]+$"),
     re.compile(r"^/api/creators/[a-f0-9-]+/characters\b"),
     re.compile(r"^/api/tags/faceted\b"),

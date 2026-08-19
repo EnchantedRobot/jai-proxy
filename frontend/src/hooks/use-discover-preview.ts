@@ -10,7 +10,6 @@ import {
 import {
   datacatSourceKind,
   fetchDatacatDetail,
-  fetchDatacatDownload,
   hydrateDatacatScripts,
   type DatacatCharacter,
 } from '@/lib/providers/datacat'
@@ -28,7 +27,7 @@ export type DiscoverPreview = components['schemas']['DiscoverPreviewOut']
  */
 export type ProviderCapture =
   | { provider: 'chub'; node: ChubNode; linked_lorebook?: unknown }
-  | { provider: 'datacat'; character: DatacatCharacter; download?: unknown }
+  | { provider: 'datacat'; character: DatacatCharacter }
 
 /**
  * Fetch a card from its provider in full, at the fidelity an import needs.
@@ -71,8 +70,7 @@ export async function captureProviderCard(
   const character = await fetchDatacatDetail(id, sourceKind)
   if (!character) throw new Error('could not fetch the card from DataCat')
   await hydrateDatacatScripts(character)
-  const download = await fetchDatacatDownload(id, sourceKind)
-  return { provider: 'datacat', character, download: download ?? undefined }
+  return { provider: 'datacat', character }
 }
 
 /**

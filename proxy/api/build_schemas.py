@@ -115,20 +115,17 @@ class ChubBuildRequest(BaseModel):
 
 # ---------------------------------------------------------------------------
 # /build-datacat -- the DataCat peer of /build-chub. The browser posts the raw
-# /api/characters/:id detail payload (character), optionally the /download
-# response (download) for cards where it fills in fields the detail payload
-# leaves empty, and hydrated `character.scripts[]` lorebook content. The
-# server ports buildV2FromDatacat/buildV2FromDownload (sources.datacat) to a
-# neutral V2 dict, then goes through CardBuilder like /build-jai and
-# /build-saucepan -- unlike Chub, a datacat character carries no
-# priority/probability/selectiveLogic or int position to lose in the
+# /api/characters/:id detail payload (character), with hydrated
+# `character.scripts[]` lorebook content. The server ports buildV2FromDatacat
+# (sources.datacat) to a neutral V2 dict, then goes through CardBuilder like
+# /build-jai and /build-saucepan -- unlike Chub, a datacat character carries
+# no priority/probability/selectiveLogic or int position to lose in the
 # pydantic round-trip.
 # ---------------------------------------------------------------------------
 
 
 class DatacatBuildRequest(BaseModel):
     character: dict[str, Any] = Field(default_factory=dict)
-    download: dict[str, Any] | None = None
     avatar_url: str | None = None
     avatar_b64: str | None = None
     # Set only on a "Replace Existing" duplicate-resolution import -- see

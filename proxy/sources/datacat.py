@@ -426,9 +426,9 @@ def build_v2_from_character(character: dict[str, Any] | None) -> dict[str, Any] 
             "personality": "",
             "scenario": scenario,
             "first_mes": first_message,
-            "mes_example": "",
-            "system_prompt": "",
-            "post_history_instructions": "",
+            "mes_example": v2_data.get("mes_example") or "",
+            "system_prompt": v2_data.get("system_prompt") or "",
+            "post_history_instructions": v2_data.get("post_history_instructions") or "",
             "creator_notes": creator_notes,
             "creator": character.get("creator_name") or character.get("creatorName") or "",
             "character_version": "1.0",
@@ -440,79 +440,3 @@ def build_v2_from_character(character: dict[str, Any] | None) -> dict[str, Any] 
     }
 
 
-def build_v2_from_download(
-    download_data: dict[str, Any] | None, character: dict[str, Any] | None = None
-) -> dict[str, Any] | None:
-    """Port of buildV2FromDownload(): a V2 character card from the
-    /api/characters/:id/download response, enriched with `character` (the
-    detail payload) for Saucepan recovery-variant fallback and provenance --
-    /download alone returns empty body fields for a repaired Saucepan card."""
-    d = (download_data or {}).get("data")
-    if not isinstance(d, dict):
-        return None
-
-    recovered = pick_recovery_variant(character) if character else {}
-    is_saucepan = bool(character) and character.get("primary_content_source_kind") == "saucepan"
-    v2_data = ((character or {}).get("chara_card_v2_json") or {}).get("data") or {}
-
-    if is_saucepan:
-        fallback_description = (
-            recovered.get("description") or recovered.get("personality")
-            or v2_data.get("description") or (character or {}).get("description") or ""
-        )
-    else:
-        fallback_description = (
-            (character or {}).get("personality") or recovered.get("personality")
-            or strip_datacat_markers(v2_data.get("description")) or ""
-        )
-    description = d.get("personality") or d.get("description") or fallback_description
-    scenario = d.get("scenario") or recovered.get("scenario") or ""
-    first_mes = d.get("first_mes") or recovered.get("first_message") or ""
-
-    if is_saucepan:
-        creator_notes = (
-            _companion_full_description(character or {}) or v2_data.get("creator_notes")
-            or d.get("creator_notes") or ""
-        )
-    else:
-        creator_notes = d.get("creator_notes") or (character or {}).get("description") or ""
-
-    creator_name = (
-        (character or {}).get("creator_name") or (character or {}).get("creatorName")
-        or ((download_data or {}).get("metadata") or {}).get("janitor_creator_name")
-        or ("" if _is_url(d.get("creator")) else (d.get("creator") or ""))
-    )
-    raw_version = d.get("character_version")
-    card_version = raw_version if (raw_version and not _is_url(raw_version)) else "1.0"
-
-    character_book = None
-    cb = d.get("character_book")
-    if isinstance(cb, dict) and cb.get("entries"):
-        character_book = cb
-    if character_book is None and character:
-        character_book = extract_character_book_from_scripts(character)
-
-    return {
-        "spec": "chara_card_v2",
-        "spec_version": "2.0",
-        "data": {
-            "name": d.get("name") or (character or {}).get("chat_name") or (character or {}).get("chatName") or (character or {}).get("name") or "Unknown",
-            "description": description,
-            "personality": "",
-            "scenario": scenario,
-            "first_mes": first_mes,
-            "mes_example": d.get("mes_example") or "",
-            "system_prompt": d.get("system_prompt") or "",
-            "post_history_instructions": d.get("post_history_instructions") or "",
-            "creator_notes": creator_notes,
-            "creator": creator_name,
-            "character_version": card_version,
-            "tags": d.get("tags") or [],
-            "alternate_greetings": d.get("alternate_greetings") or [],
-            "extensions": {
-                **(d.get("extensions") or {}),
-                **_v2_extensions_block(character or {}),
-            },
-            "character_book": character_book,
-        },
-    }
