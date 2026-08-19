@@ -1,0 +1,5 @@
+dist
+coverage
+openapi.json
+src/lib/api-schema.ts
+src/lib/tags/tag-dictionary.json

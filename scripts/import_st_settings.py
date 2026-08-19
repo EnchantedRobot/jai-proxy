@@ -29,6 +29,12 @@ charLore store is what makes the bundle exporter omit `auxWorlds` from its
 manifest instead of writing an empty array. An empty array means "restore no
 lorebooks" to an importing SillyTavern, which strips lorebook links from the
 cards it lands on. Importing an empty charLore here would re-arm exactly that.
+
+RETIRED (Stage 7 cut-over). The keys this lifts across are the *old* frontend's
+schema, and `scripts/prune_settings.py` has since dropped all but the nine the
+browser client still reads. Running this again would put them back. Kept only
+because the ST-side reading logic is the record of where that blob lived; it has
+no live caller.
 """
 
 from __future__ import annotations

@@ -141,6 +141,26 @@ def test_overwrite_replaces_the_card_under_the_name_on_disk(client, populated_ar
     assert len(list(characters.glob("*_0d162f5f.png"))) == 1
 
 
+# --- POST /characters/have --------------------------------------------------
+# The `/api/v1` peer of `POST /existing` -- Discover's "hide cards I have" and
+# its pre-import duplicate guard (docs/UI_REWRITE_PLAN.md §3.8).
+
+
+def test_have_reports_ids_already_on_disk_by_fragment(client, populated_archive):
+    resp = client.post(
+        "/api/v1/characters/have",
+        json={"ids": ["0d162f5f-86ab-4fdd-a2c2-3912adf24960", "no-such-card-id"]},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["have"] == ["0d162f5f-86ab-4fdd-a2c2-3912adf24960"]
+
+
+def test_have_is_empty_for_an_empty_archive(client):
+    resp = client.post("/api/v1/characters/have", json={"ids": []})
+    assert resp.status_code == 200
+    assert resp.json()["have"] == []
+
+
 def test_an_imported_card_is_visible_immediately(client):
     body = post(client, card_png("Fresh", creator="someone")).json()
     listed = client.get("/api/v1/characters?limit=0").json()

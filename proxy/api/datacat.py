@@ -13,8 +13,8 @@ and PHASE_3B_PLAN.md S2 for the design). Seven routes:
   dc-proxy/{path...}  -- authenticated GET passthrough (allow-listed paths only)
   dc-extract          -- submit a JanitorAI/Saucepan URL to the extraction queue
 
-The browser reaches these via DC_SESSION_API_BASE in
-web/modules/providers/provider-utils.js.
+The browser reaches these through the generated API client
+(frontend/src/lib/providers/datacat.ts).
 """
 
 from __future__ import annotations

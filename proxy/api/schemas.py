@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class CardOut(BaseModel):
@@ -43,6 +43,10 @@ class CardOut(BaseModel):
     )
     has_creator_notes: bool
     has_example_dialogue: bool
+    favorite: bool = Field(
+        default=False,
+        description="Starred, out of the card's own `extensions.fav` -- so it travels with the PNG and round-trips through SillyTavern rather than living in this server's settings.",
+    )
     size: int = Field(description="Card PNG size in bytes.")
     modified: datetime = Field(
         description="The file's mtime. Says when the card was last *written*, which on this archive is dominated by bulk repair passes -- see `linked_at` for when it arrived."
@@ -65,6 +69,18 @@ class CardOut(BaseModel):
         default=None,
         description="Why this card could not be parsed. Null for healthy cards; a card with an error has only its file fields filled in.",
     )
+
+
+class FavoriteIn(BaseModel):
+    """The one targeted write in the API. See `set_favorite` for why a single
+    boolean does not go through the whole-document `PUT`."""
+
+    value: bool = Field(description="True to star the card, false to unstar it.")
+
+
+class FavoriteOut(BaseModel):
+    id: str
+    favorite: bool
 
 
 class CardListOut(BaseModel):
@@ -234,6 +250,23 @@ class CardImportOut(BaseModel):
         default=False, description="An existing card of the same id was replaced in place."
     )
     warnings: list[str] = Field(default=[])
+
+
+class CharactersHaveIn(BaseModel):
+    """`POST /characters/have` body -- provider card ids (Chub project ids,
+    DataCat character ids, ...), not archive filenames."""
+
+    ids: list[str] = Field(default_factory=list)
+
+
+class CharactersHaveOut(BaseModel):
+    """Which of the submitted provider ids already have a card on disk.
+    UI_REWRITE_PLAN.md §3.8 -- Discover's "hide cards I have" and its
+    pre-import duplicate guard both key off this, the same `_<id8>` fragment
+    match `POST /existing` (the userscript's own route) already answers
+    from."""
+
+    have: list[str] = Field(default_factory=list)
 
 
 class DeletedOut(BaseModel):
@@ -416,15 +449,50 @@ class MediaJobSubmitIn(BaseModel):
     """`POST /media/jobs` body -- the same items/prefix/phase shape as the
     synchronous `POST /characters/{id}/media`, but queued and run in the
     background instead of streamed over the request's own connection
-    (docs/PHASE_3C_PLAN.md §7, "3C-2 -- the job runner")."""
+    (docs/PHASE_3C_PLAN.md §7, "3C-2 -- the job runner").
 
-    card_id: str
-    items: list[MediaItemIn]
+    `discover=true` is UI_REWRITE_PLAN.md §3.4's alternative to an explicit
+    `items` list: the server re-scans the card's own text for media URLs
+    (the same walk `POST .../media/scan` previews) and downloads whatever it
+    finds, in one job. `items` is ignored in that mode.
+
+    `scope="all"` is Stage 6B's bulk localize: the same run over every card in
+    the archive, sequentially, inside one job. It implies `discover` -- there is
+    no per-card item list to supply -- and `items`/`card_id` are ignored."""
+
+    scope: Literal["card", "all"] = Field(
+        default="card",
+        description='"card" downloads one card (card_id required); "all" walks the whole archive.',
+    )
+    card_id: str | None = Field(default=None, description='Required when scope is "card".')
+    items: list[MediaItemIn] = Field(default_factory=list)
+    discover: bool = Field(default=False, description="Scan the card server-side instead of taking an explicit item list.")
+    skip_complete: bool = Field(
+        default=True,
+        description='scope="all" only: skip cards whose last run finished with no errors.',
+    )
     prefix: str = Field(
         default="localized_media",
         description="Filename prefix and dedupe-priority class: localized_media, lorebook_media, extgallery, or <provider>gallery.",
     )
     phase: str = Field(default="embedded", description="Label only, recorded in the manifest's run history.")
+
+    @model_validator(mode="after")
+    def _card_id_required_for_card_scope(self) -> "MediaJobSubmitIn":
+        if self.scope == "card" and not self.card_id:
+            raise ValueError('card_id is required when scope is "card"')
+        return self
+
+
+class MediaScanOut(BaseModel):
+    """`POST /characters/{id}/media/scan` -- a dry run of the same discovery
+    `discover=true` jobs use, so the UI can show "43 images found" before
+    committing to a download. `embedded` and `lorebook` are already deduped
+    against each other -- a URL in both surfaces is reported only in
+    `embedded`."""
+
+    embedded: list[str]
+    lorebook: list[str]
 
 
 class MediaJobOut(BaseModel):
@@ -452,7 +520,7 @@ class MediaJobStatusOut(BaseModel):
     loop doesn't re-send the whole history every tick."""
 
     job_id: str
-    card_id: str
+    card_id: str | None = None
     phase: str
     prefix: str
     state: str
@@ -466,6 +534,23 @@ class MediaJobStatusOut(BaseModel):
     next_cursor: int = 0
     reason: str | None = None
     bytes: int | None = None
+
+    # ---- Stage 6B: archive-wide runs ----------------------------------------
+    scope: Literal["card", "all"] = "card"
+    unit: Literal["items", "cards"] = Field(
+        default="items",
+        description='What total/done count. A scope="all" job counts cards; a single-card job counts URLs.',
+    )
+    cards_total: int = 0
+    cards_done: int = 0
+    cards_skipped: int = Field(
+        default=0, description="Cards passed over because their last run was clean."
+    )
+    current_card_id: str | None = None
+    events_dropped: int = Field(
+        default=0,
+        description="Events discarded by the ring buffer on a long run; the manifest, not this list, is the record of what happened.",
+    )
 
 
 class ProxyStatusOut(BaseModel):

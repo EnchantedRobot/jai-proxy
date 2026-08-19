@@ -6,20 +6,21 @@ harmless. Declaring them `async` would block the event loop for the duration of 
 stat sweep or a 1.2 MB read, which is precisely the workload this API is made of.
 
 This is the archive's own contract, deliberately not SillyTavern's. Teaching it
-to answer `/characters/edit-attribute` would relocate the compatibility burden
-rather than end it; the translation lives in `web/archive-api.js`, on the client,
-in one deletable file.
+to answer `/characters/edit-attribute` would have relocated the compatibility
+burden rather than ended it, so the translation lived on the client, in one
+deletable file (`web/archive-api.js`) -- and was duly deleted with it. The
+browser client calls these routes as they are.
 
 The routes are grouped by resource across `characters`, `galleries`, `media`,
-`system`, `network` and `userscripts`; anything two of them need lives in
-`_shared`. They are assembled onto
+`system`, `network`, `userscripts` and `discover`; anything two of them need
+lives in `_shared`. They are assembled onto
 one router here, in the order they were registered when this was a single module.
 """
 
 from fastapi import APIRouter
 
 from proxy.api.v1 import _shared  # noqa: F401  -- re-exported for tests and the server's startup hook
-from proxy.api.v1 import characters, galleries, media, network, system, userscripts
+from proxy.api.v1 import characters, discover, galleries, media, network, system, userscripts
 
 router = APIRouter(prefix=_shared.PREFIX, tags=["archive"])
 router.include_router(characters.router)
@@ -28,3 +29,5 @@ router.include_router(galleries.router)
 router.include_router(media.router)
 router.include_router(network.router)
 router.include_router(userscripts.router)
+# Discover's read-only provider previews (docs/UI_REWRITE_PLAN.md §3.8).
+router.include_router(discover.router)

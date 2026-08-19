@@ -18,24 +18,34 @@ from proxy.api.schemas import (
     MediaDownloadIn,
     MediaHaveIn,
     MediaHaveOut,
+    MediaItemIn,
     MediaJobEventOut,
     MediaJobOut,
     MediaJobStatusOut,
     MediaJobSubmitIn,
     MediaManifestOut,
+    MediaScanOut,
     MediaStatusEntryOut,
     MediaStatusOut,
 )
 from proxy.api.v1 import _shared
-from proxy.cards import gallery
+from proxy.cards import gallery, pngtools
 from proxy.config import settings
-from proxy.media import jobs as media_jobs, manifest as media_manifest, writer as media_writer
+from proxy.media import (
+    discovery as media_discovery,
+    extractors as media_extractors,
+    jobs as media_jobs,
+    manifest as media_manifest,
+    status as media_status,
+    writer as media_writer,
+)
 from proxy.runtime import net
+from proxy.sources import chub as chub_source
 
 router = APIRouter()
 
 def _job_status_out(job: media_jobs.MediaJob, *, after: int = 0, include_events: bool = True) -> MediaJobStatusOut:
-    events = [MediaJobEventOut(**e) for e in job.events[after:]] if include_events else []
+    events = [MediaJobEventOut(**e) for e in job.events_after(after)] if include_events else []
     return MediaJobStatusOut(
         job_id=job.id,
         card_id=job.card_id,
@@ -49,7 +59,17 @@ def _job_status_out(job: media_jobs.MediaJob, *, after: int = 0, include_events:
         errors=job.errors,
         error=job.error_message,
         events=events,
-        next_cursor=len(job.events),
+        # A monotonic sequence number, not an index into `events` -- a long
+        # batch trims its buffer, and an index would then point at the wrong
+        # event (`MediaJob.record_event`).
+        next_cursor=job.events_seen,
+        scope=job.scope,
+        unit="cards" if job.scope == "all" else "items",
+        cards_total=job.cards_total,
+        cards_done=job.cards_done,
+        cards_skipped=job.cards_skipped,
+        current_card_id=job.current_card_id,
+        events_dropped=job.events_dropped,
     )
 
 
@@ -60,27 +80,18 @@ def get_media_status() -> MediaStatusOut:
     yet cost one failed `stat`; a folder that exists but was never downloaded
     into has no `.media.json` and costs the same. Only a folder with an actual
     manifest pays for a JSON read, and that file is small."""
-    idx = _shared.index()
-    cards: dict[str, MediaStatusEntryOut] = {}
-    for record in idx.cards():
-        folder = gallery.resolve_folder(settings.galleries_dir, gallery.folder_name(record.name, record.gallery_id))
-        if not folder:
-            continue
-        gallery_dir = settings.galleries_dir / folder
-        try:
-            media_manifest.manifest_path(gallery_dir).stat()
-        except OSError:
-            continue
-        manifest = media_manifest.load_manifest(gallery_dir)
-        last_run = manifest["runs"][-1] if manifest["runs"] else None
-        cards[record.filename] = MediaStatusEntryOut(
-            files=len(manifest["files"]),
-            bytes=sum(f.get("size", 0) for f in manifest["files"].values()),
-            complete=bool(last_run and last_run.get("errors", 0) == 0),
-            dead=len(manifest["dead"]),
-            last_run=last_run.get("at") if last_run else None,
-        )
-    return MediaStatusOut(cards=cards)
+    return MediaStatusOut(
+        cards={
+            filename: MediaStatusEntryOut(
+                files=entry.files,
+                bytes=entry.bytes,
+                complete=entry.complete,
+                dead=entry.dead,
+                last_run=entry.last_run,
+            )
+            for filename, entry in media_status.card_status_map(_shared.index()).items()
+        }
+    )
 
 
 @router.get("/characters/{card_id}/media", response_model=MediaManifestOut, summary="A card's media manifest")
@@ -96,6 +107,30 @@ def get_character_media(card_id: str) -> MediaManifestOut:
     folder = gallery.resolve_folder(settings.galleries_dir, wanted) or wanted
     manifest = media_manifest.load_manifest(settings.galleries_dir / folder) if folder else media_manifest.empty_manifest()
     return MediaManifestOut(folder=folder, files=manifest["files"], dead=manifest["dead"], runs=manifest["runs"])
+
+
+def _card_data(idx, card_id: str) -> dict:
+    record = _shared.require(idx, card_id)
+    path = idx.root / record.filename
+    try:
+        envelope = pngtools.read_envelope(path.read_bytes())
+    except (OSError, ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=f"cannot read card: {exc}") from exc
+    if envelope is None:
+        raise HTTPException(status_code=422, detail="file carries no character card")
+    return envelope[1]
+
+
+@router.post("/characters/{card_id}/media/scan", response_model=MediaScanOut, summary="Discover a card's remote media URLs, without downloading")
+def scan_character_media(card_id: str) -> MediaScanOut:
+    """Salvage item 1 (UI_REWRITE_PLAN.md §1.3, §3.4) -- the server-side walk
+    that replaces the browser scanning a card's own fields. A dry run: it
+    finds URLs, it does not fetch them, so the UI can show a count before the
+    user commits to a job."""
+    idx = _shared.index()
+    data = _card_data(idx, card_id)
+    embedded, lorebook = media_discovery.find_character_media_urls(data)
+    return MediaScanOut(embedded=embedded, lorebook=lorebook)
 
 
 @router.post("/characters/{card_id}/media", summary="Download a card's remote media")
@@ -190,12 +225,114 @@ def submit_media_job(body: MediaJobSubmitIn) -> MediaJobOut:
     `POST /characters/{id}/media` -- the browser still does discovery and
     hands over a resolved URL list -- but the download itself runs as a
     detached background task instead of over this request's own connection,
-    so it survives the tab closing. Poll `GET /media/jobs/{id}` for progress."""
+    so it survives the tab closing. Poll `GET /media/jobs/{id}` for progress.
+
+    `discover=true` (UI_REWRITE_PLAN.md §3.4) skips the browser's list
+    entirely: the server re-scans the card's own text (the same walk
+    `POST .../media/scan` previews) and downloads everything it finds,
+    embedded and lorebook URLs together, under one manifest run."""
     idx = _shared.index()
+    if body.scope == "all":
+        return _submit_batch_job(idx, body)
+
     record = _shared.require(idx, body.card_id)
+    if body.discover:
+        # Same walk the batch uses, album pages included, so a single-card
+        # "Download" and a whole-archive run can never disagree about what a
+        # card's media is.
+        items = _discovered_items(_card_data(idx, body.card_id))
+    else:
+        items = [{"url": i.url, "filename": i.filename} for i in body.items]
     folder_name, gallery_dir = _shared.gallery_dir_for_card(idx, record)
-    items = [{"url": i.url, "filename": i.filename} for i in body.items]
     job = _shared.job_store.submit(gallery_dir, folder_name, items, body.prefix, body.phase, card_id=body.card_id)
+    return MediaJobOut(job_id=job.id, state=job.state, total=job.total)
+
+
+def _discovered_items(data: dict) -> list[dict]:
+    """Everything a server-side scan can find for one card: the card's own
+    embedded and lorebook URLs, plus any gallery source resolved through
+    `media/extractors.py` -- external album pages linked in the card's text
+    (Stage 6B C3, the `extGallery` phase) and, for a Chub-sourced card, Chub's
+    own first-party gallery for it (Stage 6B, the `chub` extractor).
+
+    Gallery resolution costs at least one HTTP request, so it only runs for
+    the minority of cards that actually have a source to resolve. Callers are
+    on a worker thread or FastAPI's threadpool, which is why this is sync.
+
+    Each item carries its *own* `prefix`, matching the class it was (or would
+    have been) saved under: `localized_media` for embedded, `lorebook_media`
+    for lorebook, `extgallery` for an extractor-resolved album/MEGA image,
+    `chubgallery` for Chub's own gallery. `download_batch` falls back to the
+    job's prefix when an item omits this key, but a `discover=true` job mixes
+    all four classes in one call, and `GalleryIndex.find_by_name`'s
+    priority-downgrade guard (media-dedup.js:140-145) refuses to match a
+    lower-priority file (e.g. `extgallery_..._<mega-handle>.webp`, saved by
+    the pre-rework browser pipeline) against a higher-priority query prefix
+    like `localized_media`. Tagging every item here is what lets that guard
+    still find the archive's existing gallery files instead of silently
+    re-fetching and AES-decrypting all of them just to throw the bytes away
+    at the content-hash step.
+    """
+    embedded, lorebook = media_discovery.find_character_media_urls(data)
+    items = [{"url": url, "filename": None, "prefix": "localized_media"} for url in embedded]
+    items += [{"url": url, "filename": None, "prefix": "lorebook_media"} for url in lorebook]
+
+    # `collect_card_text_chunks` answers (embedded, lorebook) chunk lists; an
+    # album link (or a mega folder link) can sit in either surface.
+    prose_chunks, lore_chunks = media_discovery.collect_card_text_chunks(data)
+    album_pages = media_extractors.find_gallery_urls("\n".join([*prose_chunks, *lore_chunks]))
+    chub_project_id = chub_source.card_id(data)
+
+    if album_pages or chub_project_id:
+        with net.sync_client(timeout=30.0, headers={"User-Agent": "Mozilla/5.0"}) as client:
+            if album_pages:
+                for image in media_extractors.resolve_gallery_urls(client, album_pages):
+                    items.append({"url": image.url, "filename": image.filename, "prefix": "extgallery"})
+            if chub_project_id:
+                for image in media_extractors.resolve_chub_gallery(client, chub_project_id):
+                    items.append({"url": image.url, "filename": image.filename, "prefix": "chubgallery"})
+
+    # A card can reference the same image in prose, in an album, and in its
+    # own provider gallery all at once.
+    seen: set[str] = set()
+    return [i for i in items if not (i["url"] in seen or seen.add(i["url"]))]
+
+
+def _submit_batch_job(idx, body: MediaJobSubmitIn) -> MediaJobOut:
+    """Stage 6B bulk localize -- the archive-wide half of `POST /media/jobs`.
+
+    The card list is decided *here*, in the request thread, from one sweep of
+    `card_status_map`. The per-card work is not: resolving a gallery directory
+    mints a `gallery_id` and creates the folder, so doing it for every card up
+    front would leave ~3,868 empty directories behind and rewrite every card
+    that has no id yet. That work is deferred to the planner below, which the
+    worker calls one card at a time and only when there is something to fetch.
+    """
+    status = media_status.card_status_map(idx) if body.skip_complete else {}
+    card_ids: list[str] = []
+    skipped_upfront = 0
+    for record in idx.cards():
+        entry = status.get(record.filename)
+        if body.skip_complete and entry and entry.complete:
+            skipped_upfront += 1
+        else:
+            card_ids.append(record.filename)
+
+    def plan(card_id: str):
+        live = _shared.index()
+        record = _shared.require(live, card_id)
+        data = _card_data(live, card_id)
+        items = _discovered_items(data)
+        if not items:
+            # No media on this card -- return before `gallery_dir_for_card`,
+            # which would otherwise create an empty folder for it.
+            return None
+        folder_name, gallery_dir = _shared.gallery_dir_for_card(live, record)
+        return folder_name, gallery_dir, items
+
+    job = _shared.job_store.submit_batch(
+        card_ids, body.prefix, body.phase, plan=plan, skipped_upfront=skipped_upfront
+    )
     return MediaJobOut(job_id=job.id, state=job.state, total=job.total)
 
 

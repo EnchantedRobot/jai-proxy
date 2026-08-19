@@ -124,6 +124,13 @@ class CardSummary:
     prompt_chars: int = 0
     has_creator_notes: bool = False
     has_example_dialogue: bool = False
+    # Starred by the user, out of `extensions.fav`. A bool on the summary rather
+    # than a lookup into `extensions` because the grid filters and paints on it,
+    # and the extensions blob is 790 bytes a card that a list request does not
+    # otherwise pay for. SillyTavern also mirrors this at the envelope root, so
+    # the parse reads both -- but only the extensions copy survives a patch (see
+    # `pngtools.embed_card`), which is why writes go there.
+    favorite: bool = False
     # The card's whole `data.extensions` block, verbatim. Kept here -- unlike
     # every other piece of prose-adjacent content -- because it is not prose: it
     # is identity. Provider links, gallery_id, version uids and the per-source
@@ -171,6 +178,63 @@ class RefreshStats:
         return bool(self.parsed or self.removed)
 
 
+def summarize_data(data: dict[str, Any], outer: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Everything a summary derives from a card's `data` object alone -- no file
+    involved.
+
+    Split out of `summarize` below so the Discover preview can describe a card
+    that only exists in a provider's API response using exactly the counting the
+    archive applies to a card on disk (`proxy/api/v1/discover.py`). A greeting
+    count or a prompt weight that disagreed between the preview and the card you
+    end up with would be worse than showing nothing.
+
+    Returns the CardSummary field names, so a caller can splat it."""
+    outer = outer if isinstance(outer, dict) else {}
+    extensions = data.get("extensions")
+    extensions = extensions if isinstance(extensions, dict) else {}
+    # Every card this archive holds carries an `extensions.jai` block regardless
+    # of which importer wrote it -- it is stamped by CardBuilder, not by the
+    # source -- so it is the one reliable place to read provenance from. Cards
+    # from elsewhere (hand-dropped, another tool) simply have blank provenance
+    # rather than being rejected.
+    jai = extensions.get("jai")
+    jai = jai if isinstance(jai, dict) else {}
+    gallery_id = extensions.get("gallery_id")
+
+    card_id = _text(jai.get("id"))
+    return {
+        "card_id": card_id,
+        # From the id where there is one, so it matches what the filename was
+        # built from; short source ids yield a short fragment, same as on disk.
+        "fragment": id_fragment(card_id),
+        "gallery_id": gallery_id if isinstance(gallery_id, str) else "",
+        "name": _text(data.get("name")),
+        "creator": _text(data.get("creator")) or _text(jai.get("creatorName")),
+        "page_name": _text(jai.get("pageName")),
+        "tags": _string_list(data.get("tags")),
+        "source_kind": _text(jai.get("sourceKind")),
+        "source_url": _text(jai.get("source_url")),
+        "linked_at": _text(jai.get("linkedAt")),
+        # Read from the envelope root, not from `data`: `create_date` is one of
+        # the few fields SillyTavern keeps outside the card body. Resolved
+        # rather than read straight so a card that predates the stamp still
+        # sorts and displays -- the derivation is the same one the writers use.
+        "create_date": dates.resolve_create_date(outer, data),
+        "character_version": _text(data.get("character_version")),
+        # The primary greeting counts: a card always has one, and "3 greetings"
+        # should mean what a reader would expect it to mean.
+        "greeting_count": (1 if _text(data.get("first_mes")) else 0)
+        + len(_string_list(data.get("alternate_greetings"))),
+        "lore_entry_count": _lore_entry_count(data),
+        "description_chars": len(_text(data.get("description"))),
+        "prompt_chars": sum(len(_text(data.get(f))) for f in _PROMPT_FIELDS),
+        "has_creator_notes": bool(_text(data.get("creator_notes")).strip()),
+        "has_example_dialogue": bool(_text(data.get("mes_example")).strip()),
+        "favorite": _favorite(outer, extensions),
+        "extensions": extensions,
+    }
+
+
 def summarize(path: Path, stat_result: Any | None = None) -> CardSummary:
     """Read one card PNG into a summary. Never raises: a card that cannot be
     parsed comes back as a summary carrying the reason in `error`, because the
@@ -192,49 +256,23 @@ def summarize(path: Path, stat_result: Any | None = None) -> CardSummary:
     if not isinstance(data, dict):
         return CardSummary(**base, error="card `data` is not an object")
 
-    extensions = data.get("extensions")
-    extensions = extensions if isinstance(extensions, dict) else {}
-    # Every card this archive holds carries an `extensions.jai` block regardless
-    # of which importer wrote it -- it is stamped by CardBuilder, not by the
-    # source -- so it is the one reliable place to read provenance from. Cards
-    # from elsewhere (hand-dropped, another tool) simply have blank provenance
-    # rather than being rejected.
-    jai = extensions.get("jai")
-    jai = jai if isinstance(jai, dict) else {}
-    gallery_id = extensions.get("gallery_id")
+    return CardSummary(**base, **summarize_data(data, outer))
 
-    card_id = _text(jai.get("id"))
-    return CardSummary(
-        **base,
-        card_id=card_id,
-        # From the id where there is one, so it matches what the filename was
-        # built from; short source ids yield a short fragment, same as on disk.
-        fragment=id_fragment(card_id),
-        gallery_id=gallery_id if isinstance(gallery_id, str) else "",
-        name=_text(data.get("name")),
-        creator=_text(data.get("creator")) or _text(jai.get("creatorName")),
-        page_name=_text(jai.get("pageName")),
-        tags=_string_list(data.get("tags")),
-        source_kind=_text(jai.get("sourceKind")),
-        source_url=_text(jai.get("source_url")),
-        linked_at=_text(jai.get("linkedAt")),
-        # Read from the envelope root, not from `data`: `create_date` is one of
-        # the few fields SillyTavern keeps outside the card body. Resolved
-        # rather than read straight so a card that predates the stamp still
-        # sorts and displays -- the derivation is the same one the writers use.
-        create_date=dates.resolve_create_date(outer if isinstance(outer, dict) else {}, data),
-        character_version=_text(data.get("character_version")),
-        # The primary greeting counts: a card always has one, and "3 greetings"
-        # should mean what a reader would expect it to mean.
-        greeting_count=(1 if _text(data.get("first_mes")) else 0)
-        + len(_string_list(data.get("alternate_greetings"))),
-        lore_entry_count=_lore_entry_count(data),
-        description_chars=len(_text(data.get("description"))),
-        prompt_chars=sum(len(_text(data.get(f))) for f in _PROMPT_FIELDS),
-        has_creator_notes=bool(_text(data.get("creator_notes")).strip()),
-        has_example_dialogue=bool(_text(data.get("mes_example")).strip()),
-        extensions=extensions,
-    )
+
+def _favorite(outer: dict[str, Any], extensions: dict[str, Any]) -> bool:
+    """Whether this card is starred, from either place the flag is written.
+
+    SillyTavern keeps `fav` at the envelope root *and* under
+    `data.extensions`, and cards that passed through it can carry either or
+    both -- and either as the string `"true"`, which is what its own settings
+    round-trip produces. Reading is therefore tolerant of all four shapes.
+    Writing is not: only the extensions copy survives `pngtools.embed_card`,
+    which rebuilds the envelope from the spec header plus `data`.
+    """
+    for value in (extensions.get("fav"), outer.get("fav")):
+        if value is True or value == "true":
+            return True
+    return False
 
 
 def _diagnose(raw: bytes) -> str:

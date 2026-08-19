@@ -96,8 +96,13 @@ def creator_id(data: dict[str, Any]) -> str:
 
 
 def page_name(data: dict[str, Any]) -> str:
-    """The JanitorAI page name (datacat records the character name here; it does
-    not capture the separate card-title blurb the native path stores)."""
+    """The source page's listing title, out of the datacat block.
+
+    Cards written by the browser-capture path carry the real listing title here
+    (see `_v2_extensions_block`), the same blurb the native JanitorAI path
+    stores. Older CharacterLibrary-written PNGs recorded the character name
+    instead, and a card with no block at all falls back to it -- so this is
+    "the best title we have", never blank for a card that has a name."""
     return _s(datacat_block(data).get("pageName")) or _s(data.get("name"))
 
 
@@ -364,6 +369,13 @@ def _v2_extensions_block(character: dict[str, Any]) -> dict[str, Any]:
             "sourceKind": character.get("primary_content_source_kind"),
             "creatorId": character.get("creator_id") or character.get("creatorId"),
             "creatorName": character.get("creator_name") or character.get("creatorName"),
+            # The listing title, which datacat mirrors from the source page into
+            # `name` -- the character's own name is `chat_name`, and that is what
+            # becomes data.name. Without this the block carries no pageName,
+            # page_name() falls through to data.name, and the card records its
+            # character name as its listing (a "Narrator" card whose page was
+            # actually titled something loses the only title it had).
+            "pageName": _s(character.get("name")),
         }
     }
 

@@ -2,6 +2,19 @@
 # image and uv's are multi-arch -- so this builds natively on arm64 (a Mac) and
 # amd64 (a NAS or a VPS) without a variant per host.
 
+# --- frontend builder: the browser client, compiled to static assets ---------
+# node:24-alpine and not the host's node: this stage only has to run Vite, and
+# pinning it here means the image never depends on what a developer's machine
+# happens to have installed.
+FROM node:24-alpine AS frontend-builder
+
+WORKDIR /app/frontend
+# package files first, so a source-only change reuses the install layer.
+COPY frontend/package.json frontend/package-lock.json frontend/.npmrc ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
 # --- builder: resolve the locked dependency set into a venv ------------------
 FROM python:3.13-slim-bookworm AS builder
 
@@ -43,7 +56,9 @@ RUN useradd --create-home --uid 1000 app
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY proxy/ ./proxy/
-COPY web/ ./web/
+# The client's built output only -- no node_modules, no sources. Serving it is
+# proxy/server.py's FRONTEND_DIST, and it answers at the root.
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 # Source fragments only, not the compiled bundles: the server concatenates them
 # per request with the user's server URL and tag filter substituted in
 # (proxy/userscripts.py). ~60 KB, and it is what makes the userscripts

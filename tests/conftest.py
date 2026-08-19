@@ -35,12 +35,16 @@ def card_png(
     # make every geometry assertion in the suite test the fixture instead.
     size: tuple[int, int] = (384, 576),
     colour: tuple[int, int, int, int] = (120, 80, 200, 255),
+    envelope_extra: dict[str, Any] | None = None,
     **fields: Any,
 ) -> bytes:
     """A V3 card PNG: real pixels, real tEXt chunks, both spec keys.
 
     `fields` go straight into the card's `data`, so a test says what it is about
     (`tags=[...]`, `extensions={...}`) and inherits a valid card around it.
+    `envelope_extra` writes *outside* `data`, which is where SillyTavern keeps
+    the handful of root-only fields (`create_date`, `fav`) -- the ones a re-embed
+    drops unless something carries them across.
     """
     data: dict[str, Any] = {
         "name": name,
@@ -60,6 +64,7 @@ def card_png(
     }
     data.update(fields)
     envelope = {"spec": "chara_card_v3", "spec_version": "3.0", "data": data, **data}
+    envelope.update(envelope_extra or {})
 
     buffer = io.BytesIO()
     Image.new("RGBA", size, colour).save(buffer, "PNG")

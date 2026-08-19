@@ -218,6 +218,14 @@ def test_build_v2_from_character_matches_the_archived_native_twin():
     # native /build-jai retrieval that just happens to carry none either).
     assert data["character_book"] is None
 
+    # The listing title is datacat's `name`; `chat_name` is the character. The
+    # native twin recorded "Offer You Can't Refuse | Abbie" as its pageName, so
+    # the capture path has to reach the same value rather than falling through
+    # to data.name and recording "Abbie" as this card's listing.
+    assert character["name"].strip() != character["chat_name"]
+    assert data["extensions"]["datacat"]["pageName"] == "Offer You Can't Refuse | Abbie"
+    assert mapper.page_name(data) == "Offer You Can't Refuse | Abbie"
+
     profile = mapper.to_profile_fields(data)
     assert profile.name == "Abbie"
     greetings = mapper.greetings(data)

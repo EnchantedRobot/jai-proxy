@@ -37,6 +37,16 @@ userscript/*.user.js
 docs/
 example.json
 
+# The React client's build inputs stay out of the context; its *output* does
+# not come from the context at all -- the frontend-builder stage produces it
+# from frontend/ source, which must therefore NOT be excluded here. Excluding
+# node_modules is what keeps this file doing its job (see the header): it is
+# hundreds of MB of the largest kind of small file.
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/openapi.json
+
 # Build/tooling detritus.
 .venv/
 .git/

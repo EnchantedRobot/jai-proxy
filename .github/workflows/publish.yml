@@ -63,7 +63,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # Without this every run reinstalls pngquant and re-resolves the whole
-          # locked dependency set; with it, a change under proxy/ or web/ only
+          # locked dependency set; with it, a change under proxy/ only
           # rebuilds the COPY layers.
           cache-from: type=gha
           cache-to: type=gha,mode=max

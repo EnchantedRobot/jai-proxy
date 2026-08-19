@@ -1,16 +1,16 @@
-"""`GET|POST /proxy/{url}` -- the passthrough the vendored frontend has been
-calling into a 404 ever since the pivot.
+"""`GET|POST /proxy/{url}` -- the passthrough a provider fetch falls back to.
 
 WHY THIS EXISTS
 CharacterLibrary was written as a SillyTavern extension, and SillyTavern shipped
-a CORS-proxy middleware at exactly this path. Sixteen call sites still reach for
-it: `fetchWithProxy` in `web/modules/providers/provider-utils.js`, all seven
-gallery extractors, three Chub modules and the media-localization section. Every
-one of them tries the provider directly first and falls back here when the
-browser's CORS policy (or a provider that simply doesn't send the header) makes
-the direct leg impossible. With no route answering, that fallback returned a 404
-HTML page -- which the media pipeline then classified as a permanently dead URL,
-marking characters "media complete" having never fetched a byte.
+a CORS-proxy middleware at exactly this path, which sixteen call sites in the old
+frontend reached for. Every one of them tried the provider directly first and
+fell back here when the browser's CORS policy (or a provider that simply doesn't
+send the header) made the direct leg impossible. After the pivot no route
+answered, so that fallback returned a 404 HTML page -- which the media pipeline
+then classified as a permanently dead URL, marking characters "media complete"
+having never fetched a byte. The client is a different program now and the
+fallback is a deliberate one (`fetchWithFallback`, frontend/src/lib/providers/
+shared.ts), but the route and the reason for it are unchanged.
 
 So this is a bug fix that predates the proxy feature, and it is also where the
 configured outbound proxy earns most of its keep: browsing Chub and running the
@@ -73,6 +73,14 @@ _DROP_REQUEST_HEADERS = frozenset(
 # Dropped on the way back for the same framing reason: httpx has already decoded
 # the body, so a `content-encoding: gzip` we copied would describe bytes that are
 # no longer gzipped and the browser would fail to parse them.
+#
+# `cross-origin-resource-policy` is dropped for a different reason: it describes
+# the *upstream's* origin, not ours, and a provider that sets `same-origin` (e.g.
+# saucepan.ai's CDN) would have that policy replayed against callers of this very
+# route -- including the sandboxed creator-notes iframe, whose opaque origin can
+# never satisfy `same-origin` against anyone, itself included. We already vetted
+# the URL through the SSRF guard before fetching it; once it is our response,
+# the upstream's cross-origin policy for its own origin no longer applies.
 _DROP_RESPONSE_HEADERS = frozenset(
     {
         "content-encoding",
@@ -85,6 +93,7 @@ _DROP_RESPONSE_HEADERS = frozenset(
         "trailer",
         "transfer-encoding",
         "upgrade",
+        "cross-origin-resource-policy",
     }
 )
 
@@ -105,17 +114,36 @@ def _forwarded_response_headers(response: httpx.Response) -> dict[str, str]:
     }
 
 
-@router.api_route("/proxy/{url:path}", methods=["GET", "POST"])
+# Two routes rather than one `api_route(methods=["GET", "POST"])`, and the
+# reason is downstream: FastAPI writes a *single* operation id per function, so
+# a two-method route emits the same id under both `get:` and `post:` in the
+# OpenAPI document. That is not cosmetic -- openapi-typescript turns each into
+# a TypeScript declaration of the same name and the frontend's `tsc -b` fails
+# on the duplicate (see `make api-schema`). One function per method is what
+# keeps the generated client compilable; both delegate to `_forward` below, so
+# there is still one implementation.
+@router.get("/proxy/{url:path}")
 async def cors_proxy(url: str, request: Request) -> Response:
     """Fetch `url` server-side and hand the response back verbatim.
 
     The URL arrives percent-encoded as a single path segment (`proxyEncode` in
     provider-utils.js escapes `/` and `?` along with everything else), so
     Starlette's own path decoding hands it back whole, query string included.
-
-    POST is here for `mega.js`, the one caller that posts a JSON command batch
-    through the fallback; every other site is a GET.
     """
+    return await _forward(url, request)
+
+
+@router.post("/proxy/{url:path}")
+async def cors_proxy_post(url: str, request: Request) -> Response:
+    """`cors_proxy`, for the one caller that posts.
+
+    `mega.js` sends a JSON command batch through the fallback; every other site
+    is a GET.
+    """
+    return await _forward(url, request)
+
+
+async def _forward(url: str, request: Request) -> Response:
     target = url.strip()
     if not target:
         return PlainTextResponse("no URL given", status_code=400)

@@ -37,7 +37,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 
 from proxy.archive import thumbs
@@ -50,24 +50,69 @@ logger = logging.getLogger("jai_proxy.media.jobs")
 JobState = Literal["queued", "running", "done", "error", "cancelled"]
 
 
+JobScope = Literal["card", "all"]
+
+# Resolve one card id to the work for it, or None to skip it. Returns
+# `(folder_name, gallery_dir, items)`. Called on a worker thread, one card at a
+# time, at the moment that card comes up -- never up front for the whole batch.
+BatchPlanner = Callable[[str], "tuple[str, Path, list[dict[str, Any]]] | None"]
+
+# A batch over 3,868 cards can emit far more events than any poller reads, and
+# `_job_status_out(after=0)` materializes every one of them into a Pydantic
+# model. Keep a bounded tail and count what fell off -- the manifest is the
+# actual record of what happened (see the module docstring).
+MAX_EVENTS = 2000
+
+
 @dataclass
 class MediaJob:
     id: str
-    card_id: str
+    card_id: str | None
     prefix: str
     phase: str
     total: int
     created_at: str
+    scope: JobScope = "card"
     state: JobState = "queued"
     done: int = 0
     saved: int = 0
     skipped: int = 0
     errors: int = 0
     events: list[dict[str, Any]] = field(default_factory=list)
+    events_dropped: int = 0
     error_message: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
     cancel_requested: bool = False
+    # Batch-only. `cards_total` counts cards *considered*, so
+    # cards_done + cards_skipped converges on it.
+    cards_total: int = 0
+    cards_done: int = 0
+    cards_skipped: int = 0
+    current_card_id: str | None = None
+
+    # Total events ever appended. The poll cursor counts *these*, not indices
+    # into `events`, so trimming the front cannot make an old cursor point at
+    # the wrong event -- it can only make it point at one already dropped.
+    events_seen: int = 0
+
+    def record_event(self, event: dict[str, Any]) -> None:
+        self.events.append(event)
+        self.events_seen += 1
+        if len(self.events) > MAX_EVENTS:
+            # Drop from the front: a poller this far behind has already lost the
+            # head, and the tail is what it wants next.
+            overflow = len(self.events) - MAX_EVENTS
+            del self.events[:overflow]
+            self.events_dropped += overflow
+
+    def events_after(self, cursor: int) -> list[dict[str, Any]]:
+        """Events with sequence number >= `cursor`, as far back as the buffer
+        still holds. A cursor pointing into the dropped region yields the whole
+        buffer rather than an error -- `events_dropped` is how a caller learns
+        it missed some."""
+        first_held = self.events_seen - len(self.events)
+        return self.events[max(0, cursor - first_held) :]
 
 
 class JobStore:
@@ -96,6 +141,15 @@ class JobStore:
         self._queue = asyncio.Queue()
         self._worker_task = loop.create_task(self._worker())
 
+    def _enqueue(self, job: MediaJob, payload: tuple) -> MediaJob:
+        if self._loop is None or self._queue is None:
+            raise RuntimeError("JobStore.bind() must run before the first submission")
+        self._jobs[job.id] = job
+        self._order.append(job.id)
+        self._evict_finished()
+        asyncio.run_coroutine_threadsafe(self._queue.put((job.id, payload)), self._loop).result()
+        return job
+
     def submit(
         self,
         gallery_dir: Path,
@@ -105,8 +159,6 @@ class JobStore:
         phase: str,
         card_id: str,
     ) -> MediaJob:
-        if self._loop is None or self._queue is None:
-            raise RuntimeError("JobStore.bind() must run before the first submission")
         job = MediaJob(
             id=uuid.uuid4().hex,
             card_id=card_id,
@@ -115,13 +167,50 @@ class JobStore:
             total=len(items),
             created_at=media_manifest.now_iso(),
         )
-        self._jobs[job.id] = job
-        self._order.append(job.id)
-        self._evict_finished()
-        asyncio.run_coroutine_threadsafe(
-            self._queue.put((job.id, gallery_dir, folder_name, items)), self._loop
-        ).result()
-        return job
+        return self._enqueue(job, ("card", gallery_dir, folder_name, items))
+
+    def submit_batch(
+        self,
+        card_ids: list[str],
+        prefix: str,
+        phase: str,
+        *,
+        plan: "BatchPlanner",
+        skipped_upfront: int = 0,
+    ) -> MediaJob:
+        """Stage 6B -- bulk localize, as one job that walks `card_ids` in order.
+
+        Not a pool of child jobs: the single serial worker below *is* the lock
+        that keeps two runs off the same gallery's manifest (see the module
+        docstring), and spawning per-card jobs would give that up for no gain.
+        Concurrency already lives one level down, inside `download_batch`.
+
+        `plan` resolves a card id to `(folder_name, gallery_dir, items)` at the
+        moment that card comes up. It is a callback rather than a precomputed
+        list because resolving a gallery directory *creates* it -- doing that
+        for 3,868 cards up front would litter the archive with empty folders and
+        rewrite every card that has no `gallery_id` yet.
+
+        `skipped_upfront` is how many cards the caller already ruled out (a
+        clean previous run). They are counted in `cards_total` and
+        `cards_skipped` so the totals describe the *archive*, not the worklist:
+        "3,868 cards, 3,144 skipped" is the useful progress line, and a job
+        reporting 724 of 724 would hide the skipping entirely.
+        """
+        total = len(card_ids) + skipped_upfront
+        job = MediaJob(
+            id=uuid.uuid4().hex,
+            card_id=None,
+            scope="all",
+            prefix=prefix,
+            phase=phase,
+            total=total,
+            cards_total=total,
+            cards_skipped=skipped_upfront,
+            done=skipped_upfront,
+            created_at=media_manifest.now_iso(),
+        )
+        return self._enqueue(job, ("all", card_ids, plan))
 
     def get(self, job_id: str) -> MediaJob | None:
         return self._jobs.get(job_id)
@@ -156,7 +245,7 @@ class JobStore:
     async def _worker(self) -> None:
         assert self._queue is not None
         while True:
-            job_id, gallery_dir, folder_name, items = await self._queue.get()
+            job_id, payload = await self._queue.get()
             job = self._jobs.get(job_id)
             if job is None:
                 self._queue.task_done()
@@ -164,7 +253,12 @@ class JobStore:
             job.state = "running"
             job.started_at = media_manifest.now_iso()
             try:
-                await self._run(job, gallery_dir, folder_name, items)
+                if payload[0] == "all":
+                    _kind, card_ids, plan = payload
+                    await self._run_batch(job, card_ids, plan)
+                else:
+                    _kind, gallery_dir, folder_name, items = payload
+                    await self._run(job, gallery_dir, folder_name, items)
                 if job.state == "running":
                     job.state = "done"
             except Exception as exc:  # one bad job must not kill the worker
@@ -175,9 +269,30 @@ class JobStore:
                 job.finished_at = media_manifest.now_iso()
                 self._queue.task_done()
 
-    async def _run(self, job: MediaJob, gallery_dir: Path, folder_name: str, items: list[dict[str, Any]]) -> None:
+    async def _run(
+        self,
+        job: MediaJob,
+        gallery_dir: Path,
+        folder_name: str,
+        items: list[dict[str, Any]],
+        *,
+        ledger: dict | None = None,
+    ) -> None:
+        """One card's worth of downloading.
+
+        `ledger` lets a batch own the dead ledger across many cards: it is a
+        single global file (`manifest.py`), so loading and atomically rewriting
+        it per card would mean thousands of rewrites of the same few thousand
+        entries. Passed in, this method neither loads nor saves it.
+        """
+        owns_ledger = ledger is None
+        # The job's counters are cumulative across a batch, but the manifest run
+        # this appends belongs to *this card* -- so record the deltas, not the
+        # running totals.
+        saved_before, skipped_before, errors_before = job.saved, job.skipped, job.errors
         manifest = media_manifest.load_manifest(gallery_dir)
-        ledger = media_manifest.load_dead_ledger()
+        if ledger is None:
+            ledger = media_manifest.load_dead_ledger()
         index_state = media_writer.GalleryIndex.build(gallery_dir)
         # Same scheme the synchronous route uses: a millisecond timestamp as
         # the starting file index, unique across runs with no persistent counter.
@@ -205,8 +320,11 @@ class JobStore:
                     job.skipped += 1
                 else:
                     job.errors += 1
-                job.done += 1
-                job.events.append(
+                # A batch counts cards, not URLs, so its `done` is advanced by
+                # `_run_batch` instead.
+                if job.scope == "card":
+                    job.done += 1
+                job.record_event(
                     {
                         "url": outcome.url,
                         "status": outcome.status,
@@ -218,7 +336,7 @@ class JobStore:
 
         # `download_batch` stops handing out work as soon as `should_cancel`
         # fires; the state flip is this loop's to make, after it drains.
-        if job.cancel_requested:
+        if job.cancel_requested and job.scope == "card":
             job.state = "cancelled"
 
         media_manifest.append_run(
@@ -226,10 +344,66 @@ class JobStore:
             {
                 "at": media_manifest.now_iso(),
                 "phase": job.phase,
-                "saved": job.saved,
-                "skipped": job.skipped,
-                "errors": job.errors,
+                "saved": job.saved - saved_before,
+                "skipped": job.skipped - skipped_before,
+                "errors": job.errors - errors_before,
             },
         )
         media_manifest.save_manifest(gallery_dir, manifest)
-        media_manifest.save_dead_ledger(ledger)
+        if owns_ledger:
+            media_manifest.save_dead_ledger(ledger)
+
+    # Save the shared dead ledger every N cards rather than every card: it is
+    # one global file, and a batch would otherwise rewrite it thousands of times.
+    LEDGER_SAVE_EVERY = 25
+
+    async def _run_batch(
+        self,
+        job: MediaJob,
+        card_ids: list[str],
+        plan: "BatchPlanner",
+    ) -> None:
+        """Stage 6B bulk localize: every card, in order, inside one job.
+
+        Sequential on purpose -- see `submit_batch`. Each card gets its own
+        manifest run, so a batch interrupted at any point leaves every finished
+        card correct on disk; the job record itself is a live-progress cache and
+        is not expected to survive a restart.
+        """
+        ledger = media_manifest.load_dead_ledger()
+        # Cards ruled out before the job started are already counted.
+        base_done = job.done
+        try:
+            for position, card_id in enumerate(card_ids, start=1):
+                if job.cancel_requested:
+                    job.state = "cancelled"
+                    break
+                job.current_card_id = card_id
+                try:
+                    # `plan` reads and parses a PNG and may mint a gallery id --
+                    # synchronous work that would otherwise stall the single
+                    # event loop (and with it browse, thumbnails and every other
+                    # request) for the length of the run.
+                    planned = await asyncio.to_thread(plan, card_id)
+                except Exception as exc:
+                    job.errors += 1
+                    job.record_event(
+                        {"url": card_id, "status": "error", "reason": f"could not plan: {exc}"}
+                    )
+                    planned = None
+
+                if planned is None:
+                    # Nothing to fetch (already complete, unreadable, or no
+                    # media found). Deliberately *not* an error.
+                    job.cards_skipped += 1
+                else:
+                    folder_name, gallery_dir, items = planned
+                    await self._run(job, gallery_dir, folder_name, items, ledger=ledger)
+                    job.cards_done += 1
+
+                job.done = base_done + position
+                if position % self.LEDGER_SAVE_EVERY == 0:
+                    media_manifest.save_dead_ledger(ledger)
+        finally:
+            job.current_card_id = None
+            media_manifest.save_dead_ledger(ledger)

@@ -1,0 +1,217 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { apiClient } from '@/lib/api-client'
+import type { components } from '@/lib/api-schema'
+import type { CardData } from '@/lib/card'
+import type { CardDetailResult } from './use-character-detail'
+
+export type CardImport = components['schemas']['CardImportOut']
+
+/**
+ * Thrown when a write's `If-Match` did not match — another tab, or the old UI
+ * during the overlap, wrote the card first. The UI shows this specially and
+ * offers reload rather than retrying blind (docs/UI_REWRITE_PLAN.md §4.4).
+ */
+export class StaleWriteError extends Error {
+  constructor() {
+    super(
+      'This card changed since you opened it. Reload before saving over it.',
+    )
+    this.name = 'StaleWriteError'
+  }
+}
+
+/**
+ * The queries a write can invalidate: the grid and the shelf both key on
+ * `['characters', …]`, the tag popover on `['facets']`, the counts on
+ * `['stats']`, and the detail's Related rows on `['related', …]`. A card edit
+ * can move any of them, so all four are refetched after one lands.
+ */
+export function invalidateArchive(client: ReturnType<typeof useQueryClient>) {
+  for (const key of [['characters'], ['facets'], ['stats'], ['related']])
+    void client.invalidateQueries({ queryKey: key })
+}
+
+/**
+ * Whole-card `PUT` with the detail read's `ETag` as the precondition.
+ *
+ * The mutation carries the `card` (a `data` object built by `lib/card-edit`) and
+ * the `etag` the page is holding. A 412 becomes a `StaleWriteError`; success
+ * writes the fresh card *and its new ETag* straight into the detail cache, so a
+ * second edit in the same session has a current precondition without a refetch.
+ */
+export function usePutCharacter(id: string) {
+  const client = useQueryClient()
+  return useMutation<
+    CardDetailResult,
+    Error,
+    { card: CardData; etag: string | null }
+  >({
+    mutationFn: async ({ card, etag }) => {
+      const { data, response } = await apiClient.PUT(
+        '/api/v1/characters/{card_id}',
+        {
+          params: { path: { card_id: id } },
+          headers: etag ? { 'If-Match': etag } : undefined,
+          body: { card },
+        },
+      )
+      if (response.status === 412) throw new StaleWriteError()
+      if (!response.ok || data === undefined)
+        throw new Error(
+          `could not save the card: ${response.status} ${response.statusText}`.trim(),
+        )
+      return { card: data, etag: response.headers.get('ETag') }
+    },
+    onSuccess: (result) => {
+      client.setQueryData(['character', id], result)
+      invalidateArchive(client)
+    },
+  })
+}
+
+/**
+ * Star or unstar. The one targeted write — a boolean, no read-detail dance — so
+ * it is optimistic: the star flips at once and rolls back only if the write
+ * fails, then the grid is invalidated so its tiles agree.
+ */
+export function useSetFavorite(id: string) {
+  const client = useQueryClient()
+  return useMutation<boolean, Error, boolean, { previous?: CardDetailResult }>({
+    mutationFn: async (value) => {
+      const { data, response } = await apiClient.POST(
+        '/api/v1/characters/{card_id}/favorite',
+        { params: { path: { card_id: id } }, body: { value } },
+      )
+      if (!response.ok || data === undefined)
+        throw new Error('could not update the favourite')
+      return data.favorite
+    },
+    onMutate: async (value) => {
+      await client.cancelQueries({ queryKey: ['character', id] })
+      const previous = client.getQueryData<CardDetailResult>(['character', id])
+      if (previous)
+        client.setQueryData<CardDetailResult>(['character', id], {
+          ...previous,
+          card: { ...previous.card, favorite: value },
+        })
+      return { previous }
+    },
+    onError: (_error, _value, context) => {
+      if (context?.previous)
+        client.setQueryData(['character', id], context.previous)
+    },
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ['characters'] })
+    },
+  })
+}
+
+/** Bin a card, optionally its gallery with it. */
+export function useDeleteCharacter(id: string) {
+  const client = useQueryClient()
+  return useMutation<void, Error, 'keep' | 'delete'>({
+    mutationFn: async (gallery) => {
+      const { response } = await apiClient.DELETE(
+        '/api/v1/characters/{card_id}',
+        {
+          params: { path: { card_id: id }, query: { gallery } },
+        },
+      )
+      if (!response.ok)
+        throw new Error(
+          `could not delete the card: ${response.status} ${response.statusText}`.trim(),
+        )
+    },
+    onSuccess: () => {
+      client.removeQueries({ queryKey: ['character', id] })
+      invalidateArchive(client)
+    },
+  })
+}
+
+/**
+ * Replace the portrait. Multipart, so it goes through `fetch` directly rather
+ * than `openapi-fetch` — the endpoint re-encodes through intake's pipeline, and
+ * the returned detail (with a fresh ETag) replaces the cache. The pixels change
+ * behind an unchanged URL, so the caller cache-busts the image off the new ETag.
+ */
+export function useReplaceAvatar(id: string) {
+  const client = useQueryClient()
+  return useMutation<
+    CardDetailResult,
+    Error,
+    { file: File; etag: string | null }
+  >({
+    mutationFn: async ({ file, etag }) => {
+      const body = new FormData()
+      body.set('image', file)
+      const response = await fetch(
+        `/api/v1/characters/${encodeURIComponent(id)}/avatar`,
+        {
+          method: 'PUT',
+          body,
+          headers: etag ? { 'If-Match': etag } : undefined,
+        },
+      )
+      if (response.status === 412) throw new StaleWriteError()
+      if (!response.ok) {
+        const detail = await response.json().catch(() => null)
+        throw new Error(
+          detail?.detail ?? `could not replace the image: ${response.status}`,
+        )
+      }
+      const data = (await response.json()) as CardDetailResult['card']
+      return { card: data, etag: response.headers.get('ETag') }
+    },
+    onSuccess: (result) => {
+      client.setQueryData(['character', id], result)
+      invalidateArchive(client)
+    },
+  })
+}
+
+/**
+ * Adopt one or more card PNGs. `POST /characters` takes one file, so multi-file
+ * is a client loop — reported per file, since a duplicate is a success and a
+ * failed file should not sink the rest.
+ */
+export function useImportCharacters() {
+  const client = useQueryClient()
+  return useMutation<
+    { file: string; result?: CardImport; error?: string }[],
+    Error,
+    { files: File[]; onDuplicate: 'skip' | 'overwrite' }
+  >({
+    mutationFn: async ({ files, onDuplicate }) => {
+      const results: { file: string; result?: CardImport; error?: string }[] =
+        []
+      for (const file of files) {
+        const body = new FormData()
+        body.set('file', file)
+        body.set('on_duplicate', onDuplicate)
+        try {
+          const response = await fetch('/api/v1/characters', {
+            method: 'POST',
+            body,
+          })
+          if (!response.ok) {
+            const detail = await response.json().catch(() => null)
+            results.push({
+              file: file.name,
+              error: detail?.detail ?? `HTTP ${response.status}`,
+            })
+          } else {
+            results.push({
+              file: file.name,
+              result: (await response.json()) as CardImport,
+            })
+          }
+        } catch (error) {
+          results.push({ file: file.name, error: String(error) })
+        }
+      }
+      return results
+    },
+    onSuccess: () => invalidateArchive(client),
+  })
+}

@@ -16,10 +16,10 @@ import sys
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from proxy import deps
@@ -35,10 +35,17 @@ from proxy.runtime import dashboard as dashboard_mod
 
 logger = logging.getLogger("jai_proxy.server")
 
-# The vendored Character Library frontend. In the repo, not in the archive:
-# it is code, it ships with the server, and it is the same directory in a
-# checkout and in the container image. See web/VENDORED.md.
-WEB_DIR = ROOT / "web"
+# The browser client (docs/UI_REWRITE_PLAN.md). Built by `make frontend-build`
+# into frontend/dist -- present in the container image and in a checkout that
+# has run the build, absent otherwise, which is why everything below is
+# guarded. In dev it is served by Vite on :5173 instead, with /api proxied back
+# here.
+#
+# It replaced the vendored CharacterLibrary frontend that used to live in
+# `web/`, deleted at the Stage 7 cut-over. That directory is preserved on the
+# `legacy-web` branch; the "ported from web/..." comments across this package
+# resolve against it.
+FRONTEND_DIST = ROOT / "frontend" / "dist"
 
 
 @contextlib.asynccontextmanager
@@ -52,22 +59,32 @@ async def _lifespan(_app: FastAPI):
 
 app = FastAPI(title="jai-proxy", lifespan=_lifespan)
 
-# The archive's own contract: browse, download, export. Deliberately namespaced
-# under /api/v1 and deliberately not shaped like SillyTavern's /api -- see
-# proxy/api/__init__.py for why that distinction is the point.
-app.include_router(v1_router)
-# DataCat's session transport (Phase 3B S2). See proxy/api/datacat.py.
-app.include_router(datacat_router)
-# What the two userscripts talk to: the per-source build endpoints, the
-# bookkeeping they call around a bulk run, and the custom-provider chat surface
-# that is how a hidden definition gets captured at all.
-app.include_router(build_router)
-app.include_router(capture_router)
-app.include_router(chat_router)
-# The CORS passthrough the vendored frontend falls back to when a provider
-# refuses a browser-direct fetch. Registered before the static mount like every
-# other route; see proxy/api/cors_proxy.py for why it exists at all.
-app.include_router(cors_proxy_router)
+# Every router the server answers, as one tuple rather than a run of
+# `include_router` calls: the client's catch-all below derives the set of paths
+# it must NOT swallow from exactly this list, so a router added here cannot be
+# shadowed by the frontend without anyone noticing.
+#
+# - v1_router: the archive's own contract -- browse, download, export.
+#   Deliberately namespaced under /api/v1 and deliberately not shaped like
+#   SillyTavern's /api; see proxy/api/__init__.py for why that is the point.
+# - datacat_router: DataCat's session transport (Phase 3B S2).
+# - build/capture/chat: what the two userscripts talk to -- the per-source
+#   build endpoints, the bookkeeping around a bulk run, and the
+#   custom-provider chat surface that is how a hidden definition gets captured
+#   at all.
+# - cors_proxy_router: the passthrough a provider fetch falls back to when the
+#   browser cannot reach it directly.
+ROUTERS = (
+    v1_router,
+    datacat_router,
+    build_router,
+    capture_router,
+    chat_router,
+    cors_proxy_router,
+)
+
+for _router in ROUTERS:
+    app.include_router(_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -77,11 +94,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# The browse UI loads the entire archive as one JSON document at boot -- 5.9 MB
-# with extensions attached -- and 1.3 MB of vendored JavaScript alongside it.
-# Both are overwhelmingly repeated text, so gzip takes the pair down by roughly
-# a factor of five. The threshold keeps thumbnails and card PNGs out of it:
-# those are already compressed, and re-compressing them costs CPU to add bytes.
+# The list payloads and the client's own JavaScript are both overwhelmingly
+# repeated text, and gzip takes them down by roughly a factor of five. The
+# threshold keeps thumbnails and card PNGs out of it: those are already
+# compressed, and re-compressing them costs CPU to add bytes.
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
@@ -103,45 +119,100 @@ class QuietAccessFilter(logging.Filter):
 
 logging.getLogger("uvicorn.access").addFilter(QuietAccessFilter())
 
-# The browser, mounted last and mounted at the root.
+# The client, mounted last and mounted at the root.
 #
-# Last because Starlette matches routes in registration order and a mount at "/"
-# matches everything: every API route above therefore wins, and the frontend
+# Last because Starlette matches routes in registration order and the catch-all
+# below matches everything: every API route above therefore wins, and the client
 # picks up only what is left. Registering it earlier would swallow /api/v1 and
 # the userscript endpoints whole.
 #
-# At the root rather than /library because the archive *is* this application
-# now. There is no host page to be a subsection of.
-#
-# `html=True` serves index.html for "/" and for directory requests. It does
-# NOT fall back to index.html for an arbitrary unknown path -- Starlette's
-# StaticFiles only rewrites directory requests and looks for a 404.html,
-# neither of which applies here -- so an unmatched path 404s (verified live).
-# This app has no client-side deep-link routing that would need that fallback.
-class NoCacheStaticFiles(StaticFiles):
-    """Serve the frontend with browser caching switched off.
+# At the root rather than under /library or /next because the archive *is* this
+# application now. There is no host page to be a subsection of, and no second
+# frontend to share the root with.
 
-    StaticFiles sends ETag/Last-Modified but no Cache-Control, which leaves
-    Chrome free to apply heuristic freshness. That bit us badly: a hard reload
-    only bypasses the cache for the *navigation's* own subresources, so the
-    modules under web/modules/ -- imported later, when the user opens the tag
-    manager or switches to Online -- kept being served from cache. Stale code
-    is indistinguishable from broken code, and we burned a session on it.
 
-    This is a localhost archive serving a few hundred KB of its own assets.
-    Always-fresh is worth more than the bytes.
+class ImmutableStaticFiles(StaticFiles):
+    """Serve Vite's content-hashed assets with a cache header safe to keep forever.
+
+    Every file under frontend/dist/assets carries a content hash in its name, so
+    a changed file is a different URL and a cached one can never be stale. This
+    is what retires the hand-bumped `MODULE_VERSION` the old frontend needed --
+    and, with it, the `NoCacheStaticFiles` that worked around the cache trap
+    that hand-bumping kept losing to.
     """
 
     def file_response(self, *args, **kwargs) -> Response:
         response = super().file_response(*args, **kwargs)
-        response.headers["Cache-Control"] = "no-store, must-revalidate"
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
 
 
-if WEB_DIR.is_dir():
-    app.mount("/", NoCacheStaticFiles(directory=WEB_DIR, html=True), name="web")
-else:  # pragma: no cover -- only in a checkout with the frontend removed
-    logger.warning("web/ is missing at %s; the browser UI will not be served", WEB_DIR)
+def _server_owned_prefixes() -> frozenset[str]:
+    """The first path segment of every route the server answers itself.
+
+    The catch-all below returns the client shell for anything unmatched, which
+    is what makes deep links work -- and would also turn a mistyped
+    `/api/v1/charcters` into a 200 with an HTML body, where the client's JSON
+    parser reports something unrecognisable instead of "no such route". So the
+    handler 404s inside these prefixes rather than answering for them.
+
+    Derived from `ROUTERS` rather than written out, so adding a router is enough
+    to protect it; the three FastAPI adds for itself are the only literals.
+    """
+    prefixes = {"docs", "redoc", "openapi.json"}
+    for router in ROUTERS:
+        for route in router.routes:
+            path = getattr(route, "path", "")
+            if path.startswith("/") and path != "/":
+                prefixes.add(path.lstrip("/").split("/", 1)[0])
+    return frozenset(prefixes)
+
+
+SERVER_OWNED_PREFIXES = _server_owned_prefixes()
+
+if FRONTEND_DIST.is_dir():
+    app.mount(
+        "/assets",
+        ImmutableStaticFiles(directory=FRONTEND_DIST / "assets"),
+        name="frontend-assets",
+    )
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_frontend(full_path: str = "") -> FileResponse:
+        """Serve the built client, falling back to index.html for its routes.
+
+        The fallback is the point: this app has client-side routing, so
+        /characters/<id> is a real address that must return the shell rather
+        than a 404, and let the client route from there. A StaticFiles mount
+        cannot do that -- it only rewrites directory requests -- which is why
+        this is a route and why deep links work here and never did in the old
+        UI.
+        """
+        head = full_path.split("/", 1)[0]
+        if head in SERVER_OWNED_PREFIXES:
+            raise HTTPException(status_code=404, detail="Not Found")
+        candidate = FRONTEND_DIST / full_path
+        # `resolve()` on both sides so a traversal (`/../../etc/passwd`) cannot
+        # escape dist/ -- the path arrives from the URL, unvalidated.
+        if (
+            full_path
+            and candidate.is_file()
+            and FRONTEND_DIST.resolve() in candidate.resolve().parents
+        ):
+            return FileResponse(candidate)
+        # no-store on the shell only: it names the hashed assets, so a cached
+        # copy would keep pointing at the previous build's JavaScript.
+        return FileResponse(
+            FRONTEND_DIST / "index.html",
+            headers={"Cache-Control": "no-store, must-revalidate"},
+        )
+else:  # pragma: no cover -- a checkout that has not run `make frontend-build`
+    logger.warning(
+        "frontend/dist is missing at %s; the browser UI will not be served "
+        "(run `make frontend-build`)",
+        FRONTEND_DIST,
+    )
 
 
 def _owner_of(path: Path) -> tuple[Path, int, int] | None:

@@ -444,7 +444,9 @@ def test_build_chub_exports_open_card_png_from_real_capture(tmp_path):
     assert jai["sourceKind"] == "chub_core"
     assert jai["id"] == "7547962"
     assert jai["creatorName"] == "RelicGuy"
-    assert jai["pageName"] == "Autumn"
+    # The Chub *listing* title, not the character name -- it rides only on the
+    # API node, so a build that read it off the card would record "Autumn".
+    assert jai["pageName"] == "Your Bully Wants To Be Your Sex Slave?!"
     # Chub's own provenance block (baked in by Chub itself) survives untouched.
     assert data["extensions"]["chub"]["id"] == 7547962
     assert data["extensions"]["chub"]["full_path"] == node["fullPath"]
@@ -479,6 +481,39 @@ def test_build_chub_honors_explicit_gallery_id_on_replace(tmp_path):
 
     data = _decode(resp.json()["path"])
     assert data["extensions"]["gallery_id"] == "kept-id-123"
+
+
+def _datacat_character(name: str) -> dict:
+    raw = json.loads((FIXTURES / "datacat" / f"{name}.json").read_text(encoding="utf-8"))
+    return raw["character"]
+
+
+def test_build_datacat_records_the_listing_title_not_the_character_name(tmp_path):
+    """DataCat mirrors the source page's title into `name` and the character's
+    own name into `chat_name`. The card takes chat_name; the title has nowhere
+    else to go but provenance, and this exact character is in the archive via
+    /build-jai (Abbie_0d162f5f.png) carrying "Offer You Can't Refuse | Abbie" --
+    so the two acquisition paths must agree on it."""
+    client = make_client(FakeResponder(), tmp_path)
+    character = _datacat_character("raw_api_character_abbie")
+
+    resp = client.post("/build-datacat", json={"character": character})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["filename"] == "Abbie_0d162f5f.png"
+
+    data = _decode(body["path"])
+    assert data["name"] == "Abbie"
+
+    jai = data["extensions"]["jai"]
+    assert jai["sourceKind"] == "datacat_core"
+    assert jai["pageName"] == "Offer You Can't Refuse | Abbie"
+    # Both provenance blocks carry it -- the datacat block is what
+    # CharacterLibrary reads, and a card that disagreed with itself would show
+    # one title in the archive and another there.
+    assert data["extensions"]["datacat"]["pageName"] == jai["pageName"]
 
 
 # ---------------------------------------------------------------------------

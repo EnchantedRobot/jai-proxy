@@ -40,7 +40,7 @@ logger = logging.getLogger("jai_proxy.api.build")
 router = APIRouter()
 
 # Chub.ai's own avatar CDN convention; mirrors CHUB_AVATAR_BASE in
-# web/modules/providers/chub/chub-api.js -- keep the two in sync.
+# frontend/src/lib/providers/chub.ts -- keep the two in sync.
 CHUB_AVATAR_BASE = "https://avatars.charhub.io/avatars/"
 
 def _utc_now_iso() -> str:
