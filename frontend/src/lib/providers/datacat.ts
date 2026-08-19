@@ -27,6 +27,7 @@ export interface DatacatCharacter {
   creator_name?: string
   creatorName?: string
   primary_content_source_kind?: string | null
+  primaryContentSourceKind?: string | null
   [key: string]: unknown
 }
 
@@ -135,6 +136,14 @@ export function datacatName(hit: DatacatCharacter): string {
 
 export function datacatCreatorName(hit: DatacatCharacter): string {
   return hit.creator_name ?? hit.creatorName ?? ''
+}
+
+/** Which upstream the card came from (`janitor_core`, `saucepan`, ...), needed
+ * by the detail + download reads. Creator rows spell it camelCase, browse rows
+ * snake_case. */
+export function datacatSourceKind(hit: DatacatCharacter): string | null {
+  const kind = hit.primary_content_source_kind ?? hit.primaryContentSourceKind
+  return typeof kind === 'string' && kind ? kind : null
 }
 
 export function resolveDatacatTagNames(
@@ -279,6 +288,14 @@ export async function fetchDatacatCreator(
   }
 }
 
+/**
+ * NOTE: this endpoint does *not* answer in the `{totalCount, characters}` shape
+ * `/api/characters/recent-public` uses -- it answers `{total, list}`, and its
+ * rows are camelCase (`characterId`, `primaryContentSourceKind`) where the
+ * browse feed's are snake_case. Reading the browse names here is what made
+ * Following silently empty: every request returned 200 and every page mapped to
+ * zero cards. Both spellings are accepted so neither feed can break the other.
+ */
 export async function fetchDatacatCreatorCharacters(opts: {
   creatorId: string
   limit?: number
@@ -297,7 +314,10 @@ export async function fetchDatacatCreatorCharacters(opts: {
   if (!response.ok)
     throw new Error(`DataCat creator fetch failed: HTTP ${response.status}`)
   const data = await response.json()
-  return { totalCount: data.totalCount ?? 0, characters: data.characters ?? [] }
+  return {
+    totalCount: data.total ?? data.totalCount ?? 0,
+    characters: data.list ?? data.characters ?? [],
+  }
 }
 
 // ---- Tag catalogue ---------------------------------------------------------

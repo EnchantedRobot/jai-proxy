@@ -41,7 +41,9 @@ function detailCard(overrides: Record<string, unknown> = {}) {
         entries: [{ keys: ['the tower'], content: 'tall and cold', id: 1 }],
       },
       ...(overrides.card as object),
-    },
+      // Indexable: a test that needs one more field (a scenario, say) sets it
+      // on the fixture afterwards rather than restating the whole card.
+    } as Record<string, unknown>,
     ...overrides,
   }
 }
@@ -61,10 +63,9 @@ const listHandler = (items = [detailCard({ id: 'Abbie_0d162f5f.png' })]) =>
  *  Scenario's or Personality's -- Overview shows all three now. */
 function descriptionEditButton() {
   const heading = screen.getByRole('heading', { name: /^Description/ })
-  return within(heading.closest('section') as HTMLElement).getByRole(
-    'button',
-    { name: /^Edit$/ },
-  )
+  return within(heading.closest('section') as HTMLElement).getByRole('button', {
+    name: /^Edit$/,
+  })
 }
 
 describe('CharacterDetailPage', () => {
@@ -120,6 +121,30 @@ describe('CharacterDetailPage', () => {
     ).toBeInTheDocument()
     // card.json block carries the description verbatim.
     expect(screen.getByText(/A long description of Abbie/)).toBeInTheDocument()
+  })
+
+  it('Info records the listing name, including when it repeats the card name', async () => {
+    // The title the card was listed under upstream. Overview hides it when it
+    // merely repeats the name; Info is a provenance record and always shows it,
+    // because "the listing was called the same thing" is a real answer.
+    const listed = detailCard({ page_name: 'Abbie' })
+    server.use(detailHandler(listed), listHandler([listed]))
+    renderDetail('/characters/Abbie_0d162f5f.png?tab=info')
+    await screen.findByRole('heading', { name: 'Abbie', level: 1 })
+
+    const row = screen.getByText('Listing name').closest('div') as HTMLElement
+    expect(row).toHaveTextContent('Abbie')
+  })
+
+  it('Info dashes the listing name for a card that carries none', async () => {
+    // A hand-dropped PNG has no upstream listing at all -- the row stays, so a
+    // missing title reads as missing rather than as an absent row.
+    server.use(detailHandler(), listHandler())
+    renderDetail('/characters/Abbie_0d162f5f.png?tab=info')
+    await screen.findByRole('heading', { name: 'Abbie', level: 1 })
+
+    const row = screen.getByText('Listing name').closest('div') as HTMLElement
+    expect(row).toHaveTextContent('\u2014')
   })
 
   it('the lorebook tab shows the entry keys', async () => {

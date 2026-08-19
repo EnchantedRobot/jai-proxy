@@ -29,6 +29,7 @@ import {
   fetchDatacatDownload,
   fetchDatacatTags,
   resolveDatacatTagNames,
+  datacatSourceKind,
   searchDatacat,
   type DatacatCharacter,
 } from '@/lib/providers/datacat'
@@ -90,23 +91,19 @@ function fromDatacat(hit: DatacatCharacter): DiscoverItem {
 }
 
 /**
- * Provider browse (docs/UI_REWRITE_PLAN.md §3.8, §4.5's `DiscoverGrid`). One
- * query shape over both providers' very different pagination (Chub is
- * page-numbered, DataCat is offset-based) -- `pageParam` is a page index
- * either way, translated to an offset only for DataCat's call.
- */
-/**
- * One cursor covering four very different paginations: Chub browse is
- * page-numbered, Chub's Following timeline is cursor-based, DataCat browse is
- * offset-based, and DataCat's Following fans out over followed creators in
- * batches. `index` counts our own pages; `cursor` carries Chub's opaque token.
+ * Provider browse (docs/UI_REWRITE_PLAN.md §3.8, §4.5's `DiscoverGrid`).
+ *
+ * One cursor covering four paginations that turn out to agree on one thing: a
+ * page number. Chub browse and Chub's Following timeline are page-numbered,
+ * DataCat browse turns the index into an offset, and DataCat's Following turns
+ * it into a slice of the followed-creator list. (The timeline's envelope
+ * advertises a `cursor`, but it is always null -- see `fetchChubTimeline`.)
  */
 interface DiscoverCursor {
   index: number
-  cursor: string | null
 }
 
-const FIRST_CURSOR: DiscoverCursor = { index: 1, cursor: null }
+const FIRST_CURSOR: DiscoverCursor = { index: 1 }
 
 /** DataCat's Following fetches this many creators per page of results, matching
  *  the old UI's 3-at-a-time fan-out (`datacat-browse.js:1996-2062`). */
@@ -140,17 +137,17 @@ export function useDiscoverSearch(
     ],
     initialPageParam: FIRST_CURSOR,
     queryFn: async ({ pageParam }) => {
-      const { index, cursor } = pageParam
+      const { index } = pageParam
 
       if (provider === 'chub' && mode === 'following') {
-        const { nodes, cursor: next } = await fetchChubTimeline({
+        const { nodes, hasMore } = await fetchChubTimeline({
           auth: auth ?? {},
-          cursor,
+          page: index,
         })
         return {
           items: nodes.map(fromChub),
-          hasMore: Boolean(next) && nodes.length > 0,
-          next: { index: index + 1, cursor: next },
+          hasMore,
+          next: { index: index + 1 },
           total: undefined as number | undefined,
         }
       }
@@ -165,7 +162,7 @@ export function useDiscoverSearch(
         return {
           items: nodes.map(fromChub),
           hasMore,
-          next: { index: index + 1, cursor: null },
+          next: { index: index + 1 },
           total: undefined as number | undefined,
         }
       }
@@ -189,7 +186,7 @@ export function useDiscoverSearch(
         return {
           items: batches.flatMap((b) => b.characters.map(fromDatacat)),
           hasMore: index * CREATORS_PER_BATCH < followed.length,
-          next: { index: index + 1, cursor: null },
+          next: { index: index + 1 },
           total: undefined as number | undefined,
         }
       }
@@ -203,7 +200,7 @@ export function useDiscoverSearch(
       return {
         items: characters.map(fromDatacat),
         hasMore: offset + characters.length < totalCount,
-        next: { index: index + 1, cursor: null },
+        next: { index: index + 1 },
         total: totalCount,
       }
     },
@@ -356,8 +353,7 @@ export function useAddDatacatToArchive() {
     mutationFn: async (hit) => {
       const id = datacatCharacterId(hit)
       if (!id) throw new Error('this card has no character id')
-      const sourceKind =
-        (hit.primary_content_source_kind as string | null) ?? null
+      const sourceKind = datacatSourceKind(hit)
       const character = await fetchDatacatDetail(id, sourceKind)
       if (!character) throw new Error('could not fetch the card from DataCat')
       const download = await fetchDatacatDownload(id, sourceKind)

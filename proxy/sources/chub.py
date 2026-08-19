@@ -127,6 +127,14 @@ def build_v2_from_chub(
     chub_ext = {
         **(def_extensions.get("chub") or {}),
         "tagline": node.get("tagline") or definition.get("tagline") or "",
+        # The listing title -- the node's own `name`, which is the page heading
+        # and *not* `definition.name`, the character name that becomes data.name
+        # (the page "Your Bully Wants To Be Your Sex Slave?!" holds a character
+        # called "Autumn"). Chub bakes no pageName into its own export, so it
+        # exists only on the node and is lost unless stamped here. The key is
+        # the one CharacterLibrary's chub provider writes, so page_name() reads
+        # one place for both a live capture and a re-imported PNG.
+        "pageName": node.get("name") or definition.get("project_name") or "",
     }
 
     full_path = node.get("fullPath") or ""

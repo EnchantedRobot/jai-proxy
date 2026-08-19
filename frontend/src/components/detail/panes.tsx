@@ -484,6 +484,11 @@ export function InfoPane({ card }: { card: CardDetail }) {
         <InfoRows
           rows={[
             ['Source', sourceLabel(card.source_kind)],
+            // The title the card was listed under upstream, which is often not
+            // the character's name -- kept whether or not it repeats the name,
+            // unlike Overview's tagline, because here it is a provenance record
+            // and "the same as the name" is itself the answer.
+            ['Listing name', card.page_name || '—'],
             ['Creator', card.creator || 'unknown'],
             ['Created', formatDate(card.create_date), true],
             ['Added to archive', formatDate(card.linked_at), true],

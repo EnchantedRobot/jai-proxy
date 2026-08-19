@@ -245,6 +245,12 @@ def test_build_v2_from_chub_maps_fields_from_real_node():
     assert data["extensions"]["chub"]["id"] == 7547962
     assert data["extensions"]["chub"]["full_path"] == node["fullPath"]
     assert data["extensions"]["chub"]["tagline"] == node["tagline"]
+    # The listing title lives only on the node -- Chub's own export block has
+    # no pageName -- so the port has to stamp it, or it is gone. Note it is not
+    # `definition.name`: this page is titled "Your Bully Wants To Be Your Sex
+    # Slave?!" and holds a character called "Autumn".
+    assert data["extensions"]["chub"]["pageName"] == node["name"]
+    assert data["extensions"]["chub"]["pageName"] != data["name"]
     # Linked lorebook resolved via the git API, not the (absent) embedded one.
     assert len(data["character_book"]["entries"]) == 4
 
@@ -267,7 +273,7 @@ def test_build_v2_from_chub_survives_clean_card_as_raw_dict_passthrough():
     assert warnings == []
 
     assert mapper.card_id(cleaned) == "7547962"
-    assert mapper.page_name(cleaned) == "Autumn"
+    assert mapper.page_name(cleaned) == "Your Bully Wants To Be Your Sex Slave?!"
     assert mapper.source_url(cleaned) == (
         "https://chub.ai/characters/RelicGuy/your-bully-wants-to-be-your-sex-slave-6d84429ab4b8"
     )

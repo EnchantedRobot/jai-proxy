@@ -203,22 +203,48 @@ export async function fetchChubFollows(auth: ChubAuth): Promise<ChubCreator[]> {
 }
 
 /**
- * The "new from followed authors" feed. Cursor-paginated rather than
- * page-numbered, so the caller threads `cursor` back in
- * (`chub-browse.js:1774-1823`).
+ * The timeline carries whatever a followed author published -- lorebooks and
+ * posts included. Only characters belong in Discover's grid, and they are told
+ * apart the way `chub-browse.js:1849-1878` told them apart: by path prefix,
+ * plus the presence of at least one character-only field for rows whose
+ * `fullPath` is unhelpful.
+ */
+function isCharacterNode(node: ChubNode): boolean {
+  const path = (node.fullPath ?? (node.full_path as string) ?? '').toLowerCase()
+  if (path.startsWith('lorebooks/') || path.startsWith('posts/')) return false
+  if (Array.isArray(node.entries)) return false
+  return (
+    path.includes('/') ||
+    node.tagline !== undefined ||
+    node.definition !== undefined ||
+    node.first_mes !== undefined ||
+    node.topics !== undefined
+  )
+}
+
+/**
+ * The "new from followed authors" feed.
+ *
+ * Page-numbered, despite the `cursor`/`previous_cursor` fields in its envelope:
+ * verified live 2026-08-19, `/api/timeline/v1` answers `cursor: null` on every
+ * page, ignores `first` (20 rows per page, always) and honours `page`. Reading
+ * that null cursor as "no more pages" is what capped Following at a single page
+ * of 20 cards. `count` is no help either -- it reports the feed total on page 1
+ * and the page's own row count from page 2 on -- so the end of the feed is a
+ * page that comes back empty.
  */
 export async function fetchChubTimeline(opts: {
   auth: ChubAuth
-  cursor?: string | null
-}): Promise<{ nodes: ChubNode[]; cursor: string | null }> {
-  const { auth, cursor } = opts
+  page?: number
+}): Promise<{ nodes: ChubNode[]; hasMore: boolean }> {
+  const { auth, page = 1 } = opts
   if (!auth.token) throw new ChubAuthRequired()
   const params = new URLSearchParams({
     first: '50',
+    page: String(page),
     count: 'true',
     ...nsfwParams(auth),
   })
-  if (cursor) params.set('cursor', cursor)
 
   const response = await fetchWithProxy(
     `${CHUB_API_BASE}/api/timeline/v1?${params}`,
@@ -229,9 +255,10 @@ export async function fetchChubTimeline(opts: {
   if (!response.ok)
     throw new Error(`Chub timeline failed: HTTP ${response.status}`)
   const data = (await response.json()) as Record<string, unknown>
-  const inner = (data.data ?? data) as Record<string, unknown>
-  const next = (inner.cursor ?? data.cursor) as string | null | undefined
-  return { nodes: extractNodes(data), cursor: next ?? null }
+  const nodes = extractNodes(data)
+  // `hasMore` keys off the unfiltered page: a page that is all lorebooks is
+  // still a page, and must not end the feed.
+  return { nodes: nodes.filter(isCharacterNode), hasMore: nodes.length > 0 }
 }
 
 // ---- Tag catalogue ---------------------------------------------------------
