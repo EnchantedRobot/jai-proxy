@@ -13,12 +13,6 @@ validated separately, further down, against a real live capture:
     card this archive already has via the native /build-jai path
     (data/characters/Abbie_0d162f5f.png), so the mapped fields can be
     checked against that real twin, not just asserted in isolation.
-  * raw_api_download_abbie_turnstile_blocked -- the /download response for
-    the same character, captured the same way. DataCat gates /download
-    behind Cloudflare Turnstile; an anonymous session (no browser-solved
-    challenge) gets refused with no `data` -- real evidence that
-    build_v2_from_download must return None here so /build-datacat falls
-    back to build_v2_from_character, not a hypothetical edge case.
 """
 
 import base64
@@ -244,15 +238,3 @@ def test_resolve_avatar_url_prefers_the_untouched_janitorai_original():
     )
 
 
-def test_build_v2_from_download_returns_none_when_turnstile_blocks_it():
-    """Real evidence (not a hypothetical): DataCat gates /download behind
-    Cloudflare Turnstile, and an anonymous dc-proxy session gets refused with
-    no `data` key at all. /build-datacat's fallback to
-    build_v2_from_character for exactly this response is what keeps a live
-    import working despite it."""
-    download = load_raw("raw_api_download_abbie_turnstile_blocked")
-    assert download["success"] is False
-    assert "data" not in download
-
-    character = load_raw("raw_api_character_abbie")["character"]
-    assert mapper.build_v2_from_download(download, character) is None

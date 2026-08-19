@@ -609,7 +609,6 @@ export function useAddToArchive() {
         apiClient.POST('/build-datacat', {
           body: {
             character: payload.character,
-            download: (payload.download as Record<string, unknown>) ?? null,
           },
         }),
         'could not add the card',

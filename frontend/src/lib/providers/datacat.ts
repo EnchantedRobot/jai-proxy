@@ -173,7 +173,7 @@ export function datacatCreatorName(hit: DatacatCharacter): string {
 }
 
 /** Which upstream the card came from (`janitor_core`, `saucepan`, ...), needed
- * by the detail + download reads. Creator rows spell it camelCase, browse rows
+ * by the detail read. Creator rows spell it camelCase, browse rows
  * snake_case. */
 export function datacatSourceKind(hit: DatacatCharacter): string | null {
   const kind = hit.primary_content_source_kind ?? hit.primaryContentSourceKind
@@ -201,19 +201,6 @@ export async function fetchDatacatDetail(
   if (!response.ok) return null
   const data = await response.json()
   return data.character ?? null
-}
-
-/** Often fills in fields the detail payload leaves empty (repaired Saucepan
- * cards); `/build-datacat` prefers it when present. */
-export async function fetchDatacatDownload(
-  id: string,
-  sourceKind?: string | null,
-): Promise<Record<string, unknown> | null> {
-  const params = new URLSearchParams({ t: String(Date.now()) })
-  if (sourceKind) params.set('sourceKind', sourceKind)
-  const response = await dcFetch(`/api/characters/${id}/download?${params}`)
-  if (!response.ok) return null
-  return response.json()
 }
 
 // ---- Lorebook script hydration ---------------------------------------------

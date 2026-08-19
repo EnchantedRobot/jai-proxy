@@ -1008,11 +1008,6 @@ export interface paths {
          *     (not _assemble_and_write) so the built card is available afterward to
          *     populate the filename/card response fields the browser needs (see
          *     BuildResponse's docstring).
-         *
-         *     /download often fills in fields the detail payload leaves empty for a
-         *     repaired Saucepan card, so it wins when present; datacat.
-         *     build_v2_from_character is the fallback (and the only source when the
-         *     browser didn't fetch /download at all, e.g. for a plain JanitorAI row).
          */
         post: operations["build_datacat_build_datacat_post"];
         delete?: never;
@@ -1721,10 +1716,6 @@ export interface components {
             character?: {
                 [key: string]: unknown;
             };
-            /** Download */
-            download?: {
-                [key: string]: unknown;
-            } | null;
             /** Avatar Url */
             avatar_url?: string | null;
             /** Avatar B64 */
@@ -1819,13 +1810,6 @@ export interface components {
              * @description DataCat's `GET /api/characters/{id}` detail payload, with `scripts[]` already hydrated. Required for provider=datacat.
              */
             character?: {
-                [key: string]: unknown;
-            } | null;
-            /**
-             * Download
-             * @description DataCat's `/download` response, which fills in fields the detail payload leaves empty on a repaired Saucepan card. Preferred when present, exactly as `/build-datacat` prefers it.
-             */
-            download?: {
                 [key: string]: unknown;
             } | null;
         };
