@@ -70,15 +70,11 @@ function descriptionEditButton() {
 describe('CharacterDetailPage', () => {
   it('renders the overview: tagline, description, scenario, personality, but NOT the first greeting', async () => {
     // The tagline is the page blurb (`page_name`) when it differs from the name.
-    server.use(
-      detailHandler(
-        detailCard({
-          page_name: 'The reluctant guardian',
-          card: { scenario: 'A storm strands them together.' },
-        }),
-      ),
-      listHandler(),
-    )
+    // `detailCard`'s trailing `...overrides` spread replaces `card` wholesale
+    // rather than merging it, so the scenario is added after the fact.
+    const withScenario = detailCard({ page_name: 'The reluctant guardian' })
+    withScenario.card.scenario = 'A storm strands them together.'
+    server.use(detailHandler(withScenario), listHandler())
     renderDetail('/characters/Abbie_0d162f5f.png')
 
     expect(
