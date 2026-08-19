@@ -30,7 +30,13 @@ Field mapping (decided against real captures):
                       appended under a "--- <Title> ---" label. Scenario is the most
                       visible field in SillyTavern, so response-formatting / extra
                       authored sections land there rather than buried in notes.
-    creator_notes  <- companion.short_description   (avatar md is prepended downstream)
+    creator_notes  <- companion.short_description, then one markdown image per
+                      companion.portraits[] entry (avatar md is prepended
+                      downstream, so notes end up: avatar, blurb, gallery).
+                      Portraits are saucepan's own image gallery; surfacing them
+                      here as markdown lets the shared media pipeline pick them
+                      up the same way it picks up the avatar, via the
+                      markdown-image regex in proxy.media.discovery.
 
 Macros ({{user}}/{{char}}) come back intact from the definition API -- unlike the
 JanitorAI chat-relay path, nothing here is account-handle-substituted, so no
@@ -86,6 +92,27 @@ def _build_scenario(sections: list[tuple[str, str]]) -> str:
     return "\n\n".join(parts)
 
 
+def portrait_urls(raw: dict[str, Any]) -> list[tuple[str, str]]:
+    """`(caption, url)` pairs for companion.portraits[] -- saucepan's own image
+    gallery, separate from the single card avatar. Uses the 'highres' CDN
+    variant (full-size), matching what saved/rendered pages actually show.
+    Skipped entirely when `unlocked_portraits` is False: a locked gallery's
+    image ids resolve to paywalled/placeholder content, not the real picture."""
+    comp = _companion(raw)
+    if not comp.get("unlocked_portraits", True):
+        return []
+    out: list[tuple[str, str]] = []
+    for portrait in comp.get("portraits") or []:
+        if not isinstance(portrait, dict):
+            continue
+        image_id = (portrait.get("image") or {}).get("id")
+        if not image_id:
+            continue
+        caption = (portrait.get("name") or "").strip()
+        out.append((caption, f"{SAUCEPAN_ORIGIN}/cdn/{image_id}/highres"))
+    return out
+
+
 def to_profile_fields(raw: dict[str, Any]) -> ProfileFields:
     comp = _companion(raw)
     sections = _deob_sections(raw)
@@ -97,14 +124,21 @@ def to_profile_fields(raw: dict[str, Any]) -> ProfileFields:
         # sections; the v2 public blurb is the only prose left to fall back on.
         description = _deob(comp.get("full_description_fragments")).strip()
 
+    name = (comp.get("name") or "").strip()
+    creator_notes = (comp.get("short_description") or "").strip()
+    gallery = portrait_urls(raw)
+    if gallery:
+        images_md = "\n\n".join(f"![{caption or name}]({url})" for caption, url in gallery)
+        creator_notes = f"{creator_notes}\n\n{images_md}".strip()
+
     return ProfileFields(
-        name=(comp.get("name") or "").strip(),
+        name=name,
         creator=(comp.get("author_handle") or "").strip(),
         tags=[t for t in (comp.get("tags") or []) if isinstance(t, str)],
         description=description,
         scenario=_build_scenario(sections),
         mes_example=by_title.get(_EXAMPLE, "").strip(),
-        creator_notes=(comp.get("short_description") or "").strip(),
+        creator_notes=creator_notes,
     )
 
 
