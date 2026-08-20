@@ -52,8 +52,17 @@ const facets = http.get('*/api/v1/facets', () =>
       { value: 'Female', count: 3808 },
       { value: 'NSFW', count: 1726 },
     ],
-    creators: [],
-    sources: [],
+    creators: [
+      { value: 'KornyPony', count: 2 },
+      { value: 'Someone Else', count: 1 },
+    ],
+    // Chub twice on purpose: the two importer kinds the Source pill has to fold
+    // into one row.
+    sources: [
+      { value: 'chub_import', count: 1196 },
+      { value: 'chub_core', count: 7 },
+      { value: 'janitor_core', count: 1483 },
+    ],
   }),
 )
 
@@ -64,7 +73,7 @@ describe('CharactersPage', () => {
     renderApp(<CharactersPage />)
 
     expect(await screen.findByText('Abbie')).toBeInTheDocument()
-    expect(await screen.findByText('2 shown of 3,868')).toBeInTheDocument()
+    expect(await screen.findByText('2 of 3,868')).toBeInTheDocument()
   })
 
   it('sends a chip as the filter it stands for', async () => {
@@ -77,13 +86,58 @@ describe('CharactersPage', () => {
 
     renderApp(<CharactersPage />)
     await screen.findByText('Abbie')
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Has a lorebook' }),
-    )
+    await userEvent.click(screen.getByRole('button', { name: 'Lorebook' }))
 
     await waitFor(() => {
       const last = queries.at(-1)!
       expect(last.searchParams.get('has_lorebook')).toBe('true')
+    })
+  })
+
+  it('asks for every source kind behind the platform picked', async () => {
+    // Picking "Chub" has to send both `chub_import` and `chub_core`, or the
+    // 1,203 the pill counted are not the cards that come back.
+    const queries: URL[] = []
+    server.use(
+      listHandler((url) => queries.push(url)),
+      stats,
+      facets,
+    )
+
+    renderApp(<CharactersPage />)
+    await screen.findByText('Abbie')
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Filter by source' }),
+    )
+    await userEvent.click(await screen.findByRole('button', { name: /Chub/ }))
+
+    await waitFor(() => {
+      expect(queries.at(-1)!.searchParams.getAll('source')).toEqual([
+        'chub_import',
+        'chub_core',
+      ])
+    })
+  })
+
+  it('sends the creator exactly as the facet named them', async () => {
+    const queries: URL[] = []
+    server.use(
+      listHandler((url) => queries.push(url)),
+      stats,
+      facets,
+    )
+
+    renderApp(<CharactersPage />)
+    await screen.findByText('Abbie')
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Filter by creator' }),
+    )
+    await userEvent.click(
+      await screen.findByRole('button', { name: /KornyPony/ }),
+    )
+
+    await waitFor(() => {
+      expect(queries.at(-1)!.searchParams.get('creator')).toBe('KornyPony')
     })
   })
 

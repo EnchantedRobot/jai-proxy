@@ -19,6 +19,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { RenameDialog } from './RenameDialog'
+import { AvatarCropDialog } from './AvatarCropDialog'
 
 /**
  * The portrait's own actions: favourite, replace image, rename, delete. These
@@ -50,11 +51,18 @@ export function PortraitActions({
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [alsoGallery, setAlsoGallery] = useState(false)
   const [renaming, setRenaming] = useState<'name' | 'creator' | null>(null)
+  const [cropFile, setCropFile] = useState<File | null>(null)
+  const [cropOpen, setCropOpen] = useState(false)
 
   const onFile = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     event.target.value = '' // let the same file be picked again after a failure
     if (!file) return
+    setCropFile(file)
+    setCropOpen(true)
+  }
+
+  const onCropped = (file: File) => {
     avatar.mutate(
       { file, etag },
       {
@@ -107,6 +115,12 @@ export function PortraitActions({
         accept="image/*"
         hidden
         onChange={onFile}
+      />
+      <AvatarCropDialog
+        file={cropFile}
+        open={cropOpen}
+        onOpenChange={setCropOpen}
+        onCropped={onCropped}
       />
 
       <button

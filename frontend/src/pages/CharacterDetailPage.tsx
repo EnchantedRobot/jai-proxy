@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { Download } from 'lucide-react'
 import {
   useCharacterDetail,
@@ -169,7 +169,24 @@ export function CharacterDetailPage() {
         title={card.name}
         meta={
           <>
-            by <span className="text-sage">{card.creator || 'unknown'}</span>
+            by{' '}
+            {card.creator ? (
+              // The way to answer "what else has this person made". The Creator
+              // pill can do it too, but only by scrolling 192 names to find the
+              // one already on screen.
+              <Link
+                // `/`, not `/characters` — browse is the index route and
+                // `/characters/:id` is *this* page, so the tidier-looking path
+                // falls through to the catch-all and lands on nothing.
+                to={`/?creator=${encodeURIComponent(card.creator)}`}
+                className="text-sage hover:underline"
+                title={`Browse cards by ${card.creator}`}
+              >
+                {card.creator}
+              </Link>
+            ) : (
+              <span className="text-sage">unknown</span>
+            )}
             <Sep />{' '}
             <span className="font-mono">{formatDate(card.create_date)}</span>
             <Sep /> {sourceLabel(card.source_kind)}

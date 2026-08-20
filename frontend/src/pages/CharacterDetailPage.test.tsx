@@ -167,6 +167,21 @@ describe('CharacterDetailPage', () => {
     expect(screen.getByText(/No lorebook on this card/)).toBeInTheDocument()
   })
 
+  it('links the creator at the browse route, not at /characters', async () => {
+    // `/characters/:id` is this page and browse is the index route, so
+    // `/characters?creator=…` looks right and silently lands on the catch-all.
+    // Pinned as an href rather than a click because that failure renders a
+    // page with no error on it at all.
+    server.use(detailHandler(), listHandler())
+    renderDetail('/characters/Abbie_0d162f5f.png')
+    await screen.findByRole('heading', { name: 'Abbie', level: 1 })
+
+    expect(screen.getByRole('link', { name: 'KornyPony' })).toHaveAttribute(
+      'href',
+      '/?creator=KornyPony',
+    )
+  })
+
   it('deep-links a tab via ?tab=', async () => {
     server.use(detailHandler(), listHandler())
     renderDetail('/characters/Abbie_0d162f5f.png?tab=info')

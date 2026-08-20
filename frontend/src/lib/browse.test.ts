@@ -17,6 +17,8 @@ function state(overrides: Partial<BrowseState> = {}): BrowseState {
     sort: 'name',
     flags: new Set(),
     tags: new Map(),
+    creator: '',
+    sources: [],
     ...overrides,
   }
 }
@@ -56,6 +58,18 @@ describe('the browse state in the URL', () => {
     expect(writeState(state({ sort: '-lore' }), '-added').get('sort')).toBe(
       '-lore',
     )
+  })
+
+  it('round-trips the creator and the source kinds', () => {
+    // Both live in the URL like everything else, so a filtered view stays a
+    // shareable link -- and the detail page's "by <creator>" link is nothing
+    // more than one of these URLs written by hand.
+    const original = state({
+      creator: 'KornyPony',
+      sources: ['chub_import', 'chub_core'],
+    })
+
+    expect(readState(writeState(original))).toEqual(original)
   })
 
   it('ignores a flag or scope it does not recognise', () => {
@@ -131,6 +145,25 @@ describe('the API query it builds', () => {
       untagged: true,
       needs_media: true,
     })
+  })
+
+  it('sends every source kind of the chosen platform, for the API to OR', () => {
+    // One platform, two importer kinds: a card captured live from Chub is
+    // `chub_core` and one from the bulk pass is `chub_import`, and "from Chub"
+    // has to mean both or the count on the pill lies.
+    const query = toQuery(
+      state({ creator: 'Stefanon', sources: ['chub_import', 'chub_core'] }),
+    )
+
+    expect(query).toMatchObject({
+      creator: 'Stefanon',
+      source: ['chub_import', 'chub_core'],
+    })
+  })
+
+  it('leaves creator and source out entirely when nothing is chosen', () => {
+    expect(toQuery(state())).not.toHaveProperty('creator')
+    expect(toQuery(state())).not.toHaveProperty('source')
   })
 
   it('sends no search parameters at all when the box is empty', () => {
