@@ -16,9 +16,7 @@ function wrapper() {
 
 describe('idFragment — the client-side mirror of proxy/cards/naming.py:id_fragment', () => {
   it('takes the first 8 characters', () => {
-    expect(idFragment('0d162f5f-86ab-4fdd-a2c2-3912adf24960')).toBe(
-      '0d162f5f',
-    )
+    expect(idFragment('0d162f5f-86ab-4fdd-a2c2-3912adf24960')).toBe('0d162f5f')
   })
 
   it('strips characters a filename cannot carry before slicing', () => {

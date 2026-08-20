@@ -150,7 +150,8 @@ export function DiscoverPage() {
 
   const have = useHaveFragments()
   const haveFragments = have.data ?? new Set<string>()
-  const isHave = (providerId: string) => haveFragments.has(idFragment(providerId))
+  const isHave = (providerId: string) =>
+    haveFragments.has(idFragment(providerId))
   const haveCount = tagMatched.filter((i) => isHave(i.providerId)).length
   const visible = state.hideHave
     ? tagMatched.filter((i) => !isHave(i.providerId))

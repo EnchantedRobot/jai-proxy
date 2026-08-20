@@ -213,15 +213,13 @@ export function DiscoverPreviewPage() {
         <DetailPager
           position={position >= 0 ? position + 1 : null}
           total={
-            feed.data?.pages[feed.data.pages.length - 1]?.total ??
-            items.length
+            feed.data?.pages[feed.data.pages.length - 1]?.total ?? items.length
           }
           onPrev={() => go(-1)}
           onNext={() => go(1)}
           prevDisabled={position <= 0}
           nextDisabled={
-            position < 0 ||
-            (position >= items.length - 1 && !feed.hasNextPage)
+            position < 0 || (position >= items.length - 1 && !feed.hasNextPage)
           }
         />
       }
@@ -308,9 +306,7 @@ export function DiscoverPreviewPage() {
           {card?.create_date && (
             <>
               <Sep />{' '}
-              <span className="font-mono">
-                {formatDate(card.create_date)}
-              </span>
+              <span className="font-mono">{formatDate(card.create_date)}</span>
             </>
           )}
           <Sep /> {PROVIDER_LABEL[provider]}
