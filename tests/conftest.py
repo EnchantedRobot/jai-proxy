@@ -35,6 +35,7 @@ def card_png(
     # make every geometry assertion in the suite test the fixture instead.
     size: tuple[int, int] = (384, 576),
     colour: tuple[int, int, int, int] = (120, 80, 200, 255),
+    image: Image.Image | None = None,
     envelope_extra: dict[str, Any] | None = None,
     **fields: Any,
 ) -> bytes:
@@ -45,6 +46,10 @@ def card_png(
     `envelope_extra` writes *outside* `data`, which is where SillyTavern keeps
     the handful of root-only fields (`create_date`, `fav`) -- the ones a re-embed
     drops unless something carries them across.
+
+    `image` overrides the default flat `colour` fill with real pixels -- needed
+    by anything comparing avatars for similarity, since a solid-colour fill has
+    no pixel above its own average and every flat colour hashes identically.
     """
     data: dict[str, Any] = {
         "name": name,
@@ -67,7 +72,7 @@ def card_png(
     envelope.update(envelope_extra or {})
 
     buffer = io.BytesIO()
-    Image.new("RGBA", size, colour).save(buffer, "PNG")
+    (image or Image.new("RGBA", size, colour)).save(buffer, "PNG")
     payload = base64.b64encode(json.dumps(envelope).encode("utf-8")).decode("ascii")
     return pngtools.inject_text_chunks(buffer.getvalue(), {"chara": payload, "ccv3": payload})
 

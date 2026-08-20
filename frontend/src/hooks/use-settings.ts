@@ -58,6 +58,11 @@ const PROVIDER_DEFAULTS: ProviderSettings = {
 export interface Ui2Settings {
   /** The tag dictionary delta (see tag-delta.ts). */
   tagDictionaryDelta?: unknown
+  /** Duplicate-group ids (`DuplicateGroupOut.group_id`) the user has reviewed
+   *  and decided are not duplicates. Filtered out of the Duplicates section's
+   *  list client-side; the server makes no duplicate-matching decisions of
+   *  its own to remember this against. */
+  duplicatesDismissed?: string[]
   /** Applied to the Characters grid whenever the URL carries no `sort=` of
    *  its own -- an explicit link (the shelf's "See all", a bookmark) always
    *  wins over this. One of `lib/browse.ts`'s `SORTS` values. */

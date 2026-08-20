@@ -12,15 +12,15 @@ deletable file (`web/archive-api.js`) -- and was duly deleted with it. The
 browser client calls these routes as they are.
 
 The routes are grouped by resource across `characters`, `galleries`, `media`,
-`system`, `network`, `userscripts` and `discover`; anything two of them need
-lives in `_shared`. They are assembled onto
+`system`, `network`, `userscripts`, `discover` and `duplicates`; anything two
+of them need lives in `_shared`. They are assembled onto
 one router here, in the order they were registered when this was a single module.
 """
 
 from fastapi import APIRouter
 
 from proxy.api.v1 import _shared  # noqa: F401  -- re-exported for tests and the server's startup hook
-from proxy.api.v1 import characters, discover, galleries, media, network, system, userscripts
+from proxy.api.v1 import characters, discover, duplicates, galleries, media, network, system, userscripts
 
 router = APIRouter(prefix=_shared.PREFIX, tags=["archive"])
 router.include_router(characters.router)
@@ -31,3 +31,5 @@ router.include_router(network.router)
 router.include_router(userscripts.router)
 # Discover's read-only provider previews (docs/UI_REWRITE_PLAN.md §3.8).
 router.include_router(discover.router)
+# Same-creator duplicate detection (Tools -> Duplicates).
+router.include_router(duplicates.router)

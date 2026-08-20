@@ -837,6 +837,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/duplicates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Candidate duplicate groups, scoped to same-creator cards only */
+        get: operations["get_duplicates_api_v1_duplicates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/datacat/health": {
         parameters: {
             query?: never;
@@ -1936,6 +1953,106 @@ export interface components {
              * @description What the same cleaning pass the build route runs would flag -- unresolved macros, mostly. Shown so a card's problems are visible before it is kept.
              */
             warnings?: string[];
+        };
+        /**
+         * DuplicateGroupOut
+         * @description A cluster of a creator's cards that a scan thinks might be the same
+         *     character. Always one creator -- cards from different creators are never
+         *     compared, let alone grouped.
+         */
+        DuplicateGroupOut: {
+            /**
+             * Group Id
+             * @description Stable across scans as long as membership doesn't change -- derived from the sorted member filenames.
+             */
+            group_id: string;
+            /** Creator */
+            creator: string;
+            /** Members */
+            members: components["schemas"]["DuplicateMemberOut"][];
+            /** Pairs */
+            pairs: components["schemas"]["DuplicatePairOut"][];
+        };
+        /**
+         * DuplicateMemberOut
+         * @description One card inside a candidate duplicate group -- enough to render a
+         *     compare tile without a second request per card. Deliberately not the
+         *     full `CardDetailOut`: a group review doesn't need the embedded prose,
+         *     only what already distinguishes the members (and their thumbs).
+         */
+        DuplicateMemberOut: {
+            /**
+             * Id
+             * @description The card's filename on disk, e.g. `Olivia_3725810.png`.
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Page Name */
+            page_name: string;
+            /** Tags */
+            tags: string[];
+            /** Description Chars */
+            description_chars: number;
+            /** Character Version */
+            character_version: string;
+            /** Create Date */
+            create_date: string;
+            /** Thumb Url */
+            thumb_url: string;
+            /** Png Url */
+            png_url: string;
+        };
+        /**
+         * DuplicatePairOut
+         * @description Why two members of a group were paired, in enough detail for a human
+         *     to judge it rather than trust it blindly -- this is a bounded heuristic,
+         *     not a verdict.
+         */
+        DuplicatePairOut: {
+            /** A */
+            a: string;
+            /** B */
+            b: string;
+            /**
+             * Avatar Distance
+             * @description Hamming distance between the two avatars' 256-bit average-hash, or null if either thumb could not be read.
+             */
+            avatar_distance: number | null;
+            /**
+             * Name Score
+             * @description difflib ratio over the casefolded names, 0-1.
+             */
+            name_score: number;
+            /**
+             * Text Score
+             * @description Best of description/first_mes/creator_notes difflib ratio, 0-1.
+             */
+            text_score: number;
+            /**
+             * Strength
+             * @description 'strong' when the avatar alone proves it or the name match is backed by real text overlap; 'weak' when only the name matches -- e.g. two different characters sharing a recurring name.
+             * @enum {string}
+             */
+            strength: "strong" | "weak";
+            /**
+             * Reasons
+             * @description Human-readable match evidence, e.g. 'identical avatar', '92% text overlap'.
+             */
+            reasons: string[];
+        };
+        /**
+         * DuplicatesOut
+         * @description The result of a full-archive duplicate scan.
+         */
+        DuplicatesOut: {
+            /** Groups */
+            groups: components["schemas"]["DuplicateGroupOut"][];
+            /**
+             * Scanned
+             * @description Cards considered -- i.e. belonging to a creator with 2+ cards.
+             */
+            scanned: number;
         };
         /** ExistingRequest */
         ExistingRequest: {
@@ -3922,6 +4039,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_duplicates_api_v1_duplicates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DuplicatesOut"];
                 };
             };
         };
