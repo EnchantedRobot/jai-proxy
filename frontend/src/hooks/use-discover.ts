@@ -105,6 +105,11 @@ function fromChub(node: ChubNode): DiscoverItem {
   }
 }
 
+/** Grid cards render ~150px; requesting this width keeps janitorai originals
+ *  from decoding full-size (`datacat-api.js:75`, "what makes hampter grids
+ *  chug"). */
+const GRID_AVATAR_WIDTH = 400
+
 function fromDatacat(hit: DatacatCharacter): DiscoverItem {
   const id = datacatCharacterId(hit)
   return {
@@ -114,7 +119,7 @@ function fromDatacat(hit: DatacatCharacter): DiscoverItem {
     name: datacatName(hit),
     creator: datacatCreatorName(hit),
     creatorId: String(hit.creator_id ?? hit.creatorId ?? ''),
-    avatarUrl: datacatAvatarUrl(hit),
+    avatarUrl: datacatAvatarUrl(hit, { width: GRID_AVATAR_WIDTH }),
     tags: resolveDatacatTagNames(hit.tags),
     created: epoch(hit.createdAt ?? hit.created_at),
     chats: Number(hit.chatCount ?? hit.chat_count ?? 0) || 0,
@@ -542,7 +547,8 @@ export function useProviderTags(provider: Provider, auth?: ChubAuth) {
 
 /** Which of the currently-loaded provider ids are already archived --
  * `POST /characters/have`, the same `_<id8>` fragment match the userscript's
- * own `/existing` answers from (§3.8). */
+ * own `/existing` answers from (§3.8). Kept for a one-off point check; the
+ * grid uses `useHaveFragments` below instead (see its docstring for why). */
 export function useHaveGuard(providerIds: string[]) {
   return useQuery({
     queryKey: ['characters-have', providerIds.join(',')],
@@ -556,6 +562,40 @@ export function useHaveGuard(providerIds: string[]) {
       ),
     select: (data) => new Set(data.have),
     staleTime: 30_000,
+  })
+}
+
+/** The same `_<id8>` slice `proxy/cards/naming.py:id_fragment` derives --
+ * strip characters a filename can't carry, keep the first 8. */
+export function idFragment(providerId: string): string {
+  return providerId.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 8)
+}
+
+/**
+ * Every fragment already on disk, fetched once and matched locally.
+ *
+ * Discover used to ask `POST /characters/have` about every id loaded *so
+ * far*, growing with each scroll page. That made the query key churn on
+ * every page (a fresh key with no seed data goes `undefined` between the
+ * scroll and the round trip resolving, so "hide cards I have" would briefly
+ * hide nothing), and reissued the whole cumulative list every time instead of
+ * asking only about what was new. The old `web/` UI never had this problem:
+ * it built one `Set` from the whole local library on load and matched
+ * against it in memory (`browse-view.js:544-608`) — this is the same idea,
+ * sized for an archive too big to hold the whole card list client-side: just
+ * the fragments (`GET /characters/have-fragments`, a few KB), not the cards.
+ * `useAddToArchive` below invalidates this after a successful add.
+ */
+export function useHaveFragments() {
+  return useQuery({
+    queryKey: ['characters-have-fragments'],
+    queryFn: () =>
+      unwrap(
+        apiClient.GET('/api/v1/characters/have-fragments', {}),
+        'could not check the archive',
+      ),
+    select: (data) => new Set(data.fragments),
+    staleTime: 60_000,
   })
 }
 
@@ -617,6 +657,9 @@ export function useAddToArchive() {
     onSuccess: () => {
       invalidateArchive(client)
       void client.invalidateQueries({ queryKey: ['characters-have'] })
+      void client.invalidateQueries({
+        queryKey: ['characters-have-fragments'],
+      })
     },
   })
 }

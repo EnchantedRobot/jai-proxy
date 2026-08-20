@@ -37,6 +37,7 @@ from proxy.api.schemas import (
     CardListOut,
     CardOut,
     CardWriteIn,
+    CharactersHaveFragmentsOut,
     CharactersHaveIn,
     CharactersHaveOut,
     DeletedOut,
@@ -49,6 +50,7 @@ from proxy.api.schemas import (
 from proxy.api.v1 import _shared
 from proxy.archive import catalog
 from proxy.cards import edit, gallery, intake, pngtools
+from proxy.cards.naming import id_fragment
 from proxy.media import manifest as media_manifest
 from proxy.config import settings
 
@@ -374,6 +376,20 @@ def list_characters(
     )
 
 
+@router.get("/characters/have-fragments", response_model=CharactersHaveFragmentsOut, summary="Every provider-id fragment already in the archive")
+def characters_have_fragments() -> CharactersHaveFragmentsOut:
+    """The whole `_<id8>` fragment set, for Discover to fetch once and match
+    against locally instead of resending its ever-growing loaded-id list to
+    `POST /characters/have` on every scroll tick. See that route's docstring
+    for why the per-id version was slow, and `ArchiveIndex.fragments`.
+
+    Registered before `/characters/{card_id}` on purpose: Starlette matches
+    routes in declaration order, and a literal path below a `{card_id}`
+    catch-all would be swallowed by it as "the card whose id is
+    'have-fragments'" and 404."""
+    return CharactersHaveFragmentsOut(fragments=sorted(catalog.index().fragments()))
+
+
 @router.get("/characters/{card_id}", response_model=CardDetailOut, summary="One card in full")
 def get_character(card_id: str, response: Response = None) -> CardDetailOut:  # type: ignore[assignment]
     # The detail read carries the same `If-Match` validator a write checks against
@@ -692,11 +708,19 @@ def bulk_tags(body: BulkTagsIn) -> BulkTagsOut:
 @router.post("/characters/have", response_model=CharactersHaveOut, summary="Which of these provider card ids are already in the archive")
 def characters_have(body: CharactersHaveIn) -> CharactersHaveOut:
     """The `/api/v1` peer of `POST /existing` (`proxy/api/capture.py`) -- same
-    id-fragment match, same `deps.png_writer.existing`, exposed here so
-    Discover (UI_REWRITE_PLAN.md §3.8) doesn't have to reach into the
-    userscript's own route namespace for "hide cards I have" and the
-    pre-import duplicate guard."""
-    return CharactersHaveOut(have=sorted(deps.png_writer.existing(body.ids)))
+    id-fragment match, exposed here so Discover (UI_REWRITE_PLAN.md §3.8)
+    doesn't have to reach into the userscript's own route namespace for the
+    pre-import duplicate guard.
+
+    Answered from `catalog.index()`'s in-memory fragment dict rather than
+    `deps.png_writer.existing` -- that one globs the filesystem per id, which
+    is fine for its actual caller (a rare bulk-export skip check) but not for
+    a route that could be asked about hundreds of ids. Discover itself no
+    longer calls this at all (see `/characters/have-fragments`); this stays
+    for any other point check."""
+    idx = catalog.index()
+    have = {card_id for card_id in body.ids if idx.by_fragment(id_fragment(card_id))}
+    return CharactersHaveOut(have=sorted(have))
 
 
 @router.post("/tags/apply", response_model=TagsApplyOut, summary="Apply a tag rename/removal plan across the archive")

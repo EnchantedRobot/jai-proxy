@@ -172,12 +172,41 @@ export interface paths {
         /**
          * Which of these provider card ids are already in the archive
          * @description The `/api/v1` peer of `POST /existing` (`proxy/api/capture.py`) -- same
-         *     id-fragment match, same `deps.png_writer.existing`, exposed here so
-         *     Discover (UI_REWRITE_PLAN.md §3.8) doesn't have to reach into the
-         *     userscript's own route namespace for "hide cards I have" and the
+         *     id-fragment match, exposed here so Discover (UI_REWRITE_PLAN.md §3.8)
+         *     doesn't have to reach into the userscript's own route namespace for the
          *     pre-import duplicate guard.
+         *
+         *     Answered from `catalog.index()`'s in-memory fragment dict rather than
+         *     `deps.png_writer.existing` -- that one globs the filesystem per id, which
+         *     is fine for its actual caller (a rare bulk-export skip check) but not for
+         *     a route that could be asked about hundreds of ids. Discover itself no
+         *     longer calls this at all (see `/characters/have-fragments`); this stays
+         *     for any other point check.
          */
         post: operations["characters_have_api_v1_characters_have_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/characters/have-fragments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every provider-id fragment already in the archive
+         * @description The whole `_<id8>` fragment set, for Discover to fetch once and match
+         *     against locally instead of resending its ever-growing loaded-id list to
+         *     `POST /characters/have` on every scroll tick. See that route's docstring
+         *     for why the per-id version was slow, and `ArchiveIndex.fragments`.
+         */
+        get: operations["characters_have_fragments_api_v1_characters_have_fragments_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1673,6 +1702,20 @@ export interface components {
             };
         };
         /**
+         * CharactersHaveFragmentsOut
+         * @description Every `_<id8>` fragment currently on disk.
+         *
+         *     Fetched once by Discover instead of `POST /characters/have` per
+         *     id-list-so-far: matching happens client-side against this set (the same
+         *     fragment derivation, ported to TypeScript), which is what the id list
+         *     grows into every scroll would otherwise force a fresh round trip for. Not
+         *     paged or filtered -- a few thousand short strings, cheap to send whole.
+         */
+        CharactersHaveFragmentsOut: {
+            /** Fragments */
+            fragments?: string[];
+        };
+        /**
          * CharactersHaveIn
          * @description `POST /characters/have` body -- provider card ids (Chub project ids,
          *     DataCat character ids, ...), not archive filenames.
@@ -2972,6 +3015,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    characters_have_fragments_api_v1_characters_have_fragments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharactersHaveFragmentsOut"];
                 };
             };
         };

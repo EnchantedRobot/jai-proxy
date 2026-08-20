@@ -269,6 +269,18 @@ class CharactersHaveOut(BaseModel):
     have: list[str] = Field(default_factory=list)
 
 
+class CharactersHaveFragmentsOut(BaseModel):
+    """Every `_<id8>` fragment currently on disk.
+
+    Fetched once by Discover instead of `POST /characters/have` per
+    id-list-so-far: matching happens client-side against this set (the same
+    fragment derivation, ported to TypeScript), which is what the id list
+    grows into every scroll would otherwise force a fresh round trip for. Not
+    paged or filtered -- a few thousand short strings, cheap to send whole."""
+
+    fragments: list[str] = Field(default_factory=list)
+
+
 class DeletedOut(BaseModel):
     """Where a delete put things. Paths, not booleans, because the whole point
     of binning rather than unlinking is that someone can go and get it back."""

@@ -10,10 +10,11 @@ import { type TagSelection } from '@/components/discover-tags-def'
 import { useDebounced } from '@/hooks/use-debounced'
 import {
   FOLLOWING_PER_CREATOR,
+  idFragment,
   useAddToArchive,
   useDatacatFollows,
   useDiscoverSearch,
-  useHaveGuard,
+  useHaveFragments,
 } from '@/hooks/use-discover'
 import { useProviderSettings, useSettings } from '@/hooks/use-settings'
 import {
@@ -147,11 +148,12 @@ export function DiscoverPage() {
     [items, filters, filtering],
   )
 
-  const have = useHaveGuard(tagMatched.map((i) => i.providerId))
-  const haveSet = have.data ?? new Set<string>()
-  const haveCount = tagMatched.filter((i) => haveSet.has(i.providerId)).length
+  const have = useHaveFragments()
+  const haveFragments = have.data ?? new Set<string>()
+  const isHave = (providerId: string) => haveFragments.has(idFragment(providerId))
+  const haveCount = tagMatched.filter((i) => isHave(i.providerId)).length
   const visible = state.hideHave
-    ? tagMatched.filter((i) => !haveSet.has(i.providerId))
+    ? tagMatched.filter((i) => !isHave(i.providerId))
     : tagMatched
 
   const feedNote =
@@ -331,7 +333,13 @@ export function DiscoverPage() {
           <div className="flex-1" />
           <button
             type="button"
-            onClick={() => void refetch()}
+            onClick={() => {
+              void refetch()
+              // The rare case the archive changed out from under this
+              // session (another tab, the userscript) -- resync the fragment
+              // set rather than waiting on its own staleTime.
+              void have.refetch()
+            }}
             disabled={isFetching}
             className="flex h-[35px] items-center gap-2 rounded-full border border-line px-3.5 text-[13px] text-muted-foreground hover:border-white/20 hover:text-text disabled:opacity-60"
           >
@@ -373,7 +381,7 @@ export function DiscoverPage() {
               key={item.key}
               item={item}
               search={gridSearch}
-              have={haveSet.has(item.providerId)}
+              have={isHave(item.providerId)}
               adding={addingKey === item.key}
               onBrowseCreator={() =>
                 patch({

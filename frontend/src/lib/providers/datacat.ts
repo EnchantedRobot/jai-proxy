@@ -152,12 +152,35 @@ export async function fetchDatacatFresh(opts: {
   }
 }
 
-export function datacatAvatarUrl(hit: DatacatCharacter): string {
+/**
+ * `avatar`, resolved to a URL and — for janitorai-hosted originals only —
+ * pulled down to a thumbnail.
+ *
+ * Port of `web/modules/providers/datacat/datacat-api.js:51-80`
+ * (`resolveDatacatAvatarUrl`)'s width behaviour: janitorai's `bot-avatars` are
+ * full-size originals (1024px+), so decoding one into a ~150px grid slot is
+ * what made hampter grids chug. `?width=` only means something on that host —
+ * datacat-native rows already resolve to an optimized `card.webp` variant, so
+ * the host guard leaves those untouched rather than appending a no-op param.
+ */
+export function datacatAvatarUrl(
+  hit: DatacatCharacter,
+  opts: { width?: number } = {},
+): string {
   const avatar = hit.avatar
   if (!avatar || typeof avatar !== 'string') return ''
-  return /^https?:\/\//i.test(avatar)
+  const url = /^https?:\/\//i.test(avatar)
     ? avatar
     : `${DATACAT_JANITOR_IMAGE_BASE}${avatar}`
+  if (!opts.width) return url
+  let hostname = ''
+  try {
+    hostname = new URL(url).hostname
+  } catch {
+    return url
+  }
+  if (!/(^|\.)janitorai\.com$/i.test(hostname)) return url
+  return url + (url.includes('?') ? '&' : '?') + `width=${opts.width}`
 }
 
 export function datacatCharacterId(hit: DatacatCharacter): string {
@@ -249,35 +272,44 @@ export async function hydrateDatacatScripts(
 ): Promise<boolean> {
   const scripts = character?.scripts as DatacatScript[] | undefined
   if (!Array.isArray(scripts) || !scripts.length) return true
-  for (const script of scripts) {
-    if (!script || script.type !== 'lorebook' || !script.is_public) continue
-    if (script.script) continue
-    // Listed publicly, but the creator locked the content; hampter serves the
-    // metadata and nothing else, so asking is pointless rather than failing.
-    if (script.is_code_public === false) continue
-    if (
-      typeof script.api_path !== 'string' ||
-      !HAMPTER_SCRIPT_PATH.test(script.api_path)
-    )
-      continue
-    try {
-      const response = await fetch(`https://janitorai.com${script.api_path}`, {
-        headers: { Accept: 'application/json' },
-      })
-      if (!response.ok) continue
-      const full = (await response.json()) as {
-        script?: string
-        settings?: string
+  // Each script is an independent fetch to a different hampter path -- one
+  // has no bearing on another, so nothing here needs to be sequential. A card
+  // with several lorebook scripts used to pay their round trips one after
+  // another before the preview could show anything; this pays the slowest of
+  // them, once.
+  await Promise.all(
+    scripts.map(async (script) => {
+      if (!script || script.type !== 'lorebook' || !script.is_public) return
+      if (script.script) return
+      // Listed publicly, but the creator locked the content; hampter serves
+      // the metadata and nothing else, so asking is pointless rather than
+      // failing.
+      if (script.is_code_public === false) return
+      if (
+        typeof script.api_path !== 'string' ||
+        !HAMPTER_SCRIPT_PATH.test(script.api_path)
+      )
+        return
+      try {
+        const response = await fetch(
+          `https://janitorai.com${script.api_path}`,
+          { headers: { Accept: 'application/json' } },
+        )
+        if (!response.ok) return
+        const full = (await response.json()) as {
+          script?: string
+          settings?: string
+        }
+        if (typeof full?.script === 'string' && full.script) {
+          script.script = full.script
+          if (!script.settings && typeof full.settings === 'string')
+            script.settings = full.settings
+        }
+      } catch {
+        // Left unfetched; `hasUnfetchedLorebook` is how a caller notices.
       }
-      if (typeof full?.script === 'string' && full.script) {
-        script.script = full.script
-        if (!script.settings && typeof full.settings === 'string')
-          script.settings = full.settings
-      }
-    } catch {
-      // Left unfetched; `hasUnfetchedLorebook` is how a caller notices.
-    }
-  }
+    }),
+  )
   return !hasUnfetchedLorebook(character)
 }
 
