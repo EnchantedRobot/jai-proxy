@@ -15,10 +15,11 @@ import {
 } from '@/components/detail/panes'
 import type { Pane } from '@/components/detail/panes-def'
 import {
+  idFragment,
   useAddToArchive,
   useDatacatFollows,
   useDiscoverSearch,
-  useHaveGuard,
+  useHaveFragments,
   type DiscoverItem,
 } from '@/hooks/use-discover'
 import {
@@ -26,6 +27,10 @@ import {
   useDiscoverPreview,
   type ProviderCapture,
 } from '@/hooks/use-discover-preview'
+import {
+  datacatAvatarUrl,
+  type DatacatCharacter,
+} from '@/lib/providers/datacat'
 import { useProviderSettings } from '@/hooks/use-settings'
 import { readDiscoverState, writeDiscoverState } from '@/lib/discover-state'
 import { formatDate } from '@/lib/card'
@@ -118,8 +123,8 @@ export function DiscoverPreviewPage() {
   }, [item, provider, id, auth])
 
   const preview = useDiscoverPreview(provider ?? 'chub', id, capture)
-  const have = useHaveGuard(id ? [id] : [])
-  const inArchive = Boolean(id && have.data?.has(id))
+  const have = useHaveFragments()
+  const inArchive = Boolean(id && have.data?.has(idFragment(id)))
 
   const add = useAddToArchive()
   const activeTab = (params.get('tab') as Pane) ?? 'overview'
@@ -179,166 +184,193 @@ export function DiscoverPreviewPage() {
         and open it from the grid.
       </Problem>
     )
-  if (error) return <Problem>{error}</Problem>
-  if (preview.error) return <Problem>{preview.error.message}</Problem>
-  if (!preview.data) return <Fallback>reading the card…</Fallback>
 
+  // From here on there is always something to show: `item` came out of the
+  // grid's own (already-fetched) query, so name/creator/tags/avatar are known
+  // immediately. The shell renders from that on every render; only the panes
+  // — which need the server-mapped `card` — wait on `preview`. This is the
+  // same split the old modal made: paint the header from the row you clicked,
+  // stream the body in behind it.
   const card = preview.data
-  const hero = card.avatar_url || item.avatarUrl
+  // Chub's `avatar_url` is already CDN-sized; DataCat's raw janitorai
+  // original needs the same width hint the old modal used (600px) so the
+  // hero doesn't decode a full-res image before `card.avatar_url` — the
+  // provider's own choice, made after the real fetch — is ready.
+  const previewAvatar =
+    provider === 'datacat'
+      ? datacatAvatarUrl(item.raw as DatacatCharacter, { width: 600 })
+      : item.avatarUrl
+  const hero = card?.avatar_url || previewAvatar || item.avatarUrl
+  const name = card?.name ?? item.name
+  const tags = card?.tags ?? item.tags
 
   return (
-    // Read-only: these panes are the archive's editors, and there is nothing
-    // here to write to yet. `EditProvider` still wraps them because they read
-    // the context unconditionally; `readOnly` is what removes every Edit button.
-    <EditProvider id={id} data={card.card} etag={null} readOnly>
-      <CardDetailLayout
-        heroImage={hero}
-        back={back}
-        backLabel={`Discover · ${PROVIDER_LABEL[provider]}`}
-        pager={
-          <DetailPager
-            position={position >= 0 ? position + 1 : null}
-            total={
-              feed.data?.pages[feed.data.pages.length - 1]?.total ??
-              items.length
+    <CardDetailLayout
+      heroImage={hero}
+      back={back}
+      backLabel={`Discover · ${PROVIDER_LABEL[provider]}`}
+      pager={
+        <DetailPager
+          position={position >= 0 ? position + 1 : null}
+          total={
+            feed.data?.pages[feed.data.pages.length - 1]?.total ?? items.length
+          }
+          onPrev={() => go(-1)}
+          onNext={() => go(1)}
+          prevDisabled={position <= 0}
+          nextDisabled={
+            position < 0 || (position >= items.length - 1 && !feed.hasNextPage)
+          }
+        />
+      }
+      portrait={
+        <>
+          {hero ? (
+            <img
+              src={hero}
+              alt={name}
+              className="aspect-[2/3] w-full rounded-[15px] border border-line object-cover shadow-[0_24px_60px_#00000080]"
+            />
+          ) : (
+            <div className="aspect-[2/3] w-full rounded-[15px] border border-line bg-raised" />
+          )}
+          <button
+            type="button"
+            disabled={add.isPending}
+            onClick={() =>
+              add.mutate(
+                { provider, raw: item.raw, capture },
+                {
+                  onSuccess: (result) =>
+                    toast(
+                      result.duplicate
+                        ? 'Already in the archive.'
+                        : `Added ${result.card?.name ?? name}.`,
+                    ),
+                  onError: (error) => toast(error.message, 'bad'),
+                },
+              )
             }
-            onPrev={() => go(-1)}
-            onNext={() => go(1)}
-            prevDisabled={position <= 0}
-            nextDisabled={
-              position < 0 ||
-              (position >= items.length - 1 && !feed.hasNextPage)
-            }
-          />
-        }
-        portrait={
-          <>
-            {hero ? (
-              <img
-                src={hero}
-                alt={card.name}
-                className="aspect-[2/3] w-full rounded-[15px] border border-line object-cover shadow-[0_24px_60px_#00000080]"
-              />
-            ) : (
-              <div className="aspect-[2/3] w-full rounded-[15px] border border-line bg-raised" />
+            className={cn(
+              'flex h-[38px] items-center justify-center gap-2 rounded-[10px] border text-[13.5px] font-semibold disabled:opacity-60',
+              inArchive
+                ? 'border-line text-muted-foreground hover:bg-raised'
+                : 'border-sage bg-sage text-on-sage hover:bg-[#68d0b1]',
             )}
-            <button
-              type="button"
-              disabled={add.isPending}
-              onClick={() =>
-                add.mutate(
-                  { provider, raw: item.raw, capture },
-                  {
-                    onSuccess: (result) =>
-                      toast(
-                        result.duplicate
-                          ? 'Already in the archive.'
-                          : `Added ${result.card?.name ?? card.name}.`,
-                      ),
-                    onError: (error) => toast(error.message, 'bad'),
-                  },
-                )
-              }
-              className={cn(
-                'flex h-[38px] items-center justify-center gap-2 rounded-[10px] border text-[13.5px] font-semibold disabled:opacity-60',
-                inArchive
-                  ? 'border-line text-muted-foreground hover:bg-raised'
-                  : 'border-sage bg-sage text-on-sage hover:bg-[#68d0b1]',
-              )}
+          >
+            <Plus className="size-4" />
+            {add.isPending
+              ? 'Adding…'
+              : inArchive
+                ? 'Add again'
+                : 'Add to archive'}
+          </button>
+          {card?.source_url && (
+            <a
+              href={card.source_url}
+              target="_blank"
+              rel="noreferrer"
+              className="flex h-[34px] items-center justify-center gap-2 rounded-[10px] border border-line text-[13px] text-muted-foreground hover:border-white/20 hover:text-text"
             >
-              <Plus className="size-4" />
-              {add.isPending
-                ? 'Adding…'
-                : inArchive
-                  ? 'Add again'
-                  : 'Add to archive'}
-            </button>
-            {card.source_url && (
-              <a
-                href={card.source_url}
-                target="_blank"
-                rel="noreferrer"
-                className="flex h-[34px] items-center justify-center gap-2 rounded-[10px] border border-line text-[13px] text-muted-foreground hover:border-white/20 hover:text-text"
-              >
-                <ExternalLink className="size-3.5" /> Open on{' '}
-                {PROVIDER_LABEL[provider]}
-              </a>
-            )}
-            {inArchive && (
-              <p className="px-1 text-center text-[12px] leading-[1.5] text-sage">
-                Already in your archive.
-              </p>
-            )}
-            {card.warnings.length > 0 && (
-              <div className="rounded-[10px] border border-line-soft bg-surface px-3 py-2.5 text-[12px] leading-[1.5] text-faint">
-                <b className="block font-semibold text-text">
-                  {card.warnings.length} thing
-                  {card.warnings.length === 1 ? '' : 's'} to know
-                </b>
-                <ul className="mt-1 list-disc pl-4">
-                  {card.warnings.map((warning) => (
-                    <li key={warning}>{warning}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </>
-        }
-        title={card.name}
-        meta={
-          <>
-            by <span className="text-sage">{card.creator || 'unknown'}</span>
-            {card.create_date && (
-              <>
-                <Sep />{' '}
-                <span className="font-mono">
-                  {formatDate(card.create_date)}
-                </span>
-              </>
-            )}
-            <Sep /> {PROVIDER_LABEL[provider]}
-            <Sep />{' '}
-            <span className="font-mono">
-              ~{Math.round(card.prompt_chars / 4).toLocaleString()} tokens
-            </span>
-          </>
-        }
-        tags={
-          card.tags.length > 0 ? (
-            <div className="mt-3.5 flex flex-wrap gap-1.5">
-              {card.tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded-full border border-line bg-surface px-2.5 py-1 text-[12px] text-muted-foreground"
-                >
-                  {tag}
-                </span>
-              ))}
+              <ExternalLink className="size-3.5" /> Open on{' '}
+              {PROVIDER_LABEL[provider]}
+            </a>
+          )}
+          {inArchive && (
+            <p className="px-1 text-center text-[12px] leading-[1.5] text-sage">
+              Already in your archive.
+            </p>
+          )}
+          {card && card.warnings.length > 0 && (
+            <div className="rounded-[10px] border border-line-soft bg-surface px-3 py-2.5 text-[12px] leading-[1.5] text-faint">
+              <b className="block font-semibold text-text">
+                {card.warnings.length} thing
+                {card.warnings.length === 1 ? '' : 's'} to know
+              </b>
+              <ul className="mt-1 list-disc pl-4">
+                {card.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
             </div>
-          ) : undefined
-        }
-        panes={PREVIEW_PANES}
-        activeTab={PREVIEW_PANES.includes(activeTab) ? activeTab : 'overview'}
-        onTabChange={setTab}
-        tabCount={(pane) =>
-          pane === 'greetings'
+          )}
+        </>
+      }
+      title={name}
+      meta={
+        <>
+          by{' '}
+          <span className="text-sage">
+            {card?.creator || item.creator || 'unknown'}
+          </span>
+          {card?.create_date && (
+            <>
+              <Sep />{' '}
+              <span className="font-mono">{formatDate(card.create_date)}</span>
+            </>
+          )}
+          <Sep /> {PROVIDER_LABEL[provider]}
+          {card && (
+            <>
+              <Sep />{' '}
+              <span className="font-mono">
+                ~{Math.round(card.prompt_chars / 4).toLocaleString()} tokens
+              </span>
+            </>
+          )}
+        </>
+      }
+      tags={
+        tags.length > 0 ? (
+          <div className="mt-3.5 flex flex-wrap gap-1.5">
+            {tags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-full border border-line bg-surface px-2.5 py-1 text-[12px] text-muted-foreground"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        ) : undefined
+      }
+      panes={PREVIEW_PANES}
+      activeTab={PREVIEW_PANES.includes(activeTab) ? activeTab : 'overview'}
+      onTabChange={setTab}
+      tabCount={(pane) =>
+        card
+          ? pane === 'greetings'
             ? card.greetings
             : pane === 'lore'
               ? card.lore_entries
               : undefined
-        }
-      >
-        {activeTab === 'notes' ? (
-          <NotesPane card={card} />
-        ) : activeTab === 'greetings' ? (
-          <GreetingsPane card={card} />
-        ) : activeTab === 'lore' ? (
-          <LorebookPane card={card} />
-        ) : (
-          <OverviewPane card={card} />
-        )}
-      </CardDetailLayout>
-    </EditProvider>
+          : undefined
+      }
+    >
+      {error ? (
+        <Problem>{error}</Problem>
+      ) : preview.error ? (
+        <Problem>{preview.error.message}</Problem>
+      ) : !card ? (
+        <Fallback>reading the card…</Fallback>
+      ) : (
+        // Read-only: these panes are the archive's editors, and there is
+        // nothing here to write to yet. `EditProvider` still wraps them
+        // because they read the context unconditionally; `readOnly` is what
+        // removes every Edit button.
+        <EditProvider id={id} data={card.card} etag={null} readOnly>
+          {activeTab === 'notes' ? (
+            <NotesPane card={card} />
+          ) : activeTab === 'greetings' ? (
+            <GreetingsPane card={card} />
+          ) : activeTab === 'lore' ? (
+            <LorebookPane card={card} />
+          ) : (
+            <OverviewPane card={card} />
+          )}
+        </EditProvider>
+      )}
+    </CardDetailLayout>
   )
 }
 

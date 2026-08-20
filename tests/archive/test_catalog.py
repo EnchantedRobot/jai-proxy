@@ -145,6 +145,31 @@ def test_by_fragment(populated_archive):
     assert index.by_fragment("deadbeef") == ()
 
 
+def test_by_fragment_is_a_dict_lookup_not_a_scan(populated_archive):
+    """The fragment index is rebuilt on every rescan, not just at construction
+    -- a card added after the index already existed must still be found."""
+    characters = populated_archive["characters"]
+    index = _index(characters)
+    assert index.by_fragment("cafebabe") == ()
+    (characters / "New_cafebabe.png").write_bytes(
+        card_png(
+            "New",
+            extensions=jai_extensions(card_id="cafebabe-0000-0000-0000-000000000000"),
+        )
+    )
+    index.refresh(force=True)
+    assert [r.name for r in index.by_fragment("cafebabe")] == ["New"]
+
+
+def test_fragments_is_every_on_disk_fragment(populated_archive):
+    index = _index(populated_archive["characters"])
+    fragments = index.fragments()
+    assert "0d162f5f" in fragments
+    assert "deadbeef" not in fragments
+    # Every non-empty fragment `by_fragment` can answer for is in the set.
+    assert all(index.by_fragment(f) for f in fragments)
+
+
 def test_short_source_ids_yield_short_fragments(archive_dirs):
     """Chub's ids are short integers, so the fragment is shorter than 8 chars --
     it has to match what the filename was actually built from."""

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router'
 import type { DiscoverItem } from '@/hooks/use-discover'
 import { cn } from '@/lib/utils'
@@ -30,6 +31,10 @@ export function DiscoverTile({
    *  this grid for its prev/next — the same trick `CardTile` uses. */
   search: string
 }) {
+  // Provider avatars arrive at wildly different sizes and connection speeds,
+  // and popping in fully-decoded reads as the grid "snapping" mid-scroll. A
+  // fade removes the pop without waiting on anything extra to load.
+  const [loaded, setLoaded] = useState(false)
   return (
     <Link
       to={{
@@ -49,7 +54,11 @@ export function DiscoverTile({
             src={item.avatarUrl}
             alt=""
             loading="lazy"
-            className="size-full object-cover transition-transform duration-[450ms] ease-[cubic-bezier(.2,.7,.3,1)] group-hover:scale-105"
+            onLoad={() => setLoaded(true)}
+            className={cn(
+              'size-full object-cover transition-[opacity,transform] duration-[450ms] ease-[cubic-bezier(.2,.7,.3,1)] group-hover:scale-105',
+              loaded ? 'opacity-100' : 'opacity-0',
+            )}
           />
         ) : (
           <div className="size-full bg-raised" />

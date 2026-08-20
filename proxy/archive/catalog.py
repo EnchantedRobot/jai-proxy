@@ -324,6 +324,7 @@ class ArchiveIndex:
         self._debounce = debounce_seconds
         self._records: dict[str, CardSummary] = {}
         self._folded: dict[str, str] = {}
+        self._by_fragment: dict[str, tuple[CardSummary, ...]] = {}
         self._stat_keys: dict[str, tuple[int, int]] = {}
         self._lock = threading.Lock()
         self._last_refresh = 0.0
@@ -369,10 +370,21 @@ class ArchiveIndex:
     def by_fragment(self, fragment: str) -> tuple[CardSummary, ...]:
         """Records carrying this `_<id8>` fragment. The archive's duplicate and
         already-saved checks key on the fragment alone (never the name -- a
-        rename breaks a name-pinned lookup), so a lookup by it belongs here."""
-        if not fragment:
-            return ()
-        return tuple(r for r in self._records.values() if r.fragment == fragment)
+        rename breaks a name-pinned lookup), so a lookup by it belongs here.
+        A dict lookup, built once per rescan -- not a scan of every record,
+        which is what a caller checking many fragments (Discover's "have"
+        guard, potentially hundreds of ids a page) would otherwise pay for
+        each one."""
+        return self._by_fragment.get(fragment, ()) if fragment else ()
+
+    def fragments(self) -> frozenset[str]:
+        """Every `_<id8>` fragment currently on disk.
+
+        The cheap half of "do I have this": no filesystem walk (unlike
+        `PngWriter.existing`, which globs per id), just the keys of the dict
+        `by_fragment` already maintains. Meant to be fetched once and matched
+        against locally, the way Discover's have-guard does."""
+        return frozenset(self._by_fragment)
 
     # --- refreshing ----------------------------------------------------------
 
@@ -429,9 +441,15 @@ class ArchiveIndex:
             stat_keys[filename] = key
             folded[_fold(filename)] = filename
 
+        by_fragment: dict[str, list[CardSummary]] = {}
+        for record in records.values():
+            if record.fragment:
+                by_fragment.setdefault(record.fragment, []).append(record)
+
         stats.removed = len(set(self._records) - set(records))
         self._records = records
         self._folded = folded
+        self._by_fragment = {k: tuple(v) for k, v in by_fragment.items()}
         self._stat_keys = stat_keys
         stats.seconds = time.perf_counter() - started
         return stats

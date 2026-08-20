@@ -161,6 +161,12 @@ def test_have_is_empty_for_an_empty_archive(client):
     assert resp.json()["have"] == []
 
 
+def test_have_fragments_lists_every_on_disk_fragment(client, populated_archive):
+    resp = client.get("/api/v1/characters/have-fragments")
+    assert resp.status_code == 200
+    assert "0d162f5f" in resp.json()["fragments"]
+
+
 def test_an_imported_card_is_visible_immediately(client):
     body = post(client, card_png("Fresh", creator="someone")).json()
     listed = client.get("/api/v1/characters?limit=0").json()
