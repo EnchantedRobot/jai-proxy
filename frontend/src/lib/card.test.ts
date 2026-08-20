@@ -4,6 +4,7 @@ import {
   formatBytes,
   formatDate,
   greetings,
+  groupSources,
   loreEntries,
   lorebookName,
   sourceLabel,
@@ -73,10 +74,39 @@ describe('reading the embedded card', () => {
 })
 
 describe('formatting', () => {
-  it('sourceLabel maps the importer kinds and falls back readably', () => {
+  it('sourceLabel names the platform, not the importer', () => {
+    // The `_core`/`_import` half says which pass acquired the card, which is
+    // not what "Source: Chub" is answering -- both kinds are Chub.
     expect(sourceLabel('janitor_core')).toBe('JanitorAI')
     expect(sourceLabel('chub_import')).toBe('Chub')
-    expect(sourceLabel('something_else')).toBe('something else')
+    expect(sourceLabel('chub_core')).toBe('Chub')
+    expect(sourceLabel('datacat_core')).toBe('DataCat')
+    // A kind with no label yet still reads, rather than falling out.
+    expect(sourceLabel('botbooru_import')).toBe('Botbooru')
+    expect(sourceLabel('something_else')).toBe('Something else')
+  })
+
+  it('groupSources folds the two kinds of a platform into one row', () => {
+    const groups = groupSources([
+      { value: 'chub_import', count: 1196 },
+      { value: 'janitor_core', count: 1483 },
+      { value: 'chub_core', count: 7 },
+    ])
+
+    expect(groups).toEqual([
+      {
+        platform: 'janitor',
+        label: 'JanitorAI',
+        count: 1483,
+        kinds: ['janitor_core'],
+      },
+      {
+        platform: 'chub',
+        label: 'Chub',
+        count: 1203,
+        kinds: ['chub_import', 'chub_core'],
+      },
+    ])
   })
 
   it('formatBytes scales B/KB/MB', () => {

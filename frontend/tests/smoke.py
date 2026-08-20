@@ -52,6 +52,28 @@ def foreign(url: str) -> bool:
     return not url.startswith(BASE)
 
 
+#: What the Source pill calls each platform -- mirrors PLATFORM_LABELS in
+#: src/lib/card.ts, which is where the UI's own copy lives.
+SOURCE_LABELS = {
+    "janitor": "JanitorAI",
+    "chub": "Chub",
+    "datacat": "DataCat",
+    "saucepan": "Saucepan",
+    "jannyai": "JannyAI",
+    "card": "Imported file",
+}
+
+
+def shown_count(page) -> int:
+    """The "N of M" count in the toolbar, as a number.
+
+    The first span in the sticky bar, read rather than searched for across the
+    whole body: a card name that happens to contain a digit would otherwise
+    satisfy a loose regex and make the comparison pass on the wrong text."""
+    text = page.inner_text(".sticky span")
+    return int(re.match(r"([\d,]+)", text).group(1).replace(",", ""))
+
+
 def main() -> int:
     errors: list[str] = []
     failed: list[str] = []
@@ -153,7 +175,7 @@ def drive(page, result: dict) -> None:
     page.mouse.move(800, 600)
     page.mouse.wheel(0, -60_000)
     page.wait_for_timeout(400)
-    page.click("button:text-is('Has a lorebook')")
+    page.click("button:text-is('Lorebook')")
     page.wait_for_timeout(1200)
     result["filtered_count"] = page.inner_text(".sticky span")
     result["filtered_url"] = page.url
@@ -167,11 +189,11 @@ def drive(page, result: dict) -> None:
     page.wait_for_timeout(1200)
     result["sorted_url"] = page.url
 
-    # --- the tag catalogue behind + Filter ---
+    # --- the tag catalogue behind the Tags pill ---
     # The whole vocabulary, not a top-N slice: the popover has its own search
     # box, so a capped list makes a rare tag look nonexistent rather than merely
     # unlisted. Compared against /facets so a re-introduced cap fails here.
-    page.click("button:text-is('＋ Filter')")
+    page.click("button[aria-label='Filter by tag']")
     page.wait_for_timeout(900)
     result["tag_options"] = page.eval_on_selector_all(
         "[role=dialog] button, [data-radix-popper-content-wrapper] button",
@@ -180,21 +202,73 @@ def drive(page, result: dict) -> None:
     result["tag_catalogue_complete"] = result["tag_options"] >= every_tag
     if not result["tag_catalogue_complete"]:
         raise AssertionError(
-            f"+ Filter lists {result['tag_options']} entries for {every_tag} tags -- truncated")
+            f"Tags pill lists {result['tag_options']} entries for {every_tag} tags -- truncated")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(400)
+
+    # --- Source: one platform, both of its importer kinds ---
+    # The pill folds `chub_import` and `chub_core` into a single "Chub" row, so
+    # the count it produces must equal the API's for both kinds ORed. A regression
+    # to single-kind matching shows up here as a number that is short by the
+    # smaller kind, which is easy to miss by eye and impossible to miss here.
+    facets = api("/api/v1/facets?limit=0")
+    platforms: dict[str, list[str]] = {}
+    for source in facets["sources"]:
+        platforms.setdefault(re.sub(r"_(core|import)$", "", source["value"]), []).append(
+            source["value"])
+    # A two-kind platform by preference -- folding those into one row is the
+    # whole point of the pill, and a single-kind platform would pass this check
+    # even if the fold were broken.
+    platform = max(platforms, key=lambda p: len(platforms[p]))
+    kinds = platforms[platform]
+    page.click("button[aria-label='Filter by source']")
+    page.wait_for_timeout(700)
+    page.click("[data-radix-popper-content-wrapper] button:has-text('%s')"
+               % SOURCE_LABELS.get(platform, platform))
+    page.wait_for_timeout(1500)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(400)
+    expected = api("/api/v1/characters?limit=0&"
+                   + "&".join(f"source={k}" for k in kinds))["total"]
+    result["source_kinds_ored"] = kinds
+    result["source_pill_count"] = shown_count(page)
+    if result["source_pill_count"] != expected:
+        raise AssertionError(
+            f"Source pill shows {result['source_pill_count']} for {kinds}, API says {expected}")
+    page.click("button:text-is('All')")
+    page.wait_for_timeout(800)
+
+    # --- Creator ---
+    top_creator = max(facets["creators"], key=lambda c: c["count"])
+    page.click("button[aria-label='Filter by creator']")
+    page.wait_for_timeout(700)
+    page.click("[data-radix-popper-content-wrapper] button:has-text('%s')" % top_creator["value"])
+    page.wait_for_timeout(1500)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(400)
+    result["creator_filtered"] = top_creator["value"]
+    result["creator_pill_count"] = shown_count(page)
+    if result["creator_pill_count"] != top_creator["count"]:
+        raise AssertionError(
+            f"Creator pill shows {result['creator_pill_count']} for {top_creator['value']}, "
+            f"facets say {top_creator['count']}")
+    page.click("button:text-is('All')")
+    page.wait_for_timeout(800)
 
     # The "Needs media" filter (§3.3): a real manifest-backed count, matched
     # against the same question asked of the API directly.
+    page.click("button:text-is('＋ Filter')")
+    page.wait_for_timeout(700)
     page.click("text=Needs media")
     page.wait_for_timeout(1500)
     page.keyboard.press("Escape")
     page.wait_for_timeout(500)
     needs_media = api("/api/v1/characters?needs_media=true&limit=0")["total"]
     result["needs_media_cards"] = needs_media
-    shown = re.search(r"([\d,]+) shown", page.inner_text("body"))
-    result["needs_media_chip_agrees"] = bool(shown) and shown.group(1).replace(",", "") == str(needs_media)
+    result["needs_media_chip_agrees"] = shown_count(page) == needs_media
     if not result["needs_media_chip_agrees"]:
         raise AssertionError(
-            f"Needs media chip shows {shown.group(1) if shown else '?'}, API says {needs_media}")
+            f"Needs media chip shows {shown_count(page)}, API says {needs_media}")
     page.click("button:text-is('All')")
     page.wait_for_timeout(800)
 

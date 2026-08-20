@@ -1,23 +1,27 @@
 import { X } from 'lucide-react'
 import {
+  FLAG_CHIP_LABELS,
   FLAG_LABELS,
   PRESET_FLAGS,
   type BrowseState,
   type Flag,
-  type TagMode,
 } from '@/lib/browse'
 import { cn } from '@/lib/utils'
 import { FilterPopover } from './FilterPopover'
 
 /**
- * The mock's one filter surface. It replaces the old UI's 726-line advanced
- * filter builder, and the expressiveness lost with it (nested AND/OR groups) is
- * a decision, not an oversight — docs/UI_REWRITE_PLAN.md §1.1.
+ * The flag chips. It replaces the old UI's 726-line advanced filter builder,
+ * and the expressiveness lost with it (nested AND/OR groups) is a decision, not
+ * an oversight — docs/UI_REWRITE_PLAN.md §1.1.
  *
  * Two kinds of chip live here. Preset chips are always shown, on or off. Chips
- * the user added from the ＋ Filter popover are shown only while they are
- * active, and carry an ✕ that removes them outright — otherwise a tag chosen
- * once would sit in the strip forever.
+ * the user turned on from the ＋ Filter popover are shown only while they are
+ * active, and carry an ✕ that removes them outright.
+ *
+ * Only flags, and there are six of them, so the strip has a fixed maximum
+ * width. Tags, creator and source were the unbounded ones and they moved out to
+ * their own pills (FilterPills) — the strip growing until it pushed the sort
+ * control off the toolbar is the reason that split exists.
  */
 export function ChipStrip({
   state,
@@ -39,30 +43,24 @@ export function ChipStrip({
     onChange({ ...state, flags })
   }
 
-  // Include → exclude → gone. The same cycle in the popover and in the strip,
-  // because they are the same chip in two places.
-  const cycleTag = (tag: string) => {
-    const tags = new Map(state.tags)
-    const current = tags.get(tag)
-    if (!current) tags.set(tag, 'inc')
-    else if (current === 'inc') tags.set(tag, 'exc')
-    else tags.delete(tag)
-    onChange({ ...state, tags })
-  }
-
-  const dropTag = (tag: string) => {
-    const tags = new Map(state.tags)
-    tags.delete(tag)
-    onChange({ ...state, tags })
-  }
-
-  // "All" clears what the user chose, not what the route pinned.
+  // "All" clears what the user chose, not what the route pinned. It reaches the
+  // pills too: it is the one control that means "show me everything again", and
+  // leaving a tag selected inside a closed pill would quietly contradict it.
   const clearAll = () =>
-    onChange({ ...state, flags: new Set(pinned), tags: new Map(), q: '' })
+    onChange({
+      ...state,
+      flags: new Set(pinned),
+      tags: new Map(),
+      creator: '',
+      sources: [],
+      q: '',
+    })
 
   const userFiltered =
     state.tags.size > 0 ||
     state.q !== '' ||
+    state.creator !== '' ||
+    state.sources.length > 0 ||
     [...state.flags].some((f) => !pinned.includes(f))
 
   const presetFlags = PRESET_FLAGS.filter((f) => !pinned.includes(f))
@@ -82,22 +80,14 @@ export function ChipStrip({
           on={state.flags.has(flag)}
           onClick={() => setFlag(flag)}
         >
-          {FLAG_LABELS[flag]}
+          {FLAG_CHIP_LABELS[flag]}
         </Chip>
       ))}
 
       {extraFlags.map((flag) => (
         <Chip key={flag} on onClick={() => setFlag(flag)}>
-          {FLAG_LABELS[flag]}
+          {FLAG_CHIP_LABELS[flag]}
           <Remove label={FLAG_LABELS[flag]} onRemove={() => setFlag(flag)} />
-        </Chip>
-      ))}
-
-      {[...state.tags].map(([tag, mode]) => (
-        <Chip key={tag} on mode={mode} onClick={() => cycleTag(tag)}>
-          {mode === 'exc' && '− '}
-          {tag}
-          <Remove label={tag} onRemove={() => dropTag(tag)} />
         </Chip>
       ))}
 
@@ -106,21 +96,19 @@ export function ChipStrip({
   )
 }
 
+/** A flag chip: on or off. The three-way include/exclude paint went with the
+ *  tag chips to the Tags pill, which is the only place a filter is negatable. */
 function Chip({
   on,
-  mode,
   className,
   ...props
-}: React.ComponentProps<'button'> & { on?: boolean; mode?: TagMode }) {
+}: React.ComponentProps<'button'> & { on?: boolean }) {
   return (
     <button
       type="button"
       className={cn(
         'inline-flex h-[30px] flex-none items-center gap-[7px] rounded-full border border-transparent px-3.5 text-[13px] text-muted-foreground hover:bg-white/5 hover:text-text',
         on && 'border-sage-line bg-sage-dim text-sage hover:bg-sage-dim',
-        on &&
-          mode === 'exc' &&
-          'border-bad/30 bg-bad/12 text-bad hover:bg-bad/12',
         className,
       )}
       {...props}

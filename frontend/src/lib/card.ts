@@ -89,17 +89,72 @@ export function extension(card: CardData, name: string): CardData {
   return block && typeof block === 'object' ? (block as CardData) : {}
 }
 
-const SOURCE_LABELS: Record<string, string> = {
-  janitor_core: 'JanitorAI',
-  chub_import: 'Chub',
-  datacat_import: 'DataCat',
-  saucepan_core: 'Saucepan',
-  jannyai_import: 'JannyAI',
-  card_import: 'Imported file',
+/**
+ * Where a card came from, as a reader thinks of it.
+ *
+ * `source_kind` names the *importer*, not the site, and two of them exist per
+ * site: `chub_import` is the bulk pass and `chub_core` a live capture, both of
+ * them Chub. The suffix is provenance trivia — for reading a card and for
+ * filtering the grid, the platform is the answer — so the suffix is stripped
+ * and the remaining stem is labelled.
+ *
+ * Derived rather than table-driven so a kind nobody has written a label for yet
+ * still groups and still reads: an unknown `foo_import` becomes "Foo" instead
+ * of falling out of the Source list entirely.
+ */
+const PLATFORM_LABELS: Record<string, string> = {
+  janitor: 'JanitorAI',
+  chub: 'Chub',
+  datacat: 'DataCat',
+  saucepan: 'Saucepan',
+  jannyai: 'JannyAI',
+  card: 'Imported file',
+}
+
+export function sourcePlatform(kind: string): string {
+  return kind.replace(/_(core|import)$/, '')
+}
+
+export function platformLabel(platform: string): string {
+  if (PLATFORM_LABELS[platform]) return PLATFORM_LABELS[platform]
+  const words = platform.replace(/_/g, ' ').trim()
+  return words ? words[0].toUpperCase() + words.slice(1) : 'unknown'
 }
 
 export function sourceLabel(kind: string): string {
-  return SOURCE_LABELS[kind] ?? kind.replace(/_/g, ' ') ?? 'unknown'
+  return platformLabel(sourcePlatform(kind))
+}
+
+/** One row of the Source filter: a platform, its total, and the kinds to ask
+ *  the API for. Built from `/facets` so the list is whatever the archive holds. */
+export interface SourceGroup {
+  platform: string
+  label: string
+  count: number
+  kinds: string[]
+}
+
+export function groupSources(
+  sources: { value: string; count: number }[],
+): SourceGroup[] {
+  const groups = new Map<string, SourceGroup>()
+  for (const { value, count } of sources) {
+    const platform = sourcePlatform(value)
+    const group = groups.get(platform) ?? {
+      platform,
+      label: platformLabel(platform),
+      count: 0,
+      kinds: [],
+    }
+    group.count += count
+    group.kinds.push(value)
+    groups.set(platform, group)
+  }
+  // Biggest first, name breaking the tie — the same order `/facets` uses, which
+  // the merge above would otherwise disturb.
+  return [...groups.values()].sort(
+    (a, b) => b.count - a.count || a.label.localeCompare(b.label),
+  )
 }
 
 export function formatBytes(bytes: number): string {

@@ -177,6 +177,15 @@ def test_creator_and_source_filters(client):
     assert _names(client.get("/api/v1/characters?source=chub_import").json()) == ["Bella"]
 
 
+def test_repeated_source_is_ored(client):
+    """One platform can span two importer kinds -- `chub_import` for the bulk
+    pass, `chub_core` for a live capture -- so the UI's per-platform Source
+    filter sends both and expects the union, not the intersection."""
+    both = "/api/v1/characters?source=chub_import&source=janitor_core"
+    assert _names(client.get(both).json()) == ["Abbie", "Bella", "Cleo"]
+    assert client.get("/api/v1/characters?source=nothing_at_all").json()["total"] == 0
+
+
 def test_has_lorebook_filter(client):
     assert _names(client.get("/api/v1/characters?has_lorebook=true").json()) == ["Abbie"]
     assert _names(client.get("/api/v1/characters?has_lorebook=false").json()) == ["Bella", "Cleo"]

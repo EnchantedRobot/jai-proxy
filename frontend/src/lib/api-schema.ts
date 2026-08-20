@@ -2700,8 +2700,8 @@ export interface operations {
                 exclude_tag?: string[];
                 /** @description Exact creator match, case-insensitive. */
                 creator?: string | null;
-                /** @description Exact `source_kind` match, e.g. `chub_import`. */
-                source?: string | null;
+                /** @description Repeatable; exact `source_kind` match, e.g. `chub_import`. Several are ORed, which is how one platform spanning two importer kinds (`chub_import` and `chub_core`) is asked for. */
+                source?: string[];
                 has_lorebook?: boolean | null;
                 /** @description Whether the card carries a gallery_id at all. */
                 has_gallery?: boolean | null;

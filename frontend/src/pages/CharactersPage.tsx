@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router'
 import { ChipStrip } from '@/components/ChipStrip'
+import { CreatorPill, SourcePill, TagsPill } from '@/components/FilterPills'
 import { CardGrid } from '@/components/CardGrid'
 import { CardTile } from '@/components/CardTile'
 import { RecentShelf } from '@/components/RecentShelf'
@@ -100,10 +101,16 @@ export function CharactersPage({ favorites = false }: { favorites?: boolean }) {
           <span className="text-[12.5px] whitespace-nowrap text-faint">
             {isPending
               ? 'reading…'
-              : `${total.toLocaleString()} shown${
+              : `${total.toLocaleString()}${
                   stats.data ? ` of ${stats.data.cards.toLocaleString()}` : ''
                 }`}
           </span>
+          {/* The three long-list filters, then the fixed flag strip. Ordered so
+              that the controls whose contents vary sit together and the strip,
+              which never changes width, anchors the row. */}
+          <TagsPill state={state} onChange={setState} />
+          <CreatorPill state={state} onChange={setState} />
+          <SourcePill state={state} onChange={setState} />
           <ChipStrip
             state={state}
             onChange={setState}

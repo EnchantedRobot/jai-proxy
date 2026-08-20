@@ -191,7 +191,7 @@ def _matches(
     tags: list[str],
     excluded_tags: list[str],
     creator: str | None,
-    source: str | None,
+    sources: set[str],
     has_lorebook: bool | None,
     has_gallery: bool | None,
     favorite: bool | None,
@@ -216,7 +216,12 @@ def _matches(
             return False
     if creator is not None and record.creator.casefold() != creator:
         return False
-    if source is not None and record.source_kind.casefold() != source:
+    # OR across the kinds given, because the UI's Source filter is per *platform*
+    # and a platform can span two importer kinds -- Chub is `chub_import` for the
+    # bulk pass and `chub_core` for a live capture, and "cards from Chub" means
+    # both. Repeatable rather than prefix-matched: the kind vocabulary is the
+    # server's, and a client that wants one exact kind can still send just that.
+    if sources and record.source_kind.casefold() not in sources:
         return False
     if has_lorebook is not None and bool(record.lore_entry_count) != has_lorebook:
         return False
@@ -280,7 +285,10 @@ def list_characters(
         description="Repeatable; a card carrying any of these is left out. Overrides `tag` when both name the same one.",
     ),
     creator: str | None = Query(None, description="Exact creator match, case-insensitive."),
-    source: str | None = Query(None, description="Exact `source_kind` match, e.g. `chub_import`."),
+    source: list[str] = Query(
+        default=[],
+        description="Repeatable; exact `source_kind` match, e.g. `chub_import`. Several are ORed, which is how one platform spanning two importer kinds (`chub_import` and `chub_core`) is asked for.",
+    ),
     has_lorebook: bool | None = Query(None),
     has_gallery: bool | None = Query(None, description="Whether the card carries a gallery_id at all."),
     favorite: bool | None = Query(None, description="Only starred cards, or only unstarred ones."),
@@ -327,6 +335,7 @@ def list_characters(
     terms = [t for t in (q or "").casefold().split() if t]
     wanted_tags = [t.casefold() for t in tag if t.strip()]
     unwanted_tags = [t.casefold() for t in exclude_tag if t.strip()]
+    wanted_sources = {s.casefold() for s in source if s.strip()}
     matched = [
         r
         for r in records
@@ -337,7 +346,7 @@ def list_characters(
             tags=wanted_tags,
             excluded_tags=unwanted_tags,
             creator=creator.casefold() if creator else None,
-            source=source.casefold() if source else None,
+            sources=wanted_sources,
             has_lorebook=has_lorebook,
             has_gallery=has_gallery,
             favorite=favorite,

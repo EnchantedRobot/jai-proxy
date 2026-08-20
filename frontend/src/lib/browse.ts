@@ -25,8 +25,15 @@ export interface BrowseState {
   sort: string
   flags: Set<Flag>
   tags: Map<string, TagMode>
+  /** Exact creator name, or '' for any. One at a time: the API matches a single
+   *  creator exactly, and "more cards by this person" is a one-person question. */
+  creator: string
+  /** `source_kind`s to OR over — a whole platform's worth at a time, since one
+   *  platform spans two kinds. Empty for any. */
+  sources: string[]
 }
 
+/** Flag names in full, for the ＋ Filter list where there is room to read. */
 export const FLAG_LABELS: Record<Flag, string> = {
   fav: 'Favorites',
   lore: 'Has a lorebook',
@@ -36,8 +43,22 @@ export const FLAG_LABELS: Record<Flag, string> = {
   media: 'Needs media',
 }
 
+/**
+ * The same flags as chips. Shorter, because the strip sits on the toolbar row
+ * beside the pills, the count and the sort, and full sentences there cost the
+ * horizontal space that made the old strip unusable once a few were on.
+ */
+export const FLAG_CHIP_LABELS: Record<Flag, string> = {
+  fav: 'Favorites',
+  lore: 'Lorebook',
+  greets: 'Greetings',
+  new: 'This week',
+  untagged: 'Untagged',
+  media: 'Needs media',
+}
+
 /** The chips the strip always shows, in the mock's order. */
-export const PRESET_FLAGS: Flag[] = ['fav', 'lore', 'greets', 'new']
+export const PRESET_FLAGS: Flag[] = ['lore', 'greets', 'new']
 
 export const SORTS: { value: string; label: string; hint?: string }[] = [
   { value: 'name', label: 'Name', hint: 'A→Z' },
@@ -76,6 +97,8 @@ export function readState(params: URLSearchParams): BrowseState {
     sort: params.get('sort') ?? 'name',
     flags,
     tags,
+    creator: params.get('creator') ?? '',
+    sources: params.getAll('source').filter(Boolean),
   }
 }
 
@@ -101,6 +124,8 @@ export function writeState(
   for (const [tag, mode] of state.tags) {
     params.append(mode === 'inc' ? 'tag' : 'xtag', tag)
   }
+  if (state.creator) params.set('creator', state.creator)
+  for (const kind of state.sources) params.append('source', kind)
   return params
 }
 
@@ -122,7 +147,13 @@ export function tileSearch(state: BrowseState): string {
 }
 
 export function isFiltered(state: BrowseState): boolean {
-  return state.flags.size > 0 || state.tags.size > 0 || state.q !== ''
+  return (
+    state.flags.size > 0 ||
+    state.tags.size > 0 ||
+    state.q !== '' ||
+    state.creator !== '' ||
+    state.sources.length > 0
+  )
 }
 
 /**
@@ -152,6 +183,8 @@ export function toQuery(state: BrowseState) {
     sort: state.sort,
     ...(include.length ? { tag: include } : {}),
     ...(exclude.length ? { exclude_tag: exclude } : {}),
+    ...(state.creator ? { creator: state.creator } : {}),
+    ...(state.sources.length ? { source: state.sources } : {}),
     ...(state.flags.has('fav') ? { favorite: true } : {}),
     ...(state.flags.has('lore') ? { has_lorebook: true } : {}),
     ...(state.flags.has('greets') ? { min_greetings: 2 } : {}),

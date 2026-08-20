@@ -50,8 +50,14 @@ export function useRecentlyAdded(count: number) {
   })
 }
 
-/** The tag catalogue behind the ＋ Filter popover, counted over the whole archive. */
-export function useTagFacets() {
+/**
+ * The catalogues behind the Tags, Creator and Source pills — every tag, creator
+ * and source_kind the archive holds, counted over all of it.
+ *
+ * One query for all three: `/facets` computes them in a single sweep and the
+ * three pills would otherwise fire three identical requests.
+ */
+export function useFacets() {
   return useQuery({
     queryKey: ['facets'],
     // Tags change only when a card is edited or imported, and the popover is
