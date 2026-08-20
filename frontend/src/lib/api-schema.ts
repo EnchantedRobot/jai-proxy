@@ -36,6 +36,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/characters/have-fragments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every provider-id fragment already in the archive
+         * @description The whole `_<id8>` fragment set, for Discover to fetch once and match
+         *     against locally instead of resending its ever-growing loaded-id list to
+         *     `POST /characters/have` on every scroll tick. See that route's docstring
+         *     for why the per-id version was slow, and `ArchiveIndex.fragments`.
+         *
+         *     Registered before `/characters/{card_id}` on purpose: Starlette matches
+         *     routes in declaration order, and a literal path below a `{card_id}`
+         *     catch-all would be swallowed by it as "the card whose id is
+         *     'have-fragments'" and 404.
+         */
+        get: operations["characters_have_fragments_api_v1_characters_have_fragments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/characters/{card_id}": {
         parameters: {
             query?: never;
@@ -184,29 +212,6 @@ export interface paths {
          *     for any other point check.
          */
         post: operations["characters_have_api_v1_characters_have_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/characters/have-fragments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Every provider-id fragment already in the archive
-         * @description The whole `_<id8>` fragment set, for Discover to fetch once and match
-         *     against locally instead of resending its ever-growing loaded-id list to
-         *     `POST /characters/have` on every scroll tick. See that route's docstring
-         *     for why the per-id version was slow, and `ArchiveIndex.fragments`.
-         */
-        get: operations["characters_have_fragments_api_v1_characters_have_fragments_get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2779,6 +2784,26 @@ export interface operations {
             };
         };
     };
+    characters_have_fragments_api_v1_characters_have_fragments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharactersHaveFragmentsOut"];
+                };
+            };
+        };
+    };
     get_character_api_v1_characters__card_id__get: {
         parameters: {
             query?: never;
@@ -3015,26 +3040,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    characters_have_fragments_api_v1_characters_have_fragments_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CharactersHaveFragmentsOut"];
                 };
             };
         };
