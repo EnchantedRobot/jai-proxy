@@ -228,6 +228,61 @@ class TagsApplyOut(BaseModel):
     )
 
 
+class DuplicateMemberOut(BaseModel):
+    """One card inside a candidate duplicate group -- enough to render a
+    compare tile without a second request per card. Deliberately not the
+    full `CardDetailOut`: a group review doesn't need the embedded prose,
+    only what already distinguishes the members (and their thumbs)."""
+
+    id: str = Field(description="The card's filename on disk, e.g. `Olivia_3725810.png`.")
+    name: str
+    page_name: str
+    tags: list[str]
+    description_chars: int
+    character_version: str
+    create_date: str
+    thumb_url: str
+    png_url: str
+
+
+class DuplicatePairOut(BaseModel):
+    """Why two members of a group were paired, in enough detail for a human
+    to judge it rather than trust it blindly -- this is a bounded heuristic,
+    not a verdict."""
+
+    a: str
+    b: str
+    avatar_distance: int | None = Field(
+        description="Hamming distance between the two avatars' 256-bit average-hash, or null if either thumb could not be read."
+    )
+    name_score: float = Field(description="difflib ratio over the casefolded names, 0-1.")
+    text_score: float = Field(
+        description="Best of description/first_mes/creator_notes difflib ratio, 0-1."
+    )
+    strength: Literal["strong", "weak"] = Field(
+        description="'strong' when the avatar alone proves it or the name match is backed by real text overlap; 'weak' when only the name matches -- e.g. two different characters sharing a recurring name."
+    )
+    reasons: list[str] = Field(description="Human-readable match evidence, e.g. 'identical avatar', '92% text overlap'.")
+
+
+class DuplicateGroupOut(BaseModel):
+    """A cluster of a creator's cards that a scan thinks might be the same
+    character. Always one creator -- cards from different creators are never
+    compared, let alone grouped."""
+
+    group_id: str = Field(description="Stable across scans as long as membership doesn't change -- derived from the sorted member filenames.")
+    creator: str
+    members: list[DuplicateMemberOut]
+    pairs: list[DuplicatePairOut]
+
+
+class DuplicatesOut(BaseModel):
+    """The result of a full-archive duplicate scan."""
+
+    groups: list[DuplicateGroupOut]
+    scanned: int = Field(description="Cards considered -- i.e. belonging to a creator with 2+ cards.")
+
+
 class CardImportOut(BaseModel):
     """What adopting an uploaded card PNG did.
 

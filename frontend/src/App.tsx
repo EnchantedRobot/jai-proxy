@@ -2,7 +2,7 @@ import { Route, Routes } from 'react-router'
 import { AppShell } from '@/components/AppShell'
 import { CharactersPage } from '@/pages/CharactersPage'
 import { CharacterDetailPage } from '@/pages/CharacterDetailPage'
-import { TagsPage } from '@/pages/TagsPage'
+import { ToolsPage } from '@/pages/ToolsPage'
 import { DiscoverPage } from '@/pages/DiscoverPage'
 import { DiscoverPreviewPage } from '@/pages/DiscoverPreviewPage'
 import { SettingsPage } from '@/pages/SettingsPage'
@@ -19,7 +19,8 @@ export default function App() {
         <Route path="/" element={<CharactersPage />} />
         <Route path="/favorites" element={<CharactersPage favorites />} />
         <Route path="/characters/:id" element={<CharacterDetailPage />} />
-        <Route path="/tags" element={<TagsPage />} />
+        <Route path="/tools" element={<ToolsPage />} />
+        <Route path="/tools/:section" element={<ToolsPage />} />
         <Route path="/discover" element={<DiscoverPage />} />
         {/* A provider card, read before it is kept. Deep-linkable like the
             archive's own detail route, and carrying the Discover query string

@@ -51,7 +51,7 @@ const UNCATEGORIZED = 'Custom'
  * Unassigned/Removed buckets, and an Apply that resolves the working dictionary
  * into a literal plan the server applies by string equality.
  */
-export function TagsPage() {
+export function TagsSection() {
   const cards = useAllCardTags()
   const settings = useSettings()
   const saveDelta = useUpdateUi2()

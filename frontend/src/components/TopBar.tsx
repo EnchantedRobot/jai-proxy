@@ -7,7 +7,7 @@ const TABS = [
   { to: '/', label: 'Characters' },
   { to: '/favorites', label: 'Favorites' },
   { to: '/discover', label: 'Discover' },
-  { to: '/tags', label: 'Tags' },
+  { to: '/tools', label: 'Tools' },
 ]
 
 /**
