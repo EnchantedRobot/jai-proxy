@@ -126,7 +126,17 @@ and backed up, so nothing the server writes can land anywhere else.
 Install `userscript/jai-proxy-bridge.user.js` in Tampermonkey. In JanitorAI's
 proxy/config settings, set the endpoint to
 `http://127.0.0.1:8000/v1/chat/completions` (any model name — the server answers
-whatever it is called).
+whatever it is called). Point it at whatever host the bridge itself is
+configured for: the URL has to share the bridge's `serverUrl` host and port, or
+the `/models` probe stops being recognised.
+
+That request is never actually sent over the network by the page. The bridge
+injects a hook into the page that intercepts it and relays it through
+`GM_xmlhttpRequest`, which is exempt from the page's mixed-content and CSP
+rules — which is why an https JanitorAI can talk to an http server on the LAN
+with no certificate anywhere. (A browser exempts `127.0.0.1` from
+mixed-content blocking, so a *local* server used to work even with the hook
+doing nothing; a LAN address does not, which is how that was finally noticed.)
 
 **Without a checkout**, open the archive in a browser and go to **Settings →
 Userscripts**: pick a bridge, set the server URL (it offers the address you are
