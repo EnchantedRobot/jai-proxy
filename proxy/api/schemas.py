@@ -389,18 +389,33 @@ class IndexStatsOut(BaseModel):
     seconds: float
 
 
+class MediaExtStatOut(BaseModel):
+    ext: str = Field(description="Lowercase file extension without the dot, e.g. 'png'. 'other' for anything unrecognized.")
+    count: int
+    bytes: int
+
+
+class MediaStatsOut(BaseModel):
+    """Every file under the galleries directory, tallied by extension."""
+
+    images: int
+    bytes: int
+    by_ext: list[MediaExtStatOut] = Field(description="Sorted by count, descending.")
+
+
 class StatsOut(BaseModel):
     """The archive at a glance, and the health of the index behind it."""
 
     cards: int
     unreadable: int = Field(description="Cards present but unparseable. Listed at /api/v1/characters?health=broken.")
-    bytes: int
+    bytes: int = Field(description="Card (.png) bytes on disk. See `media.bytes` for gallery images.")
     creators: int
     tags: int
     galleries: int = Field(description="Cards whose gallery folder exists on disk.")
     archive_dir: str
     thumbs: ThumbStatsOut
     index: IndexStatsOut
+    media: MediaStatsOut
 
 
 class MediaItemIn(BaseModel):

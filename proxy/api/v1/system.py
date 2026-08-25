@@ -8,11 +8,21 @@ and DataCat tokens. See `proxy.state.ui_settings`.
 from __future__ import annotations
 
 import logging
+import os
 from collections import Counter
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 
-from proxy.api.schemas import FacetsOut, FacetValue, IndexStatsOut, StatsOut, ThumbStatsOut
+from proxy.api.schemas import (
+    FacetsOut,
+    FacetValue,
+    IndexStatsOut,
+    MediaExtStatOut,
+    MediaStatsOut,
+    StatsOut,
+    ThumbStatsOut,
+)
 from proxy.api.v1 import _shared
 from proxy.archive import catalog
 from proxy.cards import gallery
@@ -55,6 +65,40 @@ def facets(
     return FacetsOut(tags=top(tags), creators=top(creators), sources=top(sources))
 
 
+def _media_stats() -> MediaStatsOut:
+    """Every file under the galleries directory, tallied by extension.
+
+    Two-level scandir -- one pass over the gallery folders, one over each
+    folder's files -- the same shape as `list_galleries` + `list_gallery_files`
+    in `proxy.api.v1.galleries`. The galleries directory never nests deeper than
+    that, so this is the whole tree without needing to recurse.
+    """
+    counts: Counter[str] = Counter()
+    byte_totals: Counter[str] = Counter()
+    try:
+        with os.scandir(settings.galleries_dir) as folders:
+            folder_names = [e.name for e in folders if e.is_dir() and not e.name.startswith(".")]
+    except OSError:
+        folder_names = []
+    for name in folder_names:
+        try:
+            with os.scandir(settings.galleries_dir / name) as files:
+                for entry in files:
+                    if not entry.is_file() or entry.name.startswith("."):
+                        continue
+                    ext = Path(entry.name).suffix.casefold().lstrip(".") or "other"
+                    size = entry.stat().st_size
+                    counts[ext] += 1
+                    byte_totals[ext] += size
+        except OSError:
+            continue
+    by_ext = [
+        MediaExtStatOut(ext=ext, count=counts[ext], bytes=byte_totals[ext])
+        for ext in sorted(counts, key=lambda e: -counts[e])
+    ]
+    return MediaStatsOut(images=sum(counts.values()), bytes=sum(byte_totals.values()), by_ext=by_ext)
+
+
 @router.get("/stats", response_model=StatsOut, summary="Archive and index health")
 def stats() -> StatsOut:
     idx = _shared.index()
@@ -89,6 +133,7 @@ def stats() -> StatsOut:
             removed=last.removed,
             seconds=round(last.seconds, 4),
         ),
+        media=_media_stats(),
     )
 
 
