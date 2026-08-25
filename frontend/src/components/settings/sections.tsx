@@ -84,6 +84,7 @@ export function LibrarySection() {
 export function ArchiveSection() {
   const stats = useArchiveStats()
   const data = stats.data
+  const totalBytes = data ? data.bytes + data.media.bytes : undefined
 
   return (
     <SettingsSection
@@ -92,10 +93,17 @@ export function ArchiveSection() {
     >
       <div className="flex flex-wrap gap-x-8 gap-y-3 py-[13px]">
         <Stat value={data ? data.cards.toLocaleString() : '—'} label="cards" />
-        <Stat value={data ? formatBytes(data.bytes) : '—'} label="on disk" />
+        <Stat
+          value={totalBytes !== undefined ? formatBytes(totalBytes) : '—'}
+          label="on disk"
+        />
         <Stat
           value={data ? data.galleries.toLocaleString() : '—'}
           label="galleries"
+        />
+        <Stat
+          value={data ? data.media.images.toLocaleString() : '—'}
+          label="gallery images"
         />
         <Stat
           value={data ? data.unreadable.toLocaleString() : '—'}
@@ -103,6 +111,28 @@ export function ArchiveSection() {
         />
       </div>
       <OptionRow label="Data directory" hint={data?.archive_dir ?? '—'} />
+      <OptionRow
+        label="Characters"
+        hint={
+          data
+            ? `${formatBytes(data.bytes)} across ${data.cards.toLocaleString()} cards.`
+            : '—'
+        }
+      />
+      <OptionRow
+        label="Galleries"
+        hint={
+          data
+            ? `${formatBytes(data.media.bytes)} across ${data.media.images.toLocaleString()} images in ${data.galleries.toLocaleString()} folders${
+                data.media.by_ext.length
+                  ? ` — ${data.media.by_ext
+                      .map((e) => `${e.count.toLocaleString()} ${e.ext}`)
+                      .join(', ')}`
+                  : ''
+              }.`
+            : '—'
+        }
+      />
       <OptionRow
         label="Avatar compression"
         hint="pngquant, ~56% smaller and visually lossless — always on at import, not a per-card choice."

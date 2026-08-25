@@ -2265,6 +2265,18 @@ export interface components {
              */
             phase: string;
         };
+        /** MediaExtStatOut */
+        MediaExtStatOut: {
+            /**
+             * Ext
+             * @description Lowercase file extension without the dot, e.g. 'png'. 'other' for anything unrecognized.
+             */
+            ext: string;
+            /** Count */
+            count: number;
+            /** Bytes */
+            bytes: number;
+        };
         /**
          * MediaHaveIn
          * @description `POST /characters/{id}/media/have` body -- the name-index half of
@@ -2542,6 +2554,21 @@ export interface components {
             lorebook: string[];
         };
         /**
+         * MediaStatsOut
+         * @description Every file under the galleries directory, tallied by extension.
+         */
+        MediaStatsOut: {
+            /** Images */
+            images: number;
+            /** Bytes */
+            bytes: number;
+            /**
+             * By Ext
+             * @description Sorted by count, descending.
+             */
+            by_ext: components["schemas"]["MediaExtStatOut"][];
+        };
+        /**
          * MediaStatusEntryOut
          * @description One card's row in `GET /media/status` -- a manifest summary, not the
          *     manifest itself (see `MediaManifestOut` for that).
@@ -2631,7 +2658,10 @@ export interface components {
              * @description Cards present but unparseable. Listed at /api/v1/characters?health=broken.
              */
             unreadable: number;
-            /** Bytes */
+            /**
+             * Bytes
+             * @description Card (.png) bytes on disk. See `media.bytes` for gallery images.
+             */
             bytes: number;
             /** Creators */
             creators: number;
@@ -2646,6 +2676,7 @@ export interface components {
             archive_dir: string;
             thumbs: components["schemas"]["ThumbStatsOut"];
             index: components["schemas"]["IndexStatsOut"];
+            media: components["schemas"]["MediaStatsOut"];
         };
         /**
          * TagsApplyIn

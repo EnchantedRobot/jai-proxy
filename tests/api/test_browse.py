@@ -347,6 +347,11 @@ def test_stats(client):
     assert stats["galleries"] == 1, "only Abbie's gallery folder exists on disk"
     assert stats["bytes"] > 0
     assert stats["thumbs"] == {"cached": 0, "missing": 3, "stale": 0}
+    assert stats["media"] == {
+        "images": 2,
+        "bytes": 306,
+        "by_ext": [{"ext": "jpg", "count": 2, "bytes": 306}],
+    }, "Abbie's gallery holds one.jpg (103 bytes incl. JPEG header) and two.jpg (203 bytes)"
 
 
 def test_stats_tracks_thumb_coverage_as_it_is_generated(client):
