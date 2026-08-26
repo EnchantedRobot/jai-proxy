@@ -459,6 +459,7 @@
         "southerngirl"
       ],
       "Magic Academy": [
+        "magic school",
         "magicacademy",
         "magical academy",
         "magicalacademy"
@@ -575,6 +576,7 @@
         "squirrelgirl",
         "tail",
         "tails",
+        "mantisgirl",
         "velociraptorgirl"
       ],
       "Non-Human": [
@@ -597,8 +599,11 @@
         "monsterweek",
         "mutant",
         "non_human",
+        "monster girl",
         "nonhuman character",
         "nonhuman protagonist",
+        "sphinx",
+        "virus",
         "parasite",
         "phoenix",
         "plantgirl",
@@ -758,6 +763,7 @@
       "Undead": [
         "frankenstein",
         "mummy",
+        "skeleton",
         "undead female",
         "zombie",
         "zombie girl"
@@ -784,7 +790,8 @@
         "goblin girl",
         "goblinbaddie",
         "goblingirl",
-        "goblinwife"
+        "goblinwife",
+        "orcwife"
       ],
       "Werewolf": [
         "wolfwife"
@@ -804,7 +811,8 @@
       ],
       "Sentient Object": [
         "sentientsword",
-        "swordpov"
+        "swordpov",
+        "teddybearchar"
       ]
     },
     "Ethnicity / Culture": {
@@ -1230,6 +1238,7 @@
         "wealthy"
       ],
       "Loser": [
+        "deadbeat",
         "femcel",
         "girl failure",
         "girlfailure",
@@ -1458,7 +1467,8 @@
         "step-sibling",
         "step_sibling",
         "stepsibling",
-        "stepsis"
+        "stepsis",
+        "stepsisters"
       ],
       "Daughter": [
         "adopteddaughter",
@@ -2114,6 +2124,7 @@
         "nocucks",
         "nonntr",
         "nontr",
+        "notreallyntr",
         "notntr",
         "ntrbutnotreally",
         "ntrmustburn",
@@ -2308,6 +2319,7 @@
         "slave",
         "slave girl",
         "slavechar",
+        "slavepov",
         "slaveuser",
         "trafficked"
       ],
@@ -2378,6 +2390,7 @@
         "genderbend",
         "genderbender",
         "genderbent",
+        "gendereveal",
         "genderswap",
         "multiple genders",
         "tomgirl"
@@ -4343,6 +4356,10 @@
     "noshower",
     "notgay",
     "jork",
-    "viron"
+    "viron",
+    "fineprintjam",
+    "ouushiii",
+    "teddybear",
+    "weird"
   ]
 }
