@@ -27,7 +27,7 @@ def expressions_dir(populated_archive: dict[str, Path]) -> Path:
 
 def test_folders_are_claimed_the_same_way_as_galleries(client):
     folders = client.get("/api/v1/expressions").json()
-    assert folders == [{"folder": "Abbie_kzbYR2QbpncC", "card_id": "Abbie_0d162f5f.png"}]
+    assert folders == [{"folder": "Abbie_kzbYR2QbpncC", "card_ids": ["Abbie_0d162f5f.png"]}]
 
 
 def test_files_are_listed_independently_of_the_gallery(client):

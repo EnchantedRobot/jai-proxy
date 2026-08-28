@@ -122,3 +122,26 @@ export function useSharesTag(tag: string | undefined, excludeId: string) {
     },
   })
 }
+
+/**
+ * Every fork of one root original, for the Related pane's "Forks of this
+ * card" row. `rootFragment` is already flattened by the server
+ * (docs/FORKS_AND_EXTRAS_PLAN.md §3) — the caller passes the card's own
+ * `fork.of` when it is itself a fork, or its own `fragment` otherwise, and
+ * either way this returns every sibling at once.
+ */
+export function useForksOf(rootFragment: string | undefined, excludeId: string) {
+  return useQuery({
+    queryKey: ['related', 'fork_of', rootFragment],
+    enabled: !!rootFragment,
+    queryFn: async () => {
+      const page = await unwrap(
+        apiClient.GET('/api/v1/characters', {
+          params: { query: { fork_of: rootFragment!, limit: 24, sort: '-added' } },
+        }),
+        'could not read forks of this card',
+      )
+      return page.items.filter((card) => card.id !== excludeId)
+    },
+  })
+}

@@ -3,7 +3,9 @@ import { Check, ChevronDown, Copy, Download, Plus } from 'lucide-react'
 import { CardTile } from '@/components/CardTile'
 import { CardGrid } from '@/components/CardGrid'
 import {
+  useCharacterDetail,
   useExpressionFiles,
+  useForksOf,
   useGalleryFiles,
   useSameCreator,
   useSharesTag,
@@ -12,6 +14,7 @@ import {
 import {
   dialogueBlocks,
   estimateTokens,
+  extension,
   formatBytes,
   formatDate,
   formatTokens,
@@ -661,13 +664,41 @@ export function RelatedPane({ card }: { card: CardDetail }) {
   const sameCreator = useSameCreator(card.creator, card.id)
   const sharesTag = useSharesTag(tag, card.id)
 
+  // Flattened lineage (docs/FORKS_AND_EXTRAS_PLAN.md §3): a card that is
+  // itself a fork points `useForksOf` at its own root, not at itself, so
+  // "forks of this card" always means "every sibling", at any depth.
+  const rootFragment = card.is_fork ? str(extension(card.card, 'fork'), 'of') : card.fragment
+  const forksOf = useForksOf(rootFragment, card.id)
+  const parent = useCharacterDetail(card.forked_from?.id)
+
   const creatorCards = sameCreator.data ?? []
   const tagCards = (sharesTag.data ?? []).filter(
     (other) => !creatorCards.some((c) => c.id === other.id),
   )
+  const forkCards = forksOf.data ?? []
 
   return (
     <>
+      {card.is_fork && (
+        <Section title="Forked from">
+          {parent.data ? (
+            <CardGrid className="pt-2.5">
+              <CardTile card={parent.data.card} />
+            </CardGrid>
+          ) : (
+            <EmptyState>The original is no longer in the archive.</EmptyState>
+          )}
+        </Section>
+      )}
+      {forkCards.length > 0 && (
+        <Section title={`Forks of this card (${forkCards.length})`}>
+          <CardGrid className="pt-2.5">
+            {forkCards.map((c) => (
+              <CardTile key={c.id} card={c} />
+            ))}
+          </CardGrid>
+        </Section>
+      )}
       <Section title={`Same creator · ${card.creator || 'unknown'}`}>
         {creatorCards.length ? (
           <CardGrid className="pt-2.5">

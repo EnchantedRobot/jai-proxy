@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import { Download } from 'lucide-react'
 import {
   useCharacterDetail,
@@ -42,6 +42,12 @@ export function CharacterDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [params, setParams] = useSearchParams()
   const navigate = useNavigate()
+  const location = useLocation()
+  // Set by the Fork action's navigate — "open the fork in edit mode with the
+  // name focused" (docs/FORKS_AND_EXTRAS_PLAN.md §3). PortraitActions consumes
+  // and clears it, so a later back/forward to this same history entry does not
+  // reopen the dialog.
+  const autoOpenRename = Boolean((location.state as { openRename?: boolean } | null)?.openRename)
 
   const detail = useCharacterDetail(id)
   // A local cache-bust bumped only when the avatar is replaced. The portrait URL
@@ -165,6 +171,7 @@ export function CharacterDetailPage() {
               card={card}
               etag={etag}
               onAvatarReplaced={() => setAvatarBust((n) => n + 1)}
+              autoOpenRename={autoOpenRename}
             />
           </>
         }
@@ -193,6 +200,24 @@ export function CharacterDetailPage() {
             <span className="font-mono">{formatDate(card.create_date)}</span>
             <Sep /> {sourceLabel(card.source_kind)}
             <Sep /> <span className="font-mono">{formatBytes(card.size)}</span>
+            {card.is_fork && (
+              <>
+                <Sep />{' '}
+                {card.forked_from ? (
+                  <>
+                    fork of{' '}
+                    <Link
+                      to={`/characters/${encodeURIComponent(card.forked_from.id)}`}
+                      className="text-sage hover:underline"
+                    >
+                      {card.forked_from.name}
+                    </Link>
+                  </>
+                ) : (
+                  <span className="text-faint italic">original no longer in archive</span>
+                )}
+              </>
+            )}
           </>
         }
         tags={<HeaderTags card={card} />}

@@ -75,23 +75,29 @@ def register_folder_routes(kind: FolderKind, router: APIRouter) -> None:
         f"/{kind.segment}", response_model=list[GalleryFolderOut], summary=f"{kind.singular.capitalize()} folders on disk"
     )
     def list_folders() -> list[GalleryFolderOut]:
-        """Every folder in the directory, each paired with the card that
-        claims it.
+        """Every folder in the directory, each paired with the cards that
+        claim it.
 
         Claimed by gallery *id*, not by folder name: the name is derived from
         the card's current name and drifts the moment a card is renamed,
-        whereas the id is the actual link. So `card_id: null` now means a
+        whereas the id is the actual link. So `card_ids: []` now means a
         folder no card carries the id for -- genuinely orphaned -- rather
-        than merely misnamed.
+        than merely misnamed. A folder can have more than one claimant: a
+        fork deliberately shares its parent's `gallery_id`
+        (docs/FORKS_AND_EXTRAS_PLAN.md §3), so two cards pointing at the same
+        folder is normal, not a collision to resolve.
         """
         idx = _shared.index()
-        claimed = {r.gallery_id: r.filename for r in idx.cards() if r.gallery_id}
+        claimed: dict[str, list[str]] = {}
+        for r in idx.cards():
+            if r.gallery_id:
+                claimed.setdefault(r.gallery_id, []).append(r.filename)
         try:
             with os.scandir(kind.root()) as entries:
                 folders = sorted(e.name for e in entries if e.is_dir() and not e.name.startswith("."))
         except OSError:
             return []
-        return [GalleryFolderOut(folder=f, card_id=claimed.get(gallery.id_of(f))) for f in folders]
+        return [GalleryFolderOut(folder=f, card_ids=claimed.get(gallery.id_of(f), [])) for f in folders]
 
     @router.get(
         f"/{kind.segment}/{{folder}}", response_model=GalleryFilesOut, summary=f"Files in one {kind.singular}"

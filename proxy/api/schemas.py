@@ -47,6 +47,10 @@ class CardOut(BaseModel):
         default=False,
         description="Starred, out of the card's own `extensions.fav` -- so it travels with the PNG and round-trips through SillyTavern rather than living in this server's settings.",
     )
+    is_fork: bool = Field(
+        default=False,
+        description="Whether the card carries an `extensions.fork` block -- for the tile badge and the Forks filter chip, without paying for the whole `extensions` blob on a list request.",
+    )
     size: int = Field(description="Card PNG size in bytes.")
     modified: datetime = Field(
         description="The file's mtime. Says when the card was last *written*, which on this archive is dominated by bulk repair passes -- see `linked_at` for when it arrived."
@@ -136,11 +140,23 @@ class GalleryFilesOut(BaseModel):
 
 class GalleryFolderOut(BaseModel):
     """A gallery folder as the orphan sweep sees it: the name on disk, and the
-    card that claims it -- null when nothing does, which is what makes it an
-    orphan. See `scripts/repair_galleries.py`."""
+    cards that claim it -- empty when nothing does, which is what makes it an
+    orphan. A list, not one card, because a fork shares its parent's
+    `gallery_id` by design (docs/FORKS_AND_EXTRAS_PLAN.md §3): two or more
+    cards legitimately claiming the same folder is normal, not a data error.
+    See `scripts/repair_galleries.py`."""
 
     folder: str
-    card_id: str | None
+    card_ids: list[str]
+
+
+class ForkParentOut(BaseModel):
+    """The original a fork points at, resolved to what it's called right now
+    -- `fork.of` is a fragment, not a filename, so this is a live lookup, not
+    a copy of what the fork was told at creation time."""
+
+    id: str
+    name: str
 
 
 class CardDetailOut(CardOut):
@@ -161,6 +177,10 @@ class CardDetailOut(CardOut):
     )
     expressions_zip_url: str | None = Field(
         description="GET this to download the character's expressions as a flat zip. Null when `expressions.exists` is false -- the client must never build this path itself."
+    )
+    forked_from: ForkParentOut | None = Field(
+        default=None,
+        description="The card `extensions.fork.of` resolves to right now, when this card is a fork. Null both for a card that isn't a fork and for a fork whose original has since been deleted -- the UI shows the latter as 'original no longer in archive', not as an error.",
     )
 
 

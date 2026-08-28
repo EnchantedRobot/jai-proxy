@@ -9,6 +9,7 @@ every write is atomic, and nothing is ever unlinked.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 from datetime import datetime, timezone
@@ -43,13 +44,14 @@ from proxy.api.schemas import (
     DeletedOut,
     FavoriteIn,
     FavoriteOut,
+    ForkParentOut,
     GalleryOut,
     TagsApplyIn,
     TagsApplyOut,
 )
 from proxy.api.v1 import _shared
 from proxy.archive import catalog
-from proxy.cards import edit, gallery, intake, pngtools
+from proxy.cards import edit, forks, gallery, intake, pngtools
 from proxy.cards.naming import id_fragment
 from proxy.media import expressions_export
 from proxy.media import manifest as media_manifest
@@ -101,6 +103,7 @@ def _card_out(record: catalog.CardSummary, *, extensions: bool = False) -> CardO
         has_creator_notes=record.has_creator_notes,
         has_example_dialogue=record.has_example_dialogue,
         favorite=record.favorite,
+        is_fork=bool(record.fork_of),
         size=record.size,
         modified=datetime.fromtimestamp(record.mtime, tz=timezone.utc),
         linked_at=record.linked_at,
@@ -199,6 +202,8 @@ def _matches(
     has_lorebook: bool | None,
     has_gallery: bool | None,
     favorite: bool | None,
+    is_fork: bool | None,
+    fork_of: str | None,
     untagged: bool | None,
     min_greetings: int | None,
     added_after: str | None,
@@ -232,6 +237,14 @@ def _matches(
     if has_gallery is not None and bool(record.gallery_id) != has_gallery:
         return False
     if favorite is not None and record.favorite != favorite:
+        return False
+    if is_fork is not None and bool(record.fork_of) != is_fork:
+        return False
+    # Exact fragment match, for the Related pane's "forks of this card" --
+    # `fork_of` is already the *root*, flattened (docs/FORKS_AND_EXTRAS_PLAN.md
+    # §3), so this finds every sibling fork at once regardless of which one
+    # of them the caller is looking at.
+    if fork_of is not None and record.fork_of != fork_of:
         return False
     if untagged is not None and (not record.tags) != untagged:
         return False
@@ -296,6 +309,11 @@ def list_characters(
     has_lorebook: bool | None = Query(None),
     has_gallery: bool | None = Query(None, description="Whether the card carries a gallery_id at all."),
     favorite: bool | None = Query(None, description="Only starred cards, or only unstarred ones."),
+    is_fork: bool | None = Query(None, description="Only forks, or only cards that aren't forks."),
+    fork_of: str | None = Query(
+        None,
+        description="The root original's `_<id8>` fragment -- every fork of that card (siblings included, per the flattened lineage in docs/FORKS_AND_EXTRAS_PLAN.md §3), and nothing else.",
+    ),
     untagged: bool | None = Query(None, description="`true` for cards carrying no tags at all -- the tagging backlog."),
     min_greetings: int | None = Query(
         None, ge=0, description="Cards with at least this many greetings. `2` is the mock's multi-greeting chip."
@@ -354,6 +372,8 @@ def list_characters(
             has_lorebook=has_lorebook,
             has_gallery=has_gallery,
             favorite=favorite,
+            is_fork=is_fork,
+            fork_of=fork_of,
             untagged=untagged,
             min_greetings=min_greetings,
             added_after=added_after,
@@ -442,7 +462,24 @@ def get_character(card_id: str, response: Response = None) -> CardDetailOut:  # 
             if expressions.exists
             else None
         ),
+        forked_from=_forked_from(idx, data),
     )
+
+
+def _forked_from(idx: catalog.ArchiveIndex, data: dict) -> ForkParentOut | None:
+    """The card `extensions.fork.of` resolves to right now, or None -- both
+    for a card that isn't a fork and for one whose original was since
+    deleted. Resolved against the already-loaded index (a single
+    `by_fragment` dict lookup), never a second disk read."""
+    fork = (data.get("extensions") or {}).get("fork")
+    of = fork.get("of") if isinstance(fork, dict) else None
+    if not isinstance(of, str) or not of:
+        return None
+    parents = idx.by_fragment(of)
+    if not parents:
+        return None
+    parent = parents[0]
+    return ForkParentOut(id=parent.filename, name=parent.name)
 
 
 @router.post("/characters", response_model=CardImportOut, summary="Adopt a card PNG into the archive")
@@ -452,6 +489,11 @@ def import_character(
         "skip",
         description="What to do when the archive already holds this card's `_<id8>` fragment. `skip` reports the card already there; `overwrite` replaces it in place, under the name it currently carries.",
     ),
+    fork_of: str | None = Form(
+        None,
+        description="The parent's `_<id8>` fragment. Adopts the uploaded PNG as a fork of that card (docs/FORKS_AND_EXTRAS_PLAN.md §3): forces `extensions.gallery_id` to the parent's and stamps `extensions.fork`. The uploaded card's own content and id are otherwise taken as given -- this is 'I already have a card that is a rewrite of one I own', not a clone.",
+    ),
+    note: str | None = Form(None, description="Free text for `extensions.fork.note`. Only meaningful with `fork_of`."),
 ) -> CardImportOut:
     """Take in a card as a file: a PNG dragged onto the import modal, or one
     unpacked from a Character Library bundle.
@@ -475,6 +517,21 @@ def import_character(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     idx = _shared.index()
+
+    if fork_of:
+        parents = idx.by_fragment(fork_of)
+        if not parents:
+            raise HTTPException(status_code=422, detail=f"fork_of names no card in the archive: {fork_of!r}")
+        parent = parents[0]
+        root = parent.fork_of or parent.fragment
+        forks.stamp(
+            prepared.payload,
+            gallery_id=parent.gallery_id,
+            root=root,
+            of_filename=parent.filename,
+            note=note or "",
+        )
+
     existing = idx.by_fragment(prepared.fragment) if prepared.fragment else ()
     if existing and on_duplicate == "skip":
         record = existing[0]
@@ -517,6 +574,68 @@ def import_character(
         overwritten=bool(existing),
         warnings=prepared.warnings,
     )
+
+
+@router.post("/characters/{card_id}/fork", response_model=CardDetailOut, summary="Fork a card")
+def fork_character(card_id: str) -> CardDetailOut:
+    """Clone `card_id` into a new, standalone card that shares its gallery
+    but not its identity -- docs/FORKS_AND_EXTRAS_PLAN.md §3, the "born here"
+    primitive. `POST /characters` with `fork_of=` is the other one, for a
+    fork arriving as a file rather than made here.
+
+    The fork starts as a full copy of the parent's text -- the workflow is
+    *rewrite*, not author-from-scratch -- so the two cards are
+    content-identical the instant this returns; the id has to be fresh
+    random rather than content-derived precisely because of that (forking the
+    same card twice must not collide). Forking a fork produces a sibling, not
+    a grandchild: `fork.of` always names the root original, flattened.
+    """
+    idx = _shared.index()
+    parent = _shared.require(idx, card_id)
+    parent_path = idx.root / parent.filename
+    try:
+        _outer, parent_data = edit.read_card(parent_path)
+    except edit.WriteError as exc:
+        raise _shared.write_error(exc) from exc
+
+    root = forks.root_fragment(parent_data, parent.fragment)
+
+    fresh_id = forks.generate_card_id()
+    for _ in range(5):
+        if id_fragment(fresh_id) not in idx.fragments():
+            break
+        fresh_id = forks.generate_card_id()
+    else:
+        raise HTTPException(status_code=500, detail="could not mint a unique fork id")
+
+    data = copy.deepcopy(parent_data)
+    extensions = data.get("extensions")
+    extensions = dict(extensions) if isinstance(extensions, dict) else {}
+    jai = dict(extensions.get("jai") or {})
+    jai["id"] = fresh_id
+    jai["sourceKind"] = "fork"
+    extensions["jai"] = jai
+    data["extensions"] = extensions
+
+    payload = {"spec": "chara_card_v3", "spec_version": "3.0", "data": data}
+    payload.update(data)  # V2-compat top-level mirror, same as intake._envelope
+    forks.stamp(payload, gallery_id=parent.gallery_id, root=root, of_filename=parent.filename)
+
+    try:
+        path = deps.png_writer.write_payload(
+            payload,
+            parent_path.read_bytes(),
+            creator=str(data.get("creator") or ""),
+            name=str(data.get("name") or parent.name),
+            card_id=fresh_id,
+            normalize=False,  # the parent's pixels, already processed once
+        )
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"cannot write the fork: {exc}") from exc
+
+    catalog.index().refresh(force=True)
+    logger.info("fork: %s -> %s", parent.filename, path.name)
+    return get_character(path.name)
 
 
 @router.put("/characters/{card_id}", response_model=CardDetailOut, summary="Replace a card's contents")

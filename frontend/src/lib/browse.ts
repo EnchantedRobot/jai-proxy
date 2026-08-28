@@ -12,7 +12,7 @@ export type Card = components['schemas']['CardOut']
  */
 
 /** A chip that is on or off. The tag chips are separate — they have three states. */
-export type Flag = 'fav' | 'lore' | 'greets' | 'new' | 'untagged' | 'media'
+export type Flag = 'fav' | 'lore' | 'greets' | 'new' | 'untagged' | 'media' | 'fork'
 
 /** Click a tag once to require it, again to exclude it, again to drop it. */
 export type TagMode = 'inc' | 'exc'
@@ -41,6 +41,7 @@ export const FLAG_LABELS: Record<Flag, string> = {
   new: 'Added this week',
   untagged: 'Untagged',
   media: 'Needs media',
+  fork: 'Forks',
 }
 
 /**
@@ -55,6 +56,7 @@ export const FLAG_CHIP_LABELS: Record<Flag, string> = {
   new: 'This week',
   untagged: 'Untagged',
   media: 'Needs media',
+  fork: 'Forks',
 }
 
 /** The chips the strip always shows, in the mock's order. */
@@ -191,5 +193,6 @@ export function toQuery(state: BrowseState) {
     ...(state.flags.has('untagged') ? { untagged: true } : {}),
     ...(state.flags.has('media') ? { needs_media: true } : {}),
     ...(state.flags.has('new') ? { added_after: weekAgo() } : {}),
+    ...(state.flags.has('fork') ? { is_fork: true } : {}),
   }
 }

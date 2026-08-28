@@ -104,6 +104,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/characters/{card_id}/fork": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fork a card
+         * @description Clone `card_id` into a new, standalone card that shares its gallery
+         *     but not its identity -- docs/FORKS_AND_EXTRAS_PLAN.md §3, the "born here"
+         *     primitive. `POST /characters` with `fork_of=` is the other one, for a
+         *     fork arriving as a file rather than made here.
+         *
+         *     The fork starts as a full copy of the parent's text -- the workflow is
+         *     *rewrite*, not author-from-scratch -- so the two cards are
+         *     content-identical the instant this returns; the id has to be fresh
+         *     random rather than content-derived precisely because of that (forking the
+         *     same card twice must not collide). Forking a fork produces a sibling, not
+         *     a grandchild: `fork.of` always names the root original, flattened.
+         */
+        post: operations["fork_character_api_v1_characters__card_id__fork_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/characters/{card_id}/favorite": {
         parameters: {
             query?: never;
@@ -422,14 +452,17 @@ export interface paths {
         };
         /**
          * Gallery folders on disk
-         * @description Every folder in the directory, each paired with the card that
-         *     claims it.
+         * @description Every folder in the directory, each paired with the cards that
+         *     claim it.
          *
          *     Claimed by gallery *id*, not by folder name: the name is derived from
          *     the card's current name and drifts the moment a card is renamed,
-         *     whereas the id is the actual link. So `card_id: null` now means a
+         *     whereas the id is the actual link. So `card_ids: []` now means a
          *     folder no card carries the id for -- genuinely orphaned -- rather
-         *     than merely misnamed.
+         *     than merely misnamed. A folder can have more than one claimant: a
+         *     fork deliberately shares its parent's `gallery_id`
+         *     (docs/FORKS_AND_EXTRAS_PLAN.md §3), so two cards pointing at the same
+         *     folder is normal, not a collision to resolve.
          */
         get: operations["list_folders_api_v1_galleries_get"];
         put?: never;
@@ -583,14 +616,17 @@ export interface paths {
         };
         /**
          * Expression folders on disk
-         * @description Every folder in the directory, each paired with the card that
-         *     claims it.
+         * @description Every folder in the directory, each paired with the cards that
+         *     claim it.
          *
          *     Claimed by gallery *id*, not by folder name: the name is derived from
          *     the card's current name and drifts the moment a card is renamed,
-         *     whereas the id is the actual link. So `card_id: null` now means a
+         *     whereas the id is the actual link. So `card_ids: []` now means a
          *     folder no card carries the id for -- genuinely orphaned -- rather
-         *     than merely misnamed.
+         *     than merely misnamed. A folder can have more than one claimant: a
+         *     fork deliberately shares its parent's `gallery_id`
+         *     (docs/FORKS_AND_EXTRAS_PLAN.md §3), so two cards pointing at the same
+         *     folder is normal, not a collision to resolve.
          */
         get: operations["list_folders_api_v1_expressions_get"];
         put?: never;
@@ -1447,6 +1483,16 @@ export interface components {
              * @enum {string}
              */
             on_duplicate: "skip" | "overwrite";
+            /**
+             * Fork Of
+             * @description The parent's `_<id8>` fragment. Adopts the uploaded PNG as a fork of that card (docs/FORKS_AND_EXTRAS_PLAN.md §3): forces `extensions.gallery_id` to the parent's and stamps `extensions.fork`. The uploaded card's own content and id are otherwise taken as given -- this is 'I already have a card that is a rewrite of one I own', not a clone.
+             */
+            fork_of?: string | null;
+            /**
+             * Note
+             * @description Free text for `extensions.fork.note`. Only meaningful with `fork_of`.
+             */
+            note?: string | null;
         };
         /** Body_put_character_avatar_api_v1_characters__card_id__avatar_put */
         Body_put_character_avatar_api_v1_characters__card_id__avatar_put: {
@@ -1674,6 +1720,12 @@ export interface components {
              */
             favorite: boolean;
             /**
+             * Is Fork
+             * @description Whether the card carries an `extensions.fork` block -- for the tile badge and the Forks filter chip, without paying for the whole `extensions` blob on a list request.
+             * @default false
+             */
+            is_fork: boolean;
+            /**
              * Size
              * @description Card PNG size in bytes.
              */
@@ -1728,6 +1780,8 @@ export interface components {
              * @description GET this to download the character's expressions as a flat zip. Null when `expressions.exists` is false -- the client must never build this path itself.
              */
             expressions_zip_url: string | null;
+            /** @description The card `extensions.fork.of` resolves to right now, when this card is a fork. Null both for a card that isn't a fork and for a fork whose original has since been deleted -- the UI shows the latter as 'original no longer in archive', not as an error. */
+            forked_from?: components["schemas"]["ForkParentOut"] | null;
         };
         /**
          * CardImportOut
@@ -1860,6 +1914,12 @@ export interface components {
              * @default false
              */
             favorite: boolean;
+            /**
+             * Is Fork
+             * @description Whether the card carries an `extensions.fork` block -- for the tile badge and the Forks filter chip, without paying for the whole `extensions` blob on a list request.
+             * @default false
+             */
+            is_fork: boolean;
             /**
              * Size
              * @description Card PNG size in bytes.
@@ -2306,6 +2366,18 @@ export interface components {
             favorite: boolean;
         };
         /**
+         * ForkParentOut
+         * @description The original a fork points at, resolved to what it's called right now
+         *     -- `fork.of` is a fragment, not a filename, so this is a live lookup, not
+         *     a copy of what the fork was told at creation time.
+         */
+        ForkParentOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /**
          * GalleryFileOut
          * @description One file in a gallery folder. `kind` is sniffed from the extension rather
          *     than the bytes: a gallery holds images, video and audio side by side, and the
@@ -2366,14 +2438,17 @@ export interface components {
         /**
          * GalleryFolderOut
          * @description A gallery folder as the orphan sweep sees it: the name on disk, and the
-         *     card that claims it -- null when nothing does, which is what makes it an
-         *     orphan. See `scripts/repair_galleries.py`.
+         *     cards that claim it -- empty when nothing does, which is what makes it an
+         *     orphan. A list, not one card, because a fork shares its parent's
+         *     `gallery_id` by design (docs/FORKS_AND_EXTRAS_PLAN.md §3): two or more
+         *     cards legitimately claiming the same folder is normal, not a data error.
+         *     See `scripts/repair_galleries.py`.
          */
         GalleryFolderOut: {
             /** Folder */
             folder: string;
-            /** Card Id */
-            card_id: string | null;
+            /** Card Ids */
+            card_ids: string[];
         };
         /**
          * GalleryOut
@@ -3058,6 +3133,10 @@ export interface operations {
                 has_gallery?: boolean | null;
                 /** @description Only starred cards, or only unstarred ones. */
                 favorite?: boolean | null;
+                /** @description Only forks, or only cards that aren't forks. */
+                is_fork?: boolean | null;
+                /** @description The root original's `_<id8>` fragment -- every fork of that card (siblings included, per the flattened lineage in docs/FORKS_AND_EXTRAS_PLAN.md §3), and nothing else. */
+                fork_of?: string | null;
                 /** @description `true` for cards carrying no tags at all -- the tagging backlog. */
                 untagged?: boolean | null;
                 /** @description Cards with at least this many greetings. `2` is the mock's multi-greeting chip. */
@@ -3244,6 +3323,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeletedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fork_character_api_v1_characters__card_id__fork_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                card_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CardDetailOut"];
                 };
             };
             /** @description Validation Error */
