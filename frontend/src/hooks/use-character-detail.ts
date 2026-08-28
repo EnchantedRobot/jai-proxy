@@ -60,6 +60,29 @@ export function useGalleryFiles(folder: string | undefined, exists: boolean) {
 }
 
 /**
+ * A card's expression sprites, for the Expressions pane. Same shape and the
+ * same `enabled` gate as `useGalleryFiles` -- `exists: false` means no folder
+ * on disk, so the query stays off and the pane shows the empty state without
+ * ever asking the server for a folder it already knows is not there.
+ */
+export function useExpressionFiles(
+  folder: string | undefined,
+  exists: boolean,
+) {
+  return useQuery({
+    queryKey: ['expressions', folder],
+    enabled: !!folder && exists,
+    queryFn: () =>
+      unwrap(
+        apiClient.GET('/api/v1/expressions/{folder}', {
+          params: { path: { folder: folder! } },
+        }),
+        'could not read the expressions folder',
+      ),
+  })
+}
+
+/**
  * Cards by the same creator, for the Related pane. `creator=` is an exact,
  * case-insensitive match server-side, so this is one small query rather than a
  * client-side scan of the archive.
@@ -97,6 +120,34 @@ export function useSharesTag(tag: string | undefined, excludeId: string) {
           params: { query: { tag: [tag!], limit: 24, sort: '-added' } },
         }),
         'could not read related cards',
+      )
+      return page.items.filter((card) => card.id !== excludeId)
+    },
+  })
+}
+
+/**
+ * Every fork of one root original, for the Related pane's "Forks of this
+ * card" row. `rootFragment` is already flattened by the server
+ * (docs/FORKS_AND_EXTRAS_PLAN.md §3) — the caller passes the card's own
+ * `fork.of` when it is itself a fork, or its own `fragment` otherwise, and
+ * either way this returns every sibling at once.
+ */
+export function useForksOf(
+  rootFragment: string | undefined,
+  excludeId: string,
+) {
+  return useQuery({
+    queryKey: ['related', 'fork_of', rootFragment],
+    enabled: !!rootFragment,
+    queryFn: async () => {
+      const page = await unwrap(
+        apiClient.GET('/api/v1/characters', {
+          params: {
+            query: { fork_of: rootFragment!, limit: 24, sort: '-added' },
+          },
+        }),
+        'could not read forks of this card',
       )
       return page.items.filter((card) => card.id !== excludeId)
     },

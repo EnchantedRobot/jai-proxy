@@ -81,6 +81,64 @@ function strings(value: unknown): string[] {
     : []
 }
 
+/** One line of a dialogue block. `speaker` is null for text that precedes the
+ *  first `{{user}}:` / `{{char}}:` tag (rare, but real -- a freeform block with
+ *  no turn markers at all reads as a single untagged turn). */
+export interface DialogueTurn {
+  speaker: 'user' | 'char' | null
+  text: string
+}
+
+/** One `mes_example` block: its raw text (used by the editor) plus the turns
+ *  parsed out of it (used by the read view). */
+export interface DialogueBlock {
+  raw: string
+  turns: DialogueTurn[]
+}
+
+const TURN_TAG = /\{\{(user|char)\}\}:[ \t]*/gi
+
+/** Split one block's raw text into `{{user}}:` / `{{char}}:` turns. A block
+ *  with no recognized tag at all -- real in the archive -- falls back to a
+ *  single untagged turn holding the whole block, rather than an empty list. */
+function dialogueTurns(block: string): DialogueTurn[] {
+  const tags = [...block.matchAll(TURN_TAG)]
+  if (tags.length === 0) return [{ speaker: null, text: block }]
+
+  const turns: DialogueTurn[] = []
+  const preamble = block.slice(0, tags[0].index).trim()
+  if (preamble) turns.push({ speaker: null, text: preamble })
+
+  tags.forEach((tag, i) => {
+    const start = tag.index + tag[0].length
+    const end = i + 1 < tags.length ? tags[i + 1].index : block.length
+    const text = block.slice(start, end).trim()
+    if (text)
+      turns.push({ speaker: tag[1].toLowerCase() as 'user' | 'char', text })
+  })
+  return turns
+}
+
+/**
+ * `mes_example` split into blocks, each rendered as its own transcript.
+ *
+ * Blocks are separated by `<START>`, matched case-insensitively -- the
+ * archive's own cards use the uppercase form but a real corpus of ST exports
+ * uses lowercase `<start>` throughout. 318 archive cards carry `mes_example`
+ * with zero `<START>` markers at all; `String.split` against a pattern that
+ * never matches returns the whole string as its one element, so that case
+ * falls out as a single block for free rather than needing its own branch.
+ */
+export function dialogueBlocks(card: CardData): DialogueBlock[] {
+  const raw = str(card, 'mes_example')
+  if (!raw.trim()) return []
+  return raw
+    .split(/<start>/gi)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => ({ raw: block, turns: dialogueTurns(block) }))
+}
+
 /** The `extensions.<provider>` block, or an empty object. */
 export function extension(card: CardData, name: string): CardData {
   const extensions = card.extensions

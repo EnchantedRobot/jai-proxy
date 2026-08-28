@@ -34,7 +34,7 @@ def gallery_dir(populated_archive: dict[str, Path]) -> Path:
 
 def test_folders_name_the_card_that_claims_them(client):
     folders = client.get("/api/v1/galleries").json()
-    assert folders == [{"folder": "Abbie_kzbYR2QbpncC", "card_id": "Abbie_0d162f5f.png"}]
+    assert folders == [{"folder": "Abbie_kzbYR2QbpncC", "card_ids": ["Abbie_0d162f5f.png"]}]
 
 
 def test_a_folder_no_card_computes_is_reported_as_an_orphan(client, populated_archive):
@@ -44,7 +44,7 @@ def test_a_folder_no_card_computes_is_reported_as_an_orphan(client, populated_ar
     (populated_archive["galleries"] / "Renamed_zzzzzzzzzzzz").mkdir()
 
     folders = client.get("/api/v1/galleries").json()
-    orphans = [f["folder"] for f in folders if f["card_id"] is None]
+    orphans = [f["folder"] for f in folders if not f["card_ids"]]
     assert orphans == ["Renamed_zzzzzzzzzzzz"]
 
 

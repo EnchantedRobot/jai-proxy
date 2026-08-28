@@ -29,6 +29,14 @@ function detailCard(overrides: Record<string, unknown> = {}) {
     spec: 'chara_card_v3',
     spec_version: '3.0',
     gallery: { gallery_id: '', folder: '', exists: false, images: 0, bytes: 0 },
+    expressions: {
+      gallery_id: '',
+      folder: '',
+      exists: false,
+      images: 0,
+      bytes: 0,
+    },
+    expressions_zip_url: null,
     card: {
       name: 'Abbie',
       description: 'A long description of Abbie.',
@@ -155,6 +163,104 @@ describe('CharacterDetailPage', () => {
     await userEvent.click(screen.getByRole('button', { name: /Lorebook/ }))
     expect(screen.getByText('the tower')).toBeInTheDocument()
     expect(screen.getByText('tall and cold')).toBeInTheDocument()
+  })
+
+  it('the dialogue tab renders mes_example as a transcript, macro speaker resolved', async () => {
+    const withDialogue = detailCard({ has_example_dialogue: true })
+    withDialogue.card.mes_example =
+      '<start>\n{{user}}: Who are you?\n{{char}}: Just a traveler.'
+    server.use(detailHandler(withDialogue), listHandler([withDialogue]))
+    renderDetail('/characters/Abbie_0d162f5f.png')
+    await screen.findByRole('heading', { name: 'Abbie', level: 1 })
+
+    await userEvent.click(screen.getByRole('button', { name: /^Dialogue/ }))
+    expect(screen.getByText('Who are you?')).toBeInTheDocument()
+    expect(screen.getByText('Just a traveler.')).toBeInTheDocument()
+    // Speaker labels: {{char}} resolves to the card's name, {{user}} to "You".
+    expect(screen.getAllByText('Abbie').length).toBeGreaterThan(0)
+    expect(screen.getByText('You')).toBeInTheDocument()
+  })
+
+  it('the dialogue tab shows the empty state for a card with no mes_example', async () => {
+    server.use(detailHandler(), listHandler())
+    renderDetail('/characters/Abbie_0d162f5f.png')
+    await screen.findByRole('heading', { name: 'Abbie', level: 1 })
+
+    await userEvent.click(screen.getByRole('button', { name: /^Dialogue/ }))
+    expect(screen.getByText(/no example dialogue/i)).toBeInTheDocument()
+  })
+
+  it('the expressions tab groups sprites by label, neutral first, and offers a download link', async () => {
+    const withExpressions = detailCard({
+      expressions: {
+        gallery_id: 'kzbYR2QbpncC',
+        folder: 'Abbie_kzbYR2QbpncC',
+        exists: true,
+        images: 3,
+        bytes: 300,
+      },
+      expressions_zip_url:
+        '/api/v1/characters/Abbie_0d162f5f.png/expressions.zip',
+    })
+    server.use(
+      detailHandler(withExpressions),
+      listHandler([withExpressions]),
+      http.get('*/api/v1/expressions/:folder', () =>
+        HttpResponse.json({
+          folder: 'Abbie_kzbYR2QbpncC',
+          total: 3,
+          bytes: 300,
+          items: [
+            {
+              name: 'sadness-_00001_.webp',
+              kind: 'image',
+              size: 100,
+              modified: '2026-08-01T00:00:00Z',
+              url: '/x',
+              thumb_url: '/x/thumb',
+            },
+            {
+              name: 'neutral-_00001_.webp',
+              kind: 'image',
+              size: 100,
+              modified: '2026-08-01T00:00:00Z',
+              url: '/y',
+              thumb_url: '/y/thumb',
+            },
+            {
+              name: 'joy-_00001_.webp',
+              kind: 'image',
+              size: 100,
+              modified: '2026-08-01T00:00:00Z',
+              url: '/z',
+              thumb_url: '/z/thumb',
+            },
+          ],
+        }),
+      ),
+    )
+    renderDetail('/characters/Abbie_0d162f5f.png')
+    await screen.findByRole('heading', { name: 'Abbie', level: 1 })
+
+    await userEvent.click(screen.getByRole('button', { name: /^Expressions/ }))
+    await screen.findByText('neutral')
+    const headings = screen
+      .getAllByRole('heading', { level: 4 })
+      .map((h) => h.textContent)
+    expect(headings[0]).toMatch(/^neutral/)
+    expect(screen.getByRole('link', { name: /Download all/ })).toHaveAttribute(
+      'href',
+      '/api/v1/characters/Abbie_0d162f5f.png/expressions.zip',
+    )
+  })
+
+  it('the expressions tab shows the empty state for a character with no expressions folder', async () => {
+    server.use(detailHandler(), listHandler())
+    renderDetail('/characters/Abbie_0d162f5f.png')
+    await screen.findByRole('heading', { name: 'Abbie', level: 1 })
+
+    await userEvent.click(screen.getByRole('button', { name: /^Expressions/ }))
+    expect(screen.getByText(/no expression sprites/i)).toBeInTheDocument()
   })
 
   it('a card with no lorebook shows the empty state', async () => {

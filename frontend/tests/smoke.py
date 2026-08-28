@@ -308,7 +308,8 @@ def drive(page, result: dict) -> None:
         "nav button", "els => els.map(e => e.textContent.replace(/\\d+$/,'').trim())")
 
     # Each content tab must render without a console error (caught globally).
-    for tab in ("Greetings", "Lorebook", "Gallery", "Related", "Creator notes", "Info"):
+    for tab in ("Greetings", "Dialogue", "Lorebook", "Gallery", "Expressions",
+                "Related", "Notes", "Info"):
         btn = page.query_selector(f"nav button:has-text('{tab}')")
         if btn:
             btn.click()
@@ -317,7 +318,7 @@ def drive(page, result: dict) -> None:
 
     # The Info tab's card.json and the creator-notes iframe are the two panes a
     # screenshot cannot vouch for; assert the iframe mounted.
-    page.query_selector("nav button:has-text('Creator notes')").click()
+    page.query_selector("nav button:has-text('Notes')").click()
     page.wait_for_timeout(800)
     result["notes_iframe"] = page.eval_on_selector_all(
         "iframe[title='Creator notes']", "els => els.length")

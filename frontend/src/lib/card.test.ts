@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  dialogueBlocks,
   extension,
   formatBytes,
   formatDate,
@@ -70,6 +71,57 @@ describe('reading the embedded card', () => {
     expect(extension(card, 'jai')).toEqual({ id: 'abc' })
     expect(extension(card, 'chub')).toEqual({})
     expect(extension({}, 'jai')).toEqual({})
+  })
+})
+
+describe('dialogueBlocks', () => {
+  it('splits on <START>, case-insensitively', () => {
+    // The archive's own cards use uppercase; a real ST export corpus uses
+    // lowercase <start> throughout.
+    const card: CardData = {
+      mes_example:
+        '<start>\n{{user}}: hi\n{{char}}: hello\n<START>\n{{user}}: bye',
+    }
+    const blocks = dialogueBlocks(card)
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0].turns).toEqual([
+      { speaker: 'user', text: 'hi' },
+      { speaker: 'char', text: 'hello' },
+    ])
+    expect(blocks[1].turns).toEqual([{ speaker: 'user', text: 'bye' }])
+  })
+
+  it('falls back to one block for mes_example with zero <START> markers', () => {
+    // 318 archive cards are exactly this shape -- real, not a corrupt card.
+    const card: CardData = {
+      mes_example: '{{user}}: hi\n{{char}}: hello there',
+    }
+    const blocks = dialogueBlocks(card)
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].turns).toEqual([
+      { speaker: 'user', text: 'hi' },
+      { speaker: 'char', text: 'hello there' },
+    ])
+  })
+
+  it('a block with no {{user}}/{{char}} tags at all reads as one untagged turn', () => {
+    const card: CardData = { mes_example: '<START>\njust some freeform text' }
+    const blocks = dialogueBlocks(card)
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].turns).toEqual([
+      { speaker: null, text: 'just some freeform text' },
+    ])
+  })
+
+  it('is empty for a card with no mes_example, not a one-item list', () => {
+    expect(dialogueBlocks({})).toEqual([])
+    expect(dialogueBlocks({ mes_example: '   ' })).toEqual([])
+  })
+
+  it('never renders an empty pane for a card that has text', () => {
+    // Whatever mes_example says, a non-blank card produces at least one block.
+    const weird: CardData = { mes_example: 'no start tag, no turn tags either' }
+    expect(dialogueBlocks(weird).length).toBeGreaterThan(0)
   })
 })
 

@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router'
-import { Star } from 'lucide-react'
+import { GitFork, Star } from 'lucide-react'
 import type { Card } from '@/lib/browse'
 import { cn } from '@/lib/utils'
 
@@ -63,6 +63,14 @@ export function CardTile({
         {isNew && (
           <span className="absolute bottom-[7px] left-[7px] z-2 rounded-md bg-sage px-1.5 py-px text-[10px] font-bold tracking-[0.08em] text-on-sage uppercase">
             new
+          </span>
+        )}
+        {card.is_fork && (
+          <span
+            title="Fork"
+            className="absolute right-1.5 bottom-1.5 z-2 grid size-6 place-items-center rounded-[7px] bg-ground/72 text-faint backdrop-blur-[6px]"
+          >
+            <GitFork className="size-3.5" />
           </span>
         )}
         <img

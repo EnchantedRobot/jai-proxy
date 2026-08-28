@@ -90,21 +90,31 @@ def safe_child(root: Path, *parts: str) -> Path:
     return candidate
 
 
-def gallery_dir(folder: str, *, create: bool = False) -> Path:
-    """The directory a client's gallery folder name refers to.
+def media_dir(root: Path, folder: str, *, create: bool = False) -> Path:
+    """The directory a client's folder name refers to, under `root` -- either
+    `settings.galleries_dir` or `settings.expressions_dir`, which resolve a
+    folder name the same way (see `proxy.cards.gallery`).
 
     Validation first (the name is a path traversal until proven otherwise), then
     resolution by gallery id, so a card renamed after its images were downloaded
     still finds them. `create` is for uploads, which are allowed to bring a
-    gallery into existence; every other caller wants the miss.
+    folder into existence; every other caller wants the miss.
     """
-    checked = safe_child(settings.galleries_dir, folder)
-    resolved = gallery.resolve_folder(settings.galleries_dir, folder)
+    checked = safe_child(root, folder)
+    resolved = gallery.resolve_folder(root, folder)
     if resolved is not None:
-        return settings.galleries_dir / resolved
+        return root / resolved
     if create:
         checked.mkdir(parents=True, exist_ok=True)
     return checked
+
+
+def gallery_dir(folder: str, *, create: bool = False) -> Path:
+    return media_dir(settings.galleries_dir, folder, create=create)
+
+
+def expression_dir(folder: str, *, create: bool = False) -> Path:
+    return media_dir(settings.expressions_dir, folder, create=create)
 
 
 def gallery_dir_for_card(idx: catalog.ArchiveIndex, record: catalog.CardSummary) -> tuple[str, Path]:
@@ -130,6 +140,14 @@ def gallery_dir_for_card(idx: catalog.ArchiveIndex, record: catalog.CardSummary)
 
 def write_error(exc: edit.WriteError) -> HTTPException:
     return HTTPException(status_code=422, detail=str(exc))
+
+
+def content_disposition(name: str) -> str:
+    """RFC 6266 attachment header for `name`: an ASCII fallback plus a UTF-8
+    form, because card and character names are full of curly apostrophes and
+    em dashes that a bare `filename=` mangles."""
+    ascii_name = name.encode("ascii", "replace").decode("ascii").replace('"', "_")
+    return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(name)}'
 
 
 def serve_file(
@@ -158,12 +176,7 @@ def serve_file(
     if cache_control:
         headers["Cache-Control"] = cache_control
     if download_as:
-        # RFC 6266: an ASCII fallback plus a UTF-8 form, because card names are
-        # full of curly apostrophes and em dashes that a bare filename= mangles.
-        ascii_name = download_as.encode("ascii", "replace").decode("ascii").replace('"', "_")
-        headers["Content-Disposition"] = (
-            f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(download_as)}'
-        )
+        headers["Content-Disposition"] = content_disposition(download_as)
 
     if etag in [t.strip() for t in (request.headers.get("if-none-match") or "").split(",")]:
         return Response(status_code=304, headers=headers)

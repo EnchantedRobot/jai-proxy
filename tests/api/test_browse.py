@@ -48,6 +48,7 @@ def test_card_shape_is_the_contract(client):
         "has_creator_notes": False,
         "has_example_dialogue": False,
         "favorite": False,
+        "is_fork": False,
         "size": item["size"],
         "modified": item["modified"],
         "linked_at": "2026-07-21T17:31:47.257Z",

@@ -147,6 +147,10 @@ class ThumbnailStore:
     def gallery_dir(self) -> Path:
         return self.root / "gallery"
 
+    @property
+    def expression_dir(self) -> Path:
+        return self.root / "expression"
+
     def avatar_path(self, filename: str, size: int | None = None) -> Path:
         """Where a card's avatar thumb lives. Keyed by the exact card filename,
         extension included, which is SillyTavern's convention and what makes the
@@ -175,6 +179,13 @@ class ThumbnailStore:
         """
         return self.gallery_dir / folder / f"{filename}_{size}{_THUMB_EXT}"
 
+    def expression_path(self, folder: str, filename: str, size: int = GALLERY_THUMB_SIZE) -> Path:
+        """Where an expression sprite's thumb lives -- the gallery cache's own
+        `<folder>/<file>_<size>.webp` scheme, under its own root so the two
+        never collide even when a character's gallery and expression folders
+        share the same name."""
+        return self.expression_dir / folder / f"{filename}_{size}{_THUMB_EXT}"
+
     def gallery(
         self, source: Path, folder: str, filename: str, size: int = GALLERY_THUMB_SIZE
     ) -> ThumbFile | None:
@@ -202,6 +213,34 @@ class ThumbnailStore:
             logger.info("thumbs: cannot render gallery image %s/%s: %s", folder, filename, exc)
             return None
         path = self.gallery_path(folder, filename, size)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(path.name + ".part")
+        temporary.write_bytes(data)
+        temporary.replace(path)
+        return ThumbFile(path, sniff_media_type(data))
+
+    def expression(
+        self, source: Path, folder: str, filename: str, size: int = GALLERY_THUMB_SIZE
+    ) -> ThumbFile | None:
+        """An expression sprite's thumbnail, generating it if the cache misses.
+        Mirrors `gallery()` exactly -- see there for why `source` is passed in
+        rather than derived."""
+        path = self.expression_path(folder, filename, size)
+        if path.is_file():
+            return ThumbFile(path, media_type_of(path))
+        return self.generate_expression(source, folder, filename, size)
+
+    def generate_expression(
+        self, source: Path, folder: str, filename: str, size: int = GALLERY_THUMB_SIZE
+    ) -> ThumbFile | None:
+        """Render one expression sprite's thumb and cache it. Mirrors
+        `generate_gallery()`."""
+        try:
+            data = _render_thumb(source.read_bytes(), size=(size, size))
+        except (OSError, ValueError, TypeError, Image.DecompressionBombError) as exc:
+            logger.info("thumbs: cannot render expression image %s/%s: %s", folder, filename, exc)
+            return None
+        path = self.expression_path(folder, filename, size)
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(path.name + ".part")
         temporary.write_bytes(data)
@@ -287,12 +326,49 @@ class ThumbnailStore:
                     continue
         return removed
 
+    def forget_expression(self, folder: str, filename: str | None = None) -> int:
+        """Mirrors `forget_gallery()`, over the expression cache."""
+        directory = self.expression_dir / folder
+        if not directory.is_dir():
+            return 0
+        if filename is None:
+            shutil.rmtree(directory, ignore_errors=True)
+            return 1
+        removed = 0
+        for extension in _GALLERY_THUMB_EXTS:
+            for candidate in directory.glob(f"{glob.escape(filename)}_*{extension}"):
+                try:
+                    candidate.unlink()
+                    removed += 1
+                except OSError:
+                    continue
+        return removed
+
     def prune_gallery(self, folder: str, live_filenames: set[str]) -> int:
         """Delete cached gallery thumbs whose source image is no longer in the
         gallery folder -- docs/PHASE_3C_PLAN.md §5. `live_filenames` is the
         caller's own scandir of the gallery, so this only ever reads the
         thumb cache."""
         directory = self.gallery_dir / folder
+        if not directory.is_dir():
+            return 0
+        removed = 0
+        for candidate in directory.iterdir():
+            if not candidate.is_file():
+                continue
+            source = _gallery_thumb_source_name(candidate.name)
+            if source is None or source in live_filenames:
+                continue
+            try:
+                candidate.unlink()
+                removed += 1
+            except OSError:
+                continue
+        return removed
+
+    def prune_expression(self, folder: str, live_filenames: set[str]) -> int:
+        """Mirrors `prune_gallery()`, over the expression cache."""
+        directory = self.expression_dir / folder
         if not directory.is_dir():
             return 0
         removed = 0

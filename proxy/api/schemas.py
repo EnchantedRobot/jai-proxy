@@ -47,6 +47,10 @@ class CardOut(BaseModel):
         default=False,
         description="Starred, out of the card's own `extensions.fav` -- so it travels with the PNG and round-trips through SillyTavern rather than living in this server's settings.",
     )
+    is_fork: bool = Field(
+        default=False,
+        description="Whether the card carries an `extensions.fork` block -- for the tile badge and the Forks filter chip, without paying for the whole `extensions` blob on a list request.",
+    )
     size: int = Field(description="Card PNG size in bytes.")
     modified: datetime = Field(
         description="The file's mtime. Says when the card was last *written*, which on this archive is dominated by bulk repair passes -- see `linked_at` for when it arrived."
@@ -94,7 +98,9 @@ class CardListOut(BaseModel):
 
 
 class GalleryOut(BaseModel):
-    """A character's image gallery on disk.
+    """A character's media folder on disk -- its image gallery, or (on
+    `CardDetailOut.expressions`) its expression sprites. Both are folders
+    named the same way and measured the same way, just under different roots.
 
     `folder` is computed from the card's current name plus its gallery_id -- the
     convention CharacterLibrary uses -- so `exists: false` with a non-empty
@@ -134,11 +140,23 @@ class GalleryFilesOut(BaseModel):
 
 class GalleryFolderOut(BaseModel):
     """A gallery folder as the orphan sweep sees it: the name on disk, and the
-    card that claims it -- null when nothing does, which is what makes it an
-    orphan. See `scripts/repair_galleries.py`."""
+    cards that claim it -- empty when nothing does, which is what makes it an
+    orphan. A list, not one card, because a fork shares its parent's
+    `gallery_id` by design (docs/FORKS_AND_EXTRAS_PLAN.md §3): two or more
+    cards legitimately claiming the same folder is normal, not a data error.
+    See `scripts/repair_galleries.py`."""
 
     folder: str
-    card_id: str | None
+    card_ids: list[str]
+
+
+class ForkParentOut(BaseModel):
+    """The original a fork points at, resolved to what it's called right now
+    -- `fork.of` is a fragment, not a filename, so this is a live lookup, not
+    a copy of what the fork was told at creation time."""
+
+    id: str
+    name: str
 
 
 class CardDetailOut(CardOut):
@@ -154,6 +172,16 @@ class CardDetailOut(CardOut):
     spec_version: str
     card: dict[str, Any]
     gallery: GalleryOut
+    expressions: GalleryOut = Field(
+        description="Same shape as `gallery`, measured against data/expressions/ instead."
+    )
+    expressions_zip_url: str | None = Field(
+        description="GET this to download the character's expressions as a flat zip. Null when `expressions.exists` is false -- the client must never build this path itself."
+    )
+    forked_from: ForkParentOut | None = Field(
+        default=None,
+        description="The card `extensions.fork.of` resolves to right now, when this card is a fork. Null both for a card that isn't a fork and for a fork whose original has since been deleted -- the UI shows the latter as 'original no longer in archive', not as an error.",
+    )
 
 
 class CardWriteIn(BaseModel):
@@ -351,13 +379,38 @@ class DeletedOut(BaseModel):
 class GalleryFileWrittenOut(BaseModel):
     """One uploaded gallery file. `path` is in SillyTavern's `user/images/...`
     shape because that is what the frontend's uploaders read back out of the
-    reply and store as a local media path."""
+    reply and store as a local media path.
+
+    `name` is the name on disk, which is not necessarily the name uploaded:
+    every image is re-encoded to WebP on the way in, so the extension is
+    swapped (the stem never is -- see `proxy.media.uploads`)."""
 
     folder: str
     name: str
     size: int
     path: str
     url: str
+    replaced: bool = Field(
+        default=False,
+        description="True when this overwrote a file of the same name rather than adding one.",
+    )
+
+
+class MediaUploadSkippedOut(BaseModel):
+    """One file a bulk upload did not store, and why -- in the uploader's own
+    words, so the pane can name it. Skipping is per file rather than per
+    request on purpose: a 90-sprite pack with two strays writes 88."""
+
+    name: str
+    reason: str
+
+
+class MediaUploadOut(BaseModel):
+    """The result of uploading one or more files to a media folder."""
+
+    folder: str
+    written: list[GalleryFileWrittenOut]
+    skipped: list[MediaUploadSkippedOut]
 
 
 class FacetValue(BaseModel):

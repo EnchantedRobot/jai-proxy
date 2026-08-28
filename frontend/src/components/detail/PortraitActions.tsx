@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react'
-import { useNavigate } from 'react-router'
-import { ImageUp, Pencil, Star, Trash2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router'
+import { GitFork, ImageUp, Pencil, Star, Trash2 } from 'lucide-react'
 import type { CardDetail } from '@/hooks/use-character-detail'
 import {
   useDeleteCharacter,
+  useForkCharacter,
   useReplaceAvatar,
   useSetFavorite,
 } from '@/hooks/use-card-mutations'
@@ -38,21 +39,39 @@ export function PortraitActions({
   card,
   etag,
   onAvatarReplaced,
+  autoOpenRename = false,
 }: {
   card: CardDetail
   etag: string | null
   onAvatarReplaced: () => void
+  /** Open "Rename character" pre-focused, right after a fork — see
+   *  CharacterDetailPage, which is also what clears this once consumed. */
+  autoOpenRename?: boolean
 }) {
   const navigate = useNavigate()
+  const location = useLocation()
   const favorite = useSetFavorite(card.id)
   const avatar = useReplaceAvatar(card.id)
   const remove = useDeleteCharacter(card.id)
+  const fork = useForkCharacter(card.id)
   const fileRef = useRef<HTMLInputElement>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [alsoGallery, setAlsoGallery] = useState(false)
   const [renaming, setRenaming] = useState<'name' | 'creator' | null>(null)
   const [cropFile, setCropFile] = useState<File | null>(null)
   const [cropOpen, setCropOpen] = useState(false)
+
+  useEffect(() => {
+    if (!autoOpenRename) return
+    setRenaming('name')
+    // Consume it: an unrelated re-render (a favourite toggle, a tab change)
+    // must not reopen the dialog, and neither should a later back/forward to
+    // this same history entry.
+    navigate(`${location.pathname}${location.search}`, { replace: true })
+    // Deliberately just `autoOpenRename` — `navigate`/`location` are stable
+    // per render from the router and re-running this because *they* changed
+    // (e.g. a tab switch) would reopen the dialog on its own.
+  }, [autoOpenRename]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const onFile = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -74,6 +93,21 @@ export function PortraitActions({
       },
     )
   }
+
+  const onFork = () =>
+    fork.mutate(undefined, {
+      onSuccess: (created) => {
+        toast(`Forked as “${created.name}”.`)
+        navigate(
+          {
+            pathname: `/characters/${encodeURIComponent(created.id)}`,
+            search: location.search,
+          },
+          { state: { openRename: true } },
+        )
+      },
+      onError: (error) => toast(error.message, 'bad'),
+    })
 
   const onDelete = () =>
     remove.mutate(alsoGallery ? 'delete' : 'keep', {
@@ -136,6 +170,15 @@ export function PortraitActions({
         className="flex h-[34px] items-center justify-center gap-2 rounded-[10px] text-[12.5px] text-faint hover:bg-raised hover:text-sage"
       >
         <Pencil className="size-3.5" /> Rename creator
+      </button>
+      <button
+        type="button"
+        onClick={onFork}
+        disabled={fork.isPending}
+        className="flex h-[34px] items-center justify-center gap-2 rounded-[10px] text-[12.5px] text-faint hover:bg-raised hover:text-sage disabled:opacity-60"
+      >
+        <GitFork className="size-3.5" />
+        {fork.isPending ? 'Forking…' : 'Fork this card'}
       </button>
 
       <button

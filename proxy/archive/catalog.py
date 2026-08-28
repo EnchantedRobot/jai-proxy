@@ -97,6 +97,13 @@ class CardSummary:
     card_id: str = ""
     fragment: str = ""
     gallery_id: str = ""
+    # The root original's `_<id8>` fragment, for a fork -- "" for everything
+    # else. Flattened (docs/FORKS_AND_EXTRAS_PLAN.md §3): a fork of a fork
+    # still carries the *original's* fragment here, never an intermediate
+    # fork's. A field rather than a scan over `extensions` because both the
+    # browse filter chip and the Related pane's "forks of this card" query
+    # need it filterable the same way `has_gallery`/`favorite` already are.
+    fork_of: str = ""
     # Card content, flattened for filtering and display.
     name: str = ""
     creator: str = ""
@@ -200,6 +207,8 @@ def summarize_data(data: dict[str, Any], outer: dict[str, Any] | None = None) ->
     jai = extensions.get("jai")
     jai = jai if isinstance(jai, dict) else {}
     gallery_id = extensions.get("gallery_id")
+    fork = extensions.get("fork")
+    fork = fork if isinstance(fork, dict) else {}
 
     card_id = _text(jai.get("id"))
     return {
@@ -208,6 +217,7 @@ def summarize_data(data: dict[str, Any], outer: dict[str, Any] | None = None) ->
         # built from; short source ids yield a short fragment, same as on disk.
         "fragment": id_fragment(card_id),
         "gallery_id": gallery_id if isinstance(gallery_id, str) else "",
+        "fork_of": _text(fork.get("of")),
         "name": _text(data.get("name")),
         "creator": _text(data.get("creator")) or _text(jai.get("creatorName")),
         "page_name": _text(jai.get("pageName")),

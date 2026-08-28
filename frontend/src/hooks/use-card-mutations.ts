@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import type { components } from '@/lib/api-schema'
 import type { CardData } from '@/lib/card'
-import type { CardDetailResult } from './use-character-detail'
+import type { CardDetail, CardDetailResult } from './use-character-detail'
 
 export type CardImport = components['schemas']['CardImportOut']
 
@@ -165,6 +165,33 @@ export function useReplaceAvatar(id: string) {
     },
     onSuccess: (result) => {
       client.setQueryData(['character', id], result)
+      invalidateArchive(client)
+    },
+  })
+}
+
+/**
+ * Fork a card — the born-here primitive (docs/FORKS_AND_EXTRAS_PLAN.md §3).
+ * Returns the new card's detail so the caller can navigate straight to it;
+ * no `etag` comes back (the route doesn't set one, same as every other write
+ * here that returns via `get_character` internally), so the detail page's
+ * own read supplies a fresh one.
+ */
+export function useForkCharacter(id: string) {
+  const client = useQueryClient()
+  return useMutation<CardDetail, Error, void>({
+    mutationFn: async () => {
+      const { data, response } = await apiClient.POST(
+        '/api/v1/characters/{card_id}/fork',
+        { params: { path: { card_id: id } } },
+      )
+      if (!response.ok || data === undefined)
+        throw new Error(
+          `could not fork the card: ${response.status} ${response.statusText}`.trim(),
+        )
+      return data
+    },
+    onSuccess: () => {
       invalidateArchive(client)
     },
   })

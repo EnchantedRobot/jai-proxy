@@ -5,8 +5,10 @@ export const PANES = [
   'overview',
   'notes',
   'greetings',
+  'dialogue',
   'lore',
   'gallery',
+  'expressions',
   'related',
   'info',
 ] as const
@@ -17,10 +19,12 @@ export type Pane = (typeof PANES)[number]
  *  module that only needs the names does not import the layout. */
 export const TAB_LABELS: Record<Pane, string> = {
   overview: 'Overview',
-  notes: 'Creator notes',
+  notes: 'Notes',
   greetings: 'Greetings',
+  dialogue: 'Dialogue',
   lore: 'Lorebook',
   gallery: 'Gallery',
+  expressions: 'Expressions',
   related: 'Related',
   info: 'Info',
 }

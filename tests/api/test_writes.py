@@ -526,17 +526,22 @@ def test_apply_with_nothing_to_do_is_rejected(client):
 # --- gallery writes ---------------------------------------------------------
 
 
-def test_upload_lands_in_the_folder_and_is_listed(client, populated_archive):
+def test_upload_lands_in_the_folder_as_webp_and_is_listed(client, populated_archive):
+    """Uploads are re-encoded on the way in (docs/FORKS_AND_EXTRAS_PLAN.md §9),
+    so the stem survives and the extension does not."""
     resp = client.post(
         "/api/v1/galleries/Abbie_kzbYR2QbpncC/files",
         files={"file": ("three.png", image_bytes(), "image/png")},
     )
     assert resp.status_code == 201
-    assert resp.json()["path"] == "user/images/Abbie_kzbYR2QbpncC/three.png"
-    assert (populated_archive["galleries"] / "Abbie_kzbYR2QbpncC" / "three.png").is_file()
+    assert resp.json()["name"] == "three.webp"
+    assert resp.json()["replaced"] is False
+    assert resp.json()["path"] == "user/images/Abbie_kzbYR2QbpncC/three.webp"
+    written = populated_archive["galleries"] / "Abbie_kzbYR2QbpncC" / "three.webp"
+    assert written.read_bytes()[8:12] == b"WEBP"
 
     names = [f["name"] for f in client.get("/api/v1/galleries/Abbie_kzbYR2QbpncC").json()["items"]]
-    assert names == ["one.jpg", "three.png", "two.jpg"]
+    assert names == ["one.jpg", "three.webp", "two.jpg"]
 
 
 def test_the_url_an_upload_returns_actually_fetches_the_file(client):
@@ -548,7 +553,7 @@ def test_the_url_an_upload_returns_actually_fetches_the_file(client):
     ).json()
     fetched = client.get(written["url"])
     assert fetched.status_code == 200
-    assert fetched.content == image_bytes()
+    assert fetched.content[8:12] == b"WEBP"
 
 
 def test_upload_creates_a_gallery_that_did_not_exist(client, populated_archive):
@@ -557,7 +562,7 @@ def test_upload_creates_a_gallery_that_did_not_exist(client, populated_archive):
         files={"file": ("first.png", image_bytes(), "image/png")},
     )
     assert resp.status_code == 201
-    assert (populated_archive["galleries"] / "Cleo_CCCCCCCCCCCC" / "first.png").is_file()
+    assert (populated_archive["galleries"] / "Cleo_CCCCCCCCCCCC" / "first.webp").is_file()
 
 
 def test_upload_after_a_rename_goes_to_the_existing_folder(client, populated_archive):
@@ -572,7 +577,7 @@ def test_upload_after_a_rename_goes_to_the_existing_folder(client, populated_arc
     )
     assert resp.json()["folder"] == "Abbie_kzbYR2QbpncC"
     assert not (populated_archive["galleries"] / "Abigail_kzbYR2QbpncC").exists()
-    assert (populated_archive["galleries"] / "Abbie_kzbYR2QbpncC" / "three.png").is_file()
+    assert (populated_archive["galleries"] / "Abbie_kzbYR2QbpncC" / "three.webp").is_file()
 
 
 def test_deleting_a_gallery_file_bins_it(client, populated_archive, tmp_path, monkeypatch):
@@ -610,5 +615,5 @@ def test_uploading_cannot_write_outside_its_folder(client, populated_archive, tm
         "/api/v1/galleries/Abbie_kzbYR2QbpncC/files",
         files={"file": ("../../escaped.png", image_bytes(), "image/png")},
     )
-    assert not (populated_archive["galleries"].parent / "escaped.png").exists()
-    assert not (settings.archive_dir / "escaped.png").exists()
+    assert not (populated_archive["galleries"].parent / "escaped.webp").exists()
+    assert not (settings.archive_dir / "escaped.webp").exists()
