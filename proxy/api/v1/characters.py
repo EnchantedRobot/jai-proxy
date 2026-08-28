@@ -531,6 +531,13 @@ def import_character(
             of_filename=parent.filename,
             note=note or "",
         )
+        # A rewrite handed back here still carries the id of the card it was
+        # rewritten from, which is the archive's dedupe key -- without a new
+        # one the fork is skipped as its own parent's duplicate.
+        fresh = forks.reidentify(prepared.payload, parent.fragment)
+        if fresh:
+            prepared.card_id = fresh
+            prepared.fragment = id_fragment(fresh)
 
     existing = idx.by_fragment(prepared.fragment) if prepared.fragment else ()
     if existing and on_duplicate == "skip":

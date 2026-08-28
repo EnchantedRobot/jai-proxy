@@ -10,7 +10,7 @@ existing fork, and `fork.of` always names the root original.
 from __future__ import annotations
 
 from proxy.cards import pngtools
-from tests.conftest import card_png
+from tests.conftest import card_png, jai_extensions
 
 
 def read_card(raw: bytes) -> dict:
@@ -103,6 +103,67 @@ def test_adopting_a_file_as_a_fork_forces_the_parent_gallery_and_stamps_fork(cli
 
 def test_adopting_the_same_forked_file_twice_dedupes(client):
     png = card_png("Abbie Rewrite", creator="someone else")
+    first = post_import(client, png, fork_of="0d162f5f").json()
+    second = post_import(client, png, fork_of="0d162f5f").json()
+    assert second["duplicate"] is True
+    assert second["id"] == first["id"]
+
+
+def test_adopting_a_rewrite_that_kept_the_parents_id_gets_one_of_its_own(client, archive_dirs):
+    """The collision the fork-import path exists to survive: a card exported to
+    SillyTavern, rewritten and handed back still carries the id it was built
+    with, which is its parent's -- and the fragment alone is the dedupe key, so
+    without a new id the rewrite is waved through as its own parent's duplicate
+    and never lands."""
+    png = card_png(
+        "Abbie Rewritten",
+        description="A different Abbie entirely.",
+        extensions=jai_extensions(),  # the parent's own id and gallery
+    )
+    resp = post_import(client, png, fork_of="0d162f5f")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert body["duplicate"] is False
+    assert body["id"] != "Abbie_0d162f5f.png"
+
+    on_disk = read_card((archive_dirs["characters"] / body["id"]).read_bytes())
+    assert on_disk["extensions"]["jai"]["id"] != "0d162f5f-86ab-4fdd-a2c2-3912adf24960"
+    assert on_disk["extensions"]["fork"]["of"] == "0d162f5f"
+    assert on_disk["extensions"]["gallery_id"] == "kzbYR2QbpncC"  # shared, still
+
+    # The parent is untouched -- the collision must not have overwritten it.
+    parent = read_card((archive_dirs["characters"] / "Abbie_0d162f5f.png").read_bytes())
+    assert parent["description"] == "Abbie is a test character."
+
+
+def test_adopting_a_rewrite_carrying_the_parents_provider_id(client, archive_dirs):
+    """Same collision by the other route: the id arrives in a provider block
+    rather than ours, which is what a card acquired from Chub or DataCat and
+    then rewritten looks like."""
+    png = card_png(
+        "Abbie Rewritten",
+        description="A different Abbie entirely.",
+        extensions={"datacat": {"id": "0d162f5f-86ab-4fdd-a2c2-3912adf24960"}},
+    )
+    body = post_import(client, png, fork_of="0d162f5f").json()
+
+    assert body["duplicate"] is False
+    on_disk = read_card((archive_dirs["characters"] / body["id"]).read_bytes())
+    assert on_disk["extensions"]["fork"]["of"] == "0d162f5f"
+    # The provider block keeps its own id; only the archive's identity moves.
+    assert on_disk["extensions"]["datacat"]["id"] == "0d162f5f-86ab-4fdd-a2c2-3912adf24960"
+    assert on_disk["extensions"]["jai"]["id"] != "0d162f5f-86ab-4fdd-a2c2-3912adf24960"
+
+
+def test_a_reidentified_fork_still_dedupes_against_itself(client):
+    """The new id is derived from the rewrite's own text, not minted at random,
+    so dropping the same file twice is still caught as one card."""
+    png = card_png(
+        "Abbie Rewritten",
+        description="A different Abbie entirely.",
+        extensions=jai_extensions(),
+    )
     first = post_import(client, png, fork_of="0d162f5f").json()
     second = post_import(client, png, fork_of="0d162f5f").json()
     assert second["duplicate"] is True

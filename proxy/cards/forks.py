@@ -20,6 +20,8 @@ import secrets
 from datetime import datetime, timezone
 from typing import Any
 
+from proxy.cards import intake, naming
+
 
 def generate_card_id() -> str:
     """A fresh id for a fork born here (not adopted from a file).
@@ -89,3 +91,43 @@ def stamp(
         "forkedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
         "note": note,
     }
+
+
+def reidentify(payload: dict[str, Any], parent_fragment: str) -> str | None:
+    """Give an adopted fork an id of its own when it arrived carrying its
+    parent's. Returns the new id, or None when the fork already had one.
+
+    A card exported to SillyTavern, rewritten there and handed back to
+    `POST /characters` with `fork_of=` still carries the provider block it was
+    built from -- and that block holds the *original's* id, so the rewrite's
+    `_<id8>` fragment is its parent's. Since the fragment alone is the archive's
+    dedupe key, the import is waved through as "already have it" and the
+    rewrite silently never lands. `generate_card_id` guards the born-here side
+    against the same collision; this is its file-import counterpart, and the
+    invariant both serve is the one in this module's docstring: a fork shares
+    its parent's gallery, never its identity.
+
+    Content-derived rather than random, unlike `generate_card_id`: dropping the
+    same file on the import modal twice must still be caught as a duplicate,
+    and an adopted fork -- unlike a born-here one, which starts as a byte-copy
+    of its parent -- already differs from its parent in the very text the hash
+    reads. The random fallback covers the one case where it does not: a "fork"
+    whose name, description and greeting are all still the parent's.
+    """
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        data = payload
+    extensions = data.get("extensions")
+    jai = extensions.get("jai") if isinstance(extensions, dict) else None
+    if not isinstance(jai, dict):
+        return None
+    if naming.id_fragment(str(jai.get("id") or "")) != parent_fragment:
+        return None
+
+    fresh = intake.synthetic_id(data)
+    if naming.id_fragment(fresh) == parent_fragment:
+        fresh = generate_card_id()
+    # In place, for the same reason `stamp` mutates rather than reassigns: the
+    # envelope root and `data` share one `extensions` object.
+    jai["id"] = fresh
+    return fresh

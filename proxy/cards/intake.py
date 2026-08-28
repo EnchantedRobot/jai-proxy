@@ -74,7 +74,7 @@ def _is_ours(data: dict[str, Any]) -> bool:
     return isinstance((data.get("extensions") or {}).get("jai"), dict)
 
 
-def _synthetic_id(data: dict[str, Any]) -> str:
+def synthetic_id(data: dict[str, Any]) -> str:
     """An id for a card that carries none of the ids we recognise.
 
     Every card in the archive is `<name>_<id8>.png`, and the `_<id8>` fragment
@@ -111,7 +111,7 @@ def _provenance(data: dict[str, Any]) -> tuple[str, str, str, dict[str, Any]]:
         extensions = dict(data.get("extensions") or {})
         extensions["jai"] = {
             "source_url": None,
-            "id": _synthetic_id(data),
+            "id": synthetic_id(data),
             "sourceKind": "png_import",
             "creatorName": creator,
             "pageName": name,
@@ -134,7 +134,7 @@ def _provenance(data: dict[str, Any]) -> tuple[str, str, str, dict[str, Any]]:
     # i.e. outside the dedupe key -- fall back to the content hash rather than
     # writing a card the duplicate check cannot see.
     if not card_id:
-        card_id = _synthetic_id(data)
+        card_id = synthetic_id(data)
         extensions["jai"]["id"] = card_id
     return source, card_id, creator, extensions
 
