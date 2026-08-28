@@ -51,6 +51,7 @@ from proxy.api.v1 import _shared
 from proxy.archive import catalog
 from proxy.cards import edit, gallery, intake, pngtools
 from proxy.cards.naming import id_fragment
+from proxy.media import expressions_export
 from proxy.media import manifest as media_manifest
 from proxy.config import settings
 
@@ -110,21 +111,24 @@ def _card_out(record: catalog.CardSummary, *, extensions: bool = False) -> CardO
     )
 
 
-def _gallery_out(record: catalog.CardSummary) -> GalleryOut:
-    """A card's gallery, measured on disk. One `scandir` of one directory, so it
-    belongs on the detail view and not on a list of thousands.
+def _folder_out(record: catalog.CardSummary, root: Path) -> GalleryOut:
+    """A card's media folder under `root`, measured on disk -- `root` is either
+    `settings.galleries_dir` or `settings.expressions_dir`, the two folders a
+    card can carry (docs/FORKS_AND_EXTRAS_PLAN.md §2). One `scandir` of one
+    directory, so it belongs on the detail view and not on a list of
+    thousands.
 
-    `folder` reports the directory that actually holds the images, which after a
+    `folder` reports the directory that actually holds the files, which after a
     rename is not the name the card's own fields would compute -- see
     `gallery.resolve_folder`."""
     wanted = gallery.folder_name(record.name, record.gallery_id)
-    folder = gallery.resolve_folder(settings.galleries_dir, wanted) or wanted
+    folder = gallery.resolve_folder(root, wanted) or wanted
     out = GalleryOut(
         gallery_id=record.gallery_id, folder=folder, exists=False, images=0, bytes=0
     )
     if not folder:
         return out
-    path = settings.galleries_dir / folder
+    path = root / folder
     try:
         with os.scandir(path) as entries:
             files = [e for e in entries if e.is_file() and not e.name.startswith(".")]
@@ -425,12 +429,19 @@ def get_character(card_id: str, response: Response = None) -> CardDetailOut:  # 
         # Only reachable when the card changed between the scan and this read.
         raise HTTPException(status_code=422, detail="file carries no character card")
     outer, data = envelope
+    expressions = _folder_out(record, settings.expressions_dir)
     return CardDetailOut(
         **_card_out(record).model_dump(),
         spec=str(outer.get("spec", "")),
         spec_version=str(outer.get("spec_version", "")),
         card=data,
-        gallery=_gallery_out(record),
+        gallery=_folder_out(record, settings.galleries_dir),
+        expressions=expressions,
+        expressions_zip_url=(
+            f"{_shared.PREFIX}/characters/{quote(record.filename, safe='')}/expressions.zip"
+            if expressions.exists
+            else None
+        ),
     )
 
 
@@ -811,6 +822,23 @@ def get_character_png(card_id: str, request: Request) -> Response:
         request=request,
         download_as=record.filename,
     )
+
+
+@router.get("/characters/{card_id}/expressions.zip", summary="Download one character's expressions as a zip")
+def get_character_expressions_zip(card_id: str) -> Response:
+    """Every file in this card's expressions folder, flattened to basenames at
+    the zip root -- the shape SillyTavern's *Import Expressions Pack* button
+    expects (docs/FORKS_AND_EXTRAS_PLAN.md §2). Never embedded in the card PNG
+    itself or in a bundle export: a character's expressions run an order of
+    magnitude bigger than everything else archived for it."""
+    idx = _shared.index()
+    record = _shared.require(idx, card_id)
+    meta = _folder_out(record, settings.expressions_dir)
+    if not meta.exists:
+        raise HTTPException(status_code=404, detail=f"no expressions folder for {card_id!r}")
+    data = expressions_export.zip_one(settings.expressions_dir / meta.folder)
+    headers = {"Content-Disposition": _shared.content_disposition(f"{record.name} expressions.zip")}
+    return Response(content=data, media_type="application/zip", headers=headers)
 
 
 @router.get("/characters/{card_id}/thumb", summary="Card thumbnail")

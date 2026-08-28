@@ -107,12 +107,14 @@ def archive_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, P
     dirs = {
         "characters": tmp_path / "characters",
         "galleries": tmp_path / "galleries",
+        "expressions": tmp_path / "expressions",
         "thumbs": tmp_path / "cache" / "thumbs",
     }
     for path in dirs.values():
         path.mkdir(parents=True)
     monkeypatch.setattr(settings, "archive_dir", dirs["characters"])
     monkeypatch.setattr(settings, "galleries_dir", dirs["galleries"])
+    monkeypatch.setattr(settings, "expressions_dir", dirs["expressions"])
     monkeypatch.setattr(settings, "thumbs_dir", dirs["thumbs"])
     # Not optional. The settings route WRITES, and the real file is the only
     # copy of the developer's Chub and DataCat tokens -- an unredirected test
@@ -189,6 +191,14 @@ def populated_archive(archive_dirs: dict[str, Path]) -> dict[str, Path]:
     gallery.mkdir()
     (gallery / "one.jpg").write_bytes(b"\xff\xd8\xff" + b"0" * 100)
     (gallery / "two.jpg").write_bytes(b"\xff\xd8\xff" + b"0" * 200)
+    # Same folder-naming scheme as the gallery, under its own root -- the two
+    # never collide even though Abbie has both. Real filenames end in .webp;
+    # the bytes are JPEG magic, same "extension lies" shape as the inherited
+    # avatar cache (proxy/archive/thumbs.py), which sniffing already handles.
+    expressions = archive_dirs["expressions"] / "Abbie_kzbYR2QbpncC"
+    expressions.mkdir()
+    (expressions / "neutral-_00001_.webp").write_bytes(b"\xff\xd8\xff" + b"0" * 100)
+    (expressions / "joy-_00001_.webp").write_bytes(b"\xff\xd8\xff" + b"0" * 100)
     return archive_dirs
 
 

@@ -11,10 +11,12 @@ burden rather than ended it, so the translation lived on the client, in one
 deletable file (`web/archive-api.js`) -- and was duly deleted with it. The
 browser client calls these routes as they are.
 
-The routes are grouped by resource across `characters`, `galleries`, `media`,
-`system`, `network`, `userscripts`, `discover` and `duplicates`; anything two
-of them need lives in `_shared`. They are assembled onto
-one router here, in the order they were registered when this was a single module.
+The routes are grouped by resource across `characters`, `galleries` (which
+also serves `expressions` -- the two share one parameterised implementation,
+see `proxy.api.v1.galleries`), `media`, `system`, `network`, `userscripts`,
+`discover` and `duplicates`; anything two of them need lives in `_shared`.
+They are assembled onto one router here, in the order they were registered
+when this was a single module.
 """
 
 from fastapi import APIRouter
@@ -26,6 +28,7 @@ router = APIRouter(prefix=_shared.PREFIX, tags=["archive"])
 router.include_router(characters.router)
 router.include_router(system.router)
 router.include_router(galleries.router)
+router.include_router(galleries.expressions_router)
 router.include_router(media.router)
 router.include_router(network.router)
 router.include_router(userscripts.router)

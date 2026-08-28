@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # `uv run python -m proxy.server` works from any directory.
     archive_dir: Path = ROOT / "data" / "characters"
     galleries_dir: Path = ROOT / "data" / "galleries"
+    # A character's expression sprites -- a sibling of galleries_dir, keyed on
+    # the same gallery_id (docs/FORKS_AND_EXTRAS_PLAN.md §2). No card format
+    # change: a character either has a folder here or does not.
+    expressions_dir: Path = ROOT / "data" / "expressions"
     # Thumbnail caches, both inherited at cutover: `avatar/` from SillyTavern's
     # thumbnails/avatar (keyed by the exact card filename) and `gallery/` from
     # CharacterLibrary's cl_thumbs (keyed by <Name>_<gallery_id>). Pure cache --
@@ -142,6 +146,7 @@ STARTUP_DIR_ERRORS: list[tuple[Path, OSError]] = []
 REQUIRED_DIRS: tuple[Path, ...] = (
     settings.archive_dir,
     settings.galleries_dir,
+    settings.expressions_dir,
     settings.thumbs_dir,
     settings.captures_dir,
     settings.lorebook_cache_dir,

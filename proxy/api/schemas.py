@@ -94,7 +94,9 @@ class CardListOut(BaseModel):
 
 
 class GalleryOut(BaseModel):
-    """A character's image gallery on disk.
+    """A character's media folder on disk -- its image gallery, or (on
+    `CardDetailOut.expressions`) its expression sprites. Both are folders
+    named the same way and measured the same way, just under different roots.
 
     `folder` is computed from the card's current name plus its gallery_id -- the
     convention CharacterLibrary uses -- so `exists: false` with a non-empty
@@ -154,6 +156,12 @@ class CardDetailOut(CardOut):
     spec_version: str
     card: dict[str, Any]
     gallery: GalleryOut
+    expressions: GalleryOut = Field(
+        description="Same shape as `gallery`, measured against data/expressions/ instead."
+    )
+    expressions_zip_url: str | None = Field(
+        description="GET this to download the character's expressions as a flat zip. Null when `expressions.exists` is false -- the client must never build this path itself."
+    )
 
 
 class CardWriteIn(BaseModel):

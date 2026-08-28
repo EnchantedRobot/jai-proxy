@@ -275,6 +275,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/characters/{card_id}/expressions.zip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download one character's expressions as a zip
+         * @description Every file in this card's expressions folder, flattened to basenames at
+         *     the zip root -- the shape SillyTavern's *Import Expressions Pack* button
+         *     expects (docs/FORKS_AND_EXTRAS_PLAN.md §2). Never embedded in the card PNG
+         *     itself or in a bundle export: a character's expressions run an order of
+         *     magnitude bigger than everything else archived for it.
+         */
+        get: operations["get_character_expressions_zip_api_v1_characters__card_id__expressions_zip_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/characters/{card_id}/thumb": {
         parameters: {
             query?: never;
@@ -398,15 +422,16 @@ export interface paths {
         };
         /**
          * Gallery folders on disk
-         * @description Every folder in the galleries directory, each paired with the card that
+         * @description Every folder in the directory, each paired with the card that
          *     claims it.
          *
-         *     Claimed by gallery *id*, not by folder name: the name is derived from the
-         *     card's current name and drifts the moment a card is renamed, whereas the id
-         *     is the actual link. So `card_id: null` now means a folder no card carries the
-         *     id for -- genuinely orphaned -- rather than merely misnamed.
+         *     Claimed by gallery *id*, not by folder name: the name is derived from
+         *     the card's current name and drifts the moment a card is renamed,
+         *     whereas the id is the actual link. So `card_id: null` now means a
+         *     folder no card carries the id for -- genuinely orphaned -- rather
+         *     than merely misnamed.
          */
-        get: operations["list_galleries_api_v1_galleries_get"];
+        get: operations["list_folders_api_v1_galleries_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -424,12 +449,12 @@ export interface paths {
         };
         /**
          * Files in one gallery
-         * @description A gallery folder's contents. 404 when the folder is not there -- unlike
-         *     SillyTavern's `/api/images/list`, which creates the directory as a side
-         *     effect of being asked about it, so the frontend could never tell an empty
-         *     gallery from a missing one.
+         * @description A folder's contents. 404 when the folder is not there -- unlike
+         *     SillyTavern's `/api/images/list`, which creates the directory as a
+         *     side effect of being asked about it, so the frontend could never tell
+         *     an empty folder from a missing one.
          */
-        get: operations["list_gallery_files_api_v1_galleries__folder__get"];
+        get: operations["list_folder_files_api_v1_galleries__folder__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -445,16 +470,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** One gallery image */
-        get: operations["get_gallery_file_api_v1_galleries__folder__files__filename__get"];
+        /** One gallery file */
+        get: operations["get_file_api_v1_galleries__folder__files__filename__get"];
         put?: never;
         post?: never;
         /**
          * Bin a gallery file
-         * @description Move one gallery file to the bin. Binned rather than unlinked for the same
+         * @description Move one file to the bin. Binned rather than unlinked for the same
          *     reason cards are -- see `proxy.cards.edit`.
          */
-        delete: operations["delete_gallery_file_api_v1_galleries__folder__files__filename__delete"];
+        delete: operations["delete_file_api_v1_galleries__folder__files__filename__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -468,14 +493,15 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Gallery image thumbnail
-         * @description A fitted derivative of one gallery image, generated on a cache miss.
+         * Gallery file thumbnail
+         * @description A fitted derivative of one file, generated on a cache miss.
          *
-         *     Unlike the avatar thumb this does *not* fall back to the original on failure:
-         *     a gallery page asks for 100 of these at once, and answering a failure with a
-         *     4 MB source is how one unrenderable file takes the page down with it.
+         *     Unlike the avatar thumb this does *not* fall back to the original on
+         *     failure: a page can ask for a hundred of these at once, and answering
+         *     a failure with a multi-megabyte source is how one unrenderable file
+         *     takes the page down with it.
          */
-        get: operations["get_gallery_thumb_api_v1_galleries__folder__files__filename__thumb_get"];
+        get: operations["get_thumb_api_v1_galleries__folder__files__filename__thumb_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -495,14 +521,14 @@ export interface paths {
         put?: never;
         /**
          * Add a file to a gallery
-         * @description Store one file in a gallery, creating the folder if it is not there yet.
+         * @description Store one file in a folder, creating it if it is not there yet.
          *
-         *     Multipart rather than the base64-in-JSON shape SillyTavern used: these are
-         *     multi-megabyte binaries, and base64 inflates them by a third for the whole
-         *     round trip. The adapter converts on the client side, where the frontend's
+         *     Multipart rather than base64-in-JSON: these are multi-megabyte
+         *     binaries, and base64 inflates them by a third for the whole round
+         *     trip. The adapter converts on the client side, where the frontend's
          *     encoded copy already exists.
          */
-        post: operations["upload_gallery_file_api_v1_galleries__folder__files_post"];
+        post: operations["upload_file_api_v1_galleries__folder__files_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -520,12 +546,172 @@ export interface paths {
         put?: never;
         /**
          * Drop orphaned gallery thumbs
-         * @description docs/PHASE_3C_PLAN.md §5 -- thumbs are generated at write time now, so
-         *     the only orphans left are ones whose source file left by a route other
-         *     than `DELETE .../files/{filename}` (which already forgets its own
-         *     thumb).
+         * @description Thumbs are generated at write time, so the only orphans left are
+         *     ones whose source file left by a route other than `DELETE
+         *     .../files/{filename}` (which already forgets its own thumb).
          */
-        post: operations["prune_gallery_thumbs_api_v1_galleries__folder__thumbs_prune_post"];
+        post: operations["prune_thumbs_api_v1_galleries__folder__thumbs_prune_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/expressions/export.zip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download several characters' expressions as one zip */
+        get: operations["export_expressions_zip_api_v1_expressions_export_zip_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/expressions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Expression folders on disk
+         * @description Every folder in the directory, each paired with the card that
+         *     claims it.
+         *
+         *     Claimed by gallery *id*, not by folder name: the name is derived from
+         *     the card's current name and drifts the moment a card is renamed,
+         *     whereas the id is the actual link. So `card_id: null` now means a
+         *     folder no card carries the id for -- genuinely orphaned -- rather
+         *     than merely misnamed.
+         */
+        get: operations["list_folders_api_v1_expressions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/expressions/{folder}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Files in one expression
+         * @description A folder's contents. 404 when the folder is not there -- unlike
+         *     SillyTavern's `/api/images/list`, which creates the directory as a
+         *     side effect of being asked about it, so the frontend could never tell
+         *     an empty folder from a missing one.
+         */
+        get: operations["list_folder_files_api_v1_expressions__folder__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/expressions/{folder}/files/{filename}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One expression file */
+        get: operations["get_file_api_v1_expressions__folder__files__filename__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Bin a expression file
+         * @description Move one file to the bin. Binned rather than unlinked for the same
+         *     reason cards are -- see `proxy.cards.edit`.
+         */
+        delete: operations["delete_file_api_v1_expressions__folder__files__filename__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/expressions/{folder}/files/{filename}/thumb": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Expression file thumbnail
+         * @description A fitted derivative of one file, generated on a cache miss.
+         *
+         *     Unlike the avatar thumb this does *not* fall back to the original on
+         *     failure: a page can ask for a hundred of these at once, and answering
+         *     a failure with a multi-megabyte source is how one unrenderable file
+         *     takes the page down with it.
+         */
+        get: operations["get_thumb_api_v1_expressions__folder__files__filename__thumb_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/expressions/{folder}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a file to a expression
+         * @description Store one file in a folder, creating it if it is not there yet.
+         *
+         *     Multipart rather than base64-in-JSON: these are multi-megabyte
+         *     binaries, and base64 inflates them by a third for the whole round
+         *     trip. The adapter converts on the client side, where the frontend's
+         *     encoded copy already exists.
+         */
+        post: operations["upload_file_api_v1_expressions__folder__files_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/expressions/{folder}/thumbs/prune": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Drop orphaned expression thumbs
+         * @description Thumbs are generated at write time, so the only orphans left are
+         *     ones whose source file left by a route other than `DELETE
+         *     .../files/{filename}` (which already forgets its own thumb).
+         */
+        post: operations["prune_thumbs_api_v1_expressions__folder__thumbs_prune_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1293,11 +1479,19 @@ export interface components {
              */
             prefix: string;
         };
-        /** Body_upload_gallery_file_api_v1_galleries__folder__files_post */
-        Body_upload_gallery_file_api_v1_galleries__folder__files_post: {
+        /** Body_upload_file_api_v1_expressions__folder__files_post */
+        Body_upload_file_api_v1_expressions__folder__files_post: {
             /**
              * File
-             * @description The image, video or audio file to store.
+             * @description The file to store.
+             */
+            file: string;
+        };
+        /** Body_upload_file_api_v1_galleries__folder__files_post */
+        Body_upload_file_api_v1_galleries__folder__files_post: {
+            /**
+             * File
+             * @description The file to store.
              */
             file: string;
         };
@@ -1527,6 +1721,13 @@ export interface components {
                 [key: string]: unknown;
             };
             gallery: components["schemas"]["GalleryOut"];
+            /** @description Same shape as `gallery`, measured against data/expressions/ instead. */
+            expressions: components["schemas"]["GalleryOut"];
+            /**
+             * Expressions Zip Url
+             * @description GET this to download the character's expressions as a flat zip. Null when `expressions.exists` is false -- the client must never build this path itself.
+             */
+            expressions_zip_url: string | null;
         };
         /**
          * CardImportOut
@@ -2176,7 +2377,9 @@ export interface components {
         };
         /**
          * GalleryOut
-         * @description A character's image gallery on disk.
+         * @description A character's media folder on disk -- its image gallery, or (on
+         *     `CardDetailOut.expressions`) its expression sprites. Both are folders
+         *     named the same way and measured the same way, just under different roots.
          *
          *     `folder` is computed from the card's current name plus its gallery_id -- the
          *     convention CharacterLibrary uses -- so `exists: false` with a non-empty
@@ -3256,6 +3459,37 @@ export interface operations {
             };
         };
     };
+    get_character_expressions_zip_api_v1_characters__card_id__expressions_zip_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                card_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_character_thumb_api_v1_characters__card_id__thumb_get: {
         parameters: {
             query?: {
@@ -3421,7 +3655,7 @@ export interface operations {
             };
         };
     };
-    list_galleries_api_v1_galleries_get: {
+    list_folders_api_v1_galleries_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3441,7 +3675,7 @@ export interface operations {
             };
         };
     };
-    list_gallery_files_api_v1_galleries__folder__get: {
+    list_folder_files_api_v1_galleries__folder__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3472,7 +3706,7 @@ export interface operations {
             };
         };
     };
-    get_gallery_file_api_v1_galleries__folder__files__filename__get: {
+    get_file_api_v1_galleries__folder__files__filename__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3504,7 +3738,7 @@ export interface operations {
             };
         };
     };
-    delete_gallery_file_api_v1_galleries__folder__files__filename__delete: {
+    delete_file_api_v1_galleries__folder__files__filename__delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -3534,7 +3768,7 @@ export interface operations {
             };
         };
     };
-    get_gallery_thumb_api_v1_galleries__folder__files__filename__thumb_get: {
+    get_thumb_api_v1_galleries__folder__files__filename__thumb_get: {
         parameters: {
             query?: {
                 size?: number;
@@ -3568,7 +3802,7 @@ export interface operations {
             };
         };
     };
-    upload_gallery_file_api_v1_galleries__folder__files_post: {
+    upload_file_api_v1_galleries__folder__files_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3579,7 +3813,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_upload_gallery_file_api_v1_galleries__folder__files_post"];
+                "multipart/form-data": components["schemas"]["Body_upload_file_api_v1_galleries__folder__files_post"];
             };
         };
         responses: {
@@ -3603,7 +3837,252 @@ export interface operations {
             };
         };
     };
-    prune_gallery_thumbs_api_v1_galleries__folder__thumbs_prune_post: {
+    prune_thumbs_api_v1_galleries__folder__thumbs_prune_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                folder: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThumbsPrunedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_expressions_zip_api_v1_expressions_export_zip_get: {
+        parameters: {
+            query: {
+                /** @description Repeatable; which characters to include. */
+                id: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_folders_api_v1_expressions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GalleryFolderOut"][];
+                };
+            };
+        };
+    };
+    list_folder_files_api_v1_expressions__folder__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                folder: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GalleryFilesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_file_api_v1_expressions__folder__files__filename__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                folder: string;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_file_api_v1_expressions__folder__files__filename__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                folder: string;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_thumb_api_v1_expressions__folder__files__filename__thumb_get: {
+        parameters: {
+            query?: {
+                size?: number;
+            };
+            header?: never;
+            path: {
+                folder: string;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_file_api_v1_expressions__folder__files_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                folder: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_file_api_v1_expressions__folder__files_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GalleryFileWrittenOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prune_thumbs_api_v1_expressions__folder__thumbs_prune_post: {
         parameters: {
             query?: never;
             header?: never;

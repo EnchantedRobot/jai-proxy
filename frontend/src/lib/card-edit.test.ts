@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { CardData } from './card'
-import { setField, setGreetings, setTags } from './card-edit'
+import { dialogueBlocks, type CardData } from './card'
+import { setDialogue, setField, setGreetings, setTags } from './card-edit'
 
 describe('setField', () => {
   it('replaces one key and leaves the rest', () => {
@@ -36,6 +36,33 @@ describe('setGreetings', () => {
     const next = setGreetings({ first_mes: 'was here' }, ['', '  '])
     expect(next.first_mes).toBe('')
     expect(next.alternate_greetings).toEqual([])
+  })
+})
+
+describe('setDialogue', () => {
+  it('writes one <START> block per entry', () => {
+    const next = setDialogue({}, ['{{user}}: hi\n{{char}}: hello', 'second'])
+    expect(next.mes_example).toBe(
+      '<START>\n{{user}}: hi\n{{char}}: hello\n<START>\nsecond',
+    )
+  })
+
+  it('drops blank blocks so an emptied box leaves nothing behind', () => {
+    const next = setDialogue({}, ['  ', 'only', ''])
+    expect(next.mes_example).toBe('<START>\nonly')
+  })
+
+  it('an all-empty set clears mes_example', () => {
+    const next = setDialogue({ mes_example: 'was here' }, ['', '  '])
+    expect(next.mes_example).toBe('')
+  })
+
+  it('round-trips through dialogueBlocks', () => {
+    const written = setDialogue({}, ['{{user}}: hi', '{{char}}: hello'])
+    const blocks = dialogueBlocks(written)
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0].turns).toEqual([{ speaker: 'user', text: 'hi' }])
+    expect(blocks[1].turns).toEqual([{ speaker: 'char', text: 'hello' }])
   })
 })
 

@@ -33,6 +33,19 @@ export function setGreetings(data: CardData, greetings: string[]): CardData {
 }
 
 /**
+ * Write `mes_example` back from a list of block texts, one `<START>` per
+ * block. The editor works on each block's raw text (the same pattern as
+ * `setGreetings`, one prose box per item) rather than re-serializing parsed
+ * turns, so nothing the user typed inside a block -- spacing, an unrecognized
+ * tag -- is rewritten out from under them. Blank blocks are dropped the same
+ * way an emptied greeting is.
+ */
+export function setDialogue(data: CardData, blocks: string[]): CardData {
+  const kept = blocks.map((b) => b.trim()).filter(Boolean)
+  return { ...data, mes_example: kept.map((b) => `<START>\n${b}`).join('\n') }
+}
+
+/**
  * Replace the tag list, trimming and dropping blanks and case-insensitive
  * duplicates while keeping the first spelling seen — the archive treats `Female`
  * and `female` as one tag, and a tag editor is largely for collapsing exactly

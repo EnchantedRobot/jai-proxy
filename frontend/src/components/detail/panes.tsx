@@ -1,14 +1,16 @@
 import { useState } from 'react'
-import { Check, ChevronDown, Copy, Plus } from 'lucide-react'
+import { Check, ChevronDown, Copy, Download, Plus } from 'lucide-react'
 import { CardTile } from '@/components/CardTile'
 import { CardGrid } from '@/components/CardGrid'
 import {
+  useExpressionFiles,
   useGalleryFiles,
   useSameCreator,
   useSharesTag,
   type CardDetail,
 } from '@/hooks/use-character-detail'
 import {
+  dialogueBlocks,
   estimateTokens,
   formatBytes,
   formatDate,
@@ -18,10 +20,12 @@ import {
   lorebookName,
   sourceLabel,
   str,
+  type DialogueBlock,
   type GalleryFile,
   type LoreEntry,
 } from '@/lib/card'
-import { setField, setGreetings } from '@/lib/card-edit'
+import { setDialogue, setField, setGreetings } from '@/lib/card-edit'
+import { groupExpressions } from '@/lib/expressions'
 import { cn } from '@/lib/utils'
 import { CreatorNotes } from './CreatorNotes'
 import { EditActions, EditButton, useEdit } from './edit-context'
@@ -284,6 +288,133 @@ function GreetingsEditor({
   )
 }
 
+// ---- Dialogue ---------------------------------------------------------------
+
+/**
+ * `mes_example`, read as a transcript rather than raw prose -- each `<START>`
+ * block is its own Section, and each `{{user}}:` / `{{char}}:` turn inside it
+ * is its own bubble. The speaker label is the one thing resolved off the
+ * macro (the card's name for `{{char}}`, "You" for `{{user}}`); the turn text
+ * itself is left exactly as written, the same as a greeting's body.
+ */
+export function DialoguePane({ card }: { card: PaneCard }) {
+  const { editing, save } = useEdit()
+  const blocks = dialogueBlocks(card.card)
+  const isEditing = editing === 'dialogue'
+
+  if (isEditing)
+    return (
+      <Section title="Dialogue" action={<EditButton section="dialogue" />}>
+        <DialogueEditor
+          initial={blocks.map((b) => b.raw)}
+          onSave={(next) => save(setDialogue(card.card, next))}
+        />
+      </Section>
+    )
+
+  if (blocks.length === 0)
+    return (
+      <Section title="Dialogue" action={<EditButton section="dialogue" />}>
+        <EmptyState>This card has no example dialogue.</EmptyState>
+      </Section>
+    )
+
+  return (
+    <>
+      {blocks.map((block, index) => (
+        <Section
+          key={index}
+          title={
+            blocks.length > 1 ? `Example ${index + 1}` : 'Example dialogue'
+          }
+          count={`(${formatTokens(block.raw.length)})`}
+          action={index === 0 ? <EditButton section="dialogue" /> : undefined}
+        >
+          <DialogueTranscript block={block} name={card.name} />
+        </Section>
+      ))}
+    </>
+  )
+}
+
+function DialogueTranscript({
+  block,
+  name,
+}: {
+  block: DialogueBlock
+  name: string
+}) {
+  return (
+    <div className="mt-2.5 flex flex-col gap-2.5">
+      {block.turns.map((turn, index) => (
+        <div
+          key={index}
+          className="rounded-xl border border-line-soft bg-surface px-[17px] py-[13px]"
+        >
+          {turn.speaker && (
+            <div className="mb-1 text-[11px] font-semibold tracking-[0.06em] text-faint uppercase">
+              {turn.speaker === 'char' ? name || 'Character' : 'You'}
+            </div>
+          )}
+          <div className="text-[14.5px] leading-[1.68] whitespace-pre-wrap text-[#d2d8da]">
+            {turn.text}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function DialogueEditor({
+  initial,
+  onSave,
+}: {
+  initial: string[]
+  onSave: (blocks: string[]) => void
+}) {
+  const [drafts, setDrafts] = useState<string[]>(
+    initial.length ? initial : [''],
+  )
+  const set = (index: number, value: string) =>
+    setDrafts(drafts.map((d, i) => (i === index ? value : d)))
+
+  return (
+    <div className="mt-2.5 flex flex-col gap-3">
+      {drafts.map((draft, index) => (
+        <div key={index}>
+          <div className="flex items-center gap-2.5 text-[11.5px] text-faint">
+            <span>
+              {drafts.length > 1 ? `Example ${index + 1}` : 'Example dialogue'}
+            </span>
+            {drafts.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setDrafts(drafts.filter((_, i) => i !== index))}
+                className="text-faint hover:text-bad"
+              >
+                remove
+              </button>
+            )}
+          </div>
+          <InlineTextField
+            value={draft}
+            onChange={(value) => set(index, value)}
+            autoFocus={index === 0}
+          />
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => setDrafts([...drafts, ''])}
+        className="flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-line py-2.5 text-[12.5px] text-muted hover:border-sage-line hover:text-sage"
+      >
+        <Plus className="size-3.5" /> Add block
+      </button>
+      <SaveRow onSave={() => onSave(drafts)} />
+    </div>
+  )
+}
+
 // ---- Lorebook --------------------------------------------------------------
 
 export function LorebookPane({ card }: { card: PaneCard }) {
@@ -441,6 +572,82 @@ function GalleryThumb({
         </span>
       )}
     </button>
+  )
+}
+
+// ---- Expressions -------------------------------------------------------------
+
+/**
+ * A character's expression sprites, grouped by parsed label (`neutral`
+ * first) and read-only, the same posture `GalleryPane` takes -- ingest is a
+ * separate, later pass (docs/FORKS_AND_EXTRAS_PLAN.md §8), not this pane's
+ * job. `Download all` streams the flat zip ST's own *Import Expressions
+ * Pack* button expects.
+ */
+export function ExpressionsPane({ card }: { card: CardDetail }) {
+  const expressions = useExpressionFiles(
+    card.expressions.folder,
+    card.expressions.exists,
+  )
+  const [open, setOpen] = useState<number | null>(null)
+  const files = expressions.data?.items ?? []
+
+  if (!card.expressions.exists)
+    return <EmptyState>No expression sprites for this character.</EmptyState>
+  if (expressions.isPending)
+    return <p className="mt-4 text-center text-faint">reading expressions…</p>
+  if (files.length === 0)
+    return <EmptyState>The expressions folder is empty.</EmptyState>
+
+  const groups = groupExpressions(files)
+  const flat = groups.flatMap((group) => group.files)
+
+  return (
+    <Section
+      title={`${files.length} sprites · ${groups.length} expressions`}
+      count={formatBytes(expressions.data!.bytes)}
+      action={
+        card.expressions_zip_url && (
+          <a
+            href={card.expressions_zip_url}
+            download
+            className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-[12px] text-muted hover:border-sage-line hover:text-sage"
+          >
+            <Download className="size-3" /> Download all
+          </a>
+        )
+      }
+    >
+      <div className="mt-2.5 flex flex-col gap-5">
+        {groups.map((group) => (
+          <div key={group.label}>
+            <h4 className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-faint uppercase">
+              {group.label}{' '}
+              <span className="text-faint/70 normal-case">
+                ({group.files.length})
+              </span>
+            </h4>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-2">
+              {group.files.map((file) => (
+                <GalleryThumb
+                  key={file.name}
+                  file={file}
+                  onOpen={() => setOpen(flat.indexOf(file))}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      {open !== null && (
+        <Lightbox
+          files={flat}
+          index={open}
+          onIndex={setOpen}
+          onClose={() => setOpen(null)}
+        />
+      )}
+    </Section>
   )
 }
 

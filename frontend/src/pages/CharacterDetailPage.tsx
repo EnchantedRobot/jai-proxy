@@ -15,6 +15,8 @@ import {
   Sep,
 } from '@/components/detail/CardDetailLayout'
 import {
+  DialoguePane,
+  ExpressionsPane,
   GalleryPane,
   InfoPane,
   GreetingsPane,
@@ -202,8 +204,10 @@ export function CharacterDetailPage() {
         {activeTab === 'overview' && <OverviewPane card={card} />}
         {activeTab === 'notes' && <NotesPane card={card} />}
         {activeTab === 'greetings' && <GreetingsPane card={card} />}
+        {activeTab === 'dialogue' && <DialoguePane card={card} />}
         {activeTab === 'lore' && <LorebookPane card={card} />}
         {activeTab === 'gallery' && <GalleryPane card={card} />}
+        {activeTab === 'expressions' && <ExpressionsPane card={card} />}
         {activeTab === 'related' && <RelatedPane card={card} />}
         {activeTab === 'info' && <InfoPane card={card} />}
       </CardDetailLayout>
@@ -211,9 +215,10 @@ export function CharacterDetailPage() {
   )
 }
 
-/** The small number beside the Greetings and Lorebook tabs. */
+/** The small number beside the Greetings, Dialogue and Lorebook tabs. */
 function paneCount(pane: Pane, card: CardDetail): number | undefined {
   if (pane === 'greetings') return card.greetings
+  if (pane === 'dialogue') return card.has_example_dialogue ? 1 : undefined
   if (pane === 'lore') return card.lore_entries
   return undefined
 }
