@@ -113,7 +113,8 @@ function dialogueTurns(block: string): DialogueTurn[] {
     const start = tag.index + tag[0].length
     const end = i + 1 < tags.length ? tags[i + 1].index : block.length
     const text = block.slice(start, end).trim()
-    if (text) turns.push({ speaker: tag[1].toLowerCase() as 'user' | 'char', text })
+    if (text)
+      turns.push({ speaker: tag[1].toLowerCase() as 'user' | 'char', text })
   })
   return turns
 }

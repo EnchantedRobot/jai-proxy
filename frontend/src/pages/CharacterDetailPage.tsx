@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router'
 import { Download } from 'lucide-react'
 import {
   useCharacterDetail,
@@ -47,7 +53,9 @@ export function CharacterDetailPage() {
   // name focused" (docs/FORKS_AND_EXTRAS_PLAN.md §3). PortraitActions consumes
   // and clears it, so a later back/forward to this same history entry does not
   // reopen the dialog.
-  const autoOpenRename = Boolean((location.state as { openRename?: boolean } | null)?.openRename)
+  const autoOpenRename = Boolean(
+    (location.state as { openRename?: boolean } | null)?.openRename,
+  )
 
   const detail = useCharacterDetail(id)
   // A local cache-bust bumped only when the avatar is replaced. The portrait URL
@@ -214,7 +222,9 @@ export function CharacterDetailPage() {
                     </Link>
                   </>
                 ) : (
-                  <span className="text-faint italic">original no longer in archive</span>
+                  <span className="text-faint italic">
+                    original no longer in archive
+                  </span>
                 )}
               </>
             )}

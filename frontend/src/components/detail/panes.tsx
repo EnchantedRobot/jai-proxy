@@ -35,6 +35,7 @@ import { EditActions, EditButton, useEdit } from './edit-context'
 import { InlineTextField } from './editors'
 import { Lightbox } from './Lightbox'
 import { MediaDiscovery } from './MediaDiscovery'
+import { MediaUpload } from './MediaUpload'
 import { ClampedProse, EmptyState, ProseBox, Section } from './Section'
 
 /**
@@ -505,47 +506,46 @@ export function GalleryPane({ card }: { card: CardDetail }) {
   const [open, setOpen] = useState<number | null>(null)
   const files = gallery.data?.items ?? []
 
-  if (!card.gallery.exists)
-    return (
-      <>
-        <MediaDiscovery cardId={card.id} />
-        <EmptyState>No gallery has been downloaded for this card.</EmptyState>
-      </>
-    )
-  if (gallery.isPending)
-    return <p className="mt-4 text-center text-faint">reading gallery…</p>
-  if (files.length === 0)
-    return (
-      <>
-        <MediaDiscovery cardId={card.id} />
-        <EmptyState>The gallery folder is empty.</EmptyState>
-      </>
-    )
-
+  // The two ingest controls sit above the conditional body, in one fixed
+  // position: a first upload flips the pane from its empty state to the grid,
+  // and a control rendered inside those branches would unmount mid-write —
+  // taking its own report ("3 added, 2 skipped") with it, exactly when there
+  // is most to say.
   return (
-    <Section
-      title={`${files.length} files`}
-      count={formatBytes(gallery.data!.bytes)}
-    >
+    <>
       <MediaDiscovery cardId={card.id} />
-      <div className="mt-2.5 grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-2.5">
-        {files.map((file, index) => (
-          <GalleryThumb
-            key={file.name}
-            file={file}
-            onOpen={() => setOpen(index)}
-          />
-        ))}
-      </div>
-      {open !== null && (
-        <Lightbox
-          files={files}
-          index={open}
-          onIndex={setOpen}
-          onClose={() => setOpen(null)}
-        />
+      <MediaUpload kind="galleries" folder={card.gallery.folder} />
+      {!card.gallery.exists ? (
+        <EmptyState>No gallery has been downloaded for this card.</EmptyState>
+      ) : gallery.isPending ? (
+        <p className="mt-4 text-center text-faint">reading gallery…</p>
+      ) : files.length === 0 ? (
+        <EmptyState>The gallery folder is empty.</EmptyState>
+      ) : (
+        <Section
+          title={`${files.length} files`}
+          count={formatBytes(gallery.data!.bytes)}
+        >
+          <div className="mt-2.5 grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-2.5">
+            {files.map((file, index) => (
+              <GalleryThumb
+                key={file.name}
+                file={file}
+                onOpen={() => setOpen(index)}
+              />
+            ))}
+          </div>
+          {open !== null && (
+            <Lightbox
+              files={files}
+              index={open}
+              onIndex={setOpen}
+              onClose={() => setOpen(null)}
+            />
+          )}
+        </Section>
       )}
-    </Section>
+    </>
   )
 }
 
@@ -582,10 +582,9 @@ function GalleryThumb({
 
 /**
  * A character's expression sprites, grouped by parsed label (`neutral`
- * first) and read-only, the same posture `GalleryPane` takes -- ingest is a
- * separate, later pass (docs/FORKS_AND_EXTRAS_PLAN.md §8), not this pane's
- * job. `Download all` streams the flat zip ST's own *Import Expressions
- * Pack* button expects.
+ * first). `Download all` streams the flat zip ST's own *Import Expressions
+ * Pack* button expects, and `MediaUpload` takes that same shape back in
+ * (docs/FORKS_AND_EXTRAS_PLAN.md §9) -- an export round-trips.
  */
 export function ExpressionsPane({ card }: { card: CardDetail }) {
   const expressions = useExpressionFiles(
@@ -595,62 +594,68 @@ export function ExpressionsPane({ card }: { card: CardDetail }) {
   const [open, setOpen] = useState<number | null>(null)
   const files = expressions.data?.items ?? []
 
-  if (!card.expressions.exists)
-    return <EmptyState>No expression sprites for this character.</EmptyState>
-  if (expressions.isPending)
-    return <p className="mt-4 text-center text-faint">reading expressions…</p>
-  if (files.length === 0)
-    return <EmptyState>The expressions folder is empty.</EmptyState>
-
   const groups = groupExpressions(files)
   const flat = groups.flatMap((group) => group.files)
 
+  // Above the conditional body and never inside it -- see `GalleryPane` for
+  // why the position has to be fixed.
   return (
-    <Section
-      title={`${files.length} sprites · ${groups.length} expressions`}
-      count={formatBytes(expressions.data!.bytes)}
-      action={
-        card.expressions_zip_url && (
-          <a
-            href={card.expressions_zip_url}
-            download
-            className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-[12px] text-muted hover:border-sage-line hover:text-sage"
-          >
-            <Download className="size-3" /> Download all
-          </a>
-        )
-      }
-    >
-      <div className="mt-2.5 flex flex-col gap-5">
-        {groups.map((group) => (
-          <div key={group.label}>
-            <h4 className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-faint uppercase">
-              {group.label}{' '}
-              <span className="text-faint/70 normal-case">
-                ({group.files.length})
-              </span>
-            </h4>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-2">
-              {group.files.map((file) => (
-                <GalleryThumb
-                  key={file.name}
-                  file={file}
-                  onOpen={() => setOpen(flat.indexOf(file))}
-                />
-              ))}
-            </div>
+    <>
+      <MediaUpload kind="expressions" folder={card.expressions.folder} zip />
+      {!card.expressions.exists ? (
+        <EmptyState>No expression sprites for this character.</EmptyState>
+      ) : expressions.isPending ? (
+        <p className="mt-4 text-center text-faint">reading expressions…</p>
+      ) : files.length === 0 ? (
+        <EmptyState>The expressions folder is empty.</EmptyState>
+      ) : (
+        <Section
+          title={`${files.length} sprites · ${groups.length} expressions`}
+          count={formatBytes(expressions.data!.bytes)}
+          action={
+            card.expressions_zip_url && (
+              <a
+                href={card.expressions_zip_url}
+                download
+                className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-[12px] text-muted hover:border-sage-line hover:text-sage"
+              >
+                <Download className="size-3" /> Download all
+              </a>
+            )
+          }
+        >
+          <div className="mt-2.5 flex flex-col gap-5">
+            {groups.map((group) => (
+              <div key={group.label}>
+                <h4 className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-faint uppercase">
+                  {group.label}{' '}
+                  <span className="text-faint/70 normal-case">
+                    ({group.files.length})
+                  </span>
+                </h4>
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-2">
+                  {group.files.map((file) => (
+                    <GalleryThumb
+                      key={file.name}
+                      file={file}
+                      onOpen={() => setOpen(flat.indexOf(file))}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      {open !== null && (
-        <Lightbox
-          files={flat}
-          index={open}
-          onIndex={setOpen}
-          onClose={() => setOpen(null)}
-        />
+          {open !== null && (
+            <Lightbox
+              files={flat}
+              index={open}
+              onIndex={setOpen}
+              onClose={() => setOpen(null)}
+            />
+          )}
+        </Section>
       )}
-    </Section>
+    </>
   )
 }
 
@@ -667,7 +672,9 @@ export function RelatedPane({ card }: { card: CardDetail }) {
   // Flattened lineage (docs/FORKS_AND_EXTRAS_PLAN.md §3): a card that is
   // itself a fork points `useForksOf` at its own root, not at itself, so
   // "forks of this card" always means "every sibling", at any depth.
-  const rootFragment = card.is_fork ? str(extension(card.card, 'fork'), 'of') : card.fragment
+  const rootFragment = card.is_fork
+    ? str(extension(card.card, 'fork'), 'of')
+    : card.fragment
   const forksOf = useForksOf(rootFragment, card.id)
   const parent = useCharacterDetail(card.forked_from?.id)
 

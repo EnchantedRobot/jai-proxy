@@ -29,7 +29,13 @@ function detailCard(overrides: Record<string, unknown> = {}) {
     spec: 'chara_card_v3',
     spec_version: '3.0',
     gallery: { gallery_id: '', folder: '', exists: false, images: 0, bytes: 0 },
-    expressions: { gallery_id: '', folder: '', exists: false, images: 0, bytes: 0 },
+    expressions: {
+      gallery_id: '',
+      folder: '',
+      exists: false,
+      images: 0,
+      bytes: 0,
+    },
     expressions_zip_url: null,
     card: {
       name: 'Abbie',
@@ -193,7 +199,8 @@ describe('CharacterDetailPage', () => {
         images: 3,
         bytes: 300,
       },
-      expressions_zip_url: '/api/v1/characters/Abbie_0d162f5f.png/expressions.zip',
+      expressions_zip_url:
+        '/api/v1/characters/Abbie_0d162f5f.png/expressions.zip',
     })
     server.use(
       detailHandler(withExpressions),
@@ -204,9 +211,30 @@ describe('CharacterDetailPage', () => {
           total: 3,
           bytes: 300,
           items: [
-            { name: 'sadness-_00001_.webp', kind: 'image', size: 100, modified: '2026-08-01T00:00:00Z', url: '/x', thumb_url: '/x/thumb' },
-            { name: 'neutral-_00001_.webp', kind: 'image', size: 100, modified: '2026-08-01T00:00:00Z', url: '/y', thumb_url: '/y/thumb' },
-            { name: 'joy-_00001_.webp', kind: 'image', size: 100, modified: '2026-08-01T00:00:00Z', url: '/z', thumb_url: '/z/thumb' },
+            {
+              name: 'sadness-_00001_.webp',
+              kind: 'image',
+              size: 100,
+              modified: '2026-08-01T00:00:00Z',
+              url: '/x',
+              thumb_url: '/x/thumb',
+            },
+            {
+              name: 'neutral-_00001_.webp',
+              kind: 'image',
+              size: 100,
+              modified: '2026-08-01T00:00:00Z',
+              url: '/y',
+              thumb_url: '/y/thumb',
+            },
+            {
+              name: 'joy-_00001_.webp',
+              kind: 'image',
+              size: 100,
+              modified: '2026-08-01T00:00:00Z',
+              url: '/z',
+              thumb_url: '/z/thumb',
+            },
           ],
         }),
       ),

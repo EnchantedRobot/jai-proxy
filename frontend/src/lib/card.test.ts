@@ -79,7 +79,8 @@ describe('dialogueBlocks', () => {
     // The archive's own cards use uppercase; a real ST export corpus uses
     // lowercase <start> throughout.
     const card: CardData = {
-      mes_example: '<start>\n{{user}}: hi\n{{char}}: hello\n<START>\n{{user}}: bye',
+      mes_example:
+        '<start>\n{{user}}: hi\n{{char}}: hello\n<START>\n{{user}}: bye',
     }
     const blocks = dialogueBlocks(card)
     expect(blocks).toHaveLength(2)

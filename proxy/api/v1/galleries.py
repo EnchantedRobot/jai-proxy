@@ -27,13 +27,15 @@ from proxy.api.schemas import (
     GalleryFilesOut,
     GalleryFileWrittenOut,
     GalleryFolderOut,
+    MediaUploadOut,
+    MediaUploadSkippedOut,
     ThumbsPrunedOut,
 )
 from proxy.api.v1 import _shared
 from proxy.archive import catalog, thumbs
 from proxy.cards import edit, gallery
 from proxy.config import settings
-from proxy.media import expressions_export
+from proxy.media import expressions, uploads
 
 # Which element a file is for, by extension. Sniffing the bytes would be more
 # honest but needs an open per file, and this list exists so a folder of 400
@@ -66,6 +68,51 @@ class FolderKind:
     thumb: Callable[[Path, str, str, int], thumbs.ThumbFile | None]
     thumb_forget: Callable[[str, str | None], int]
     thumb_prune: Callable[[str, set[str]], int]
+    # Why an otherwise-valid image may not live in *this* resource, or None to
+    # take it. The only behavioural difference between the two mounts
+    # (docs/FORKS_AND_EXTRAS_PLAN.md §9): a gallery takes any image, an
+    # expressions folder takes only one whose filename parses to one of ST's
+    # 28 labels. Asked after the WebP rename, which cannot change the label.
+    reject: Callable[[str], str | None] = lambda name: None
+
+
+def _store(kind: FolderKind, directory: Path, filename: str, data: bytes) -> GalleryFileWrittenOut:
+    """Convert and write one uploaded file into `directory`, creating the
+    folder only once there is something to put in it -- a refused upload must
+    not leave an empty folder behind, which is the difference between "this
+    character has no sprites" and "this character has a sprites folder with
+    nothing in it" everywhere downstream.
+
+    Raises `uploads.RejectedUpload`; the two callers differ only in whether
+    that is a 422 or one line of a report.
+    """
+    prepared = uploads.prepare(filename, data)
+    refusal = kind.reject(prepared.name)
+    if refusal:
+        raise uploads.RejectedUpload(refusal)
+
+    directory.mkdir(parents=True, exist_ok=True)
+    target = _shared.safe_child(directory, prepared.name)
+    replaced = target.is_file()
+    try:
+        edit.write_atomic(target, prepared.data)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"cannot write {prepared.name}: {exc}") from exc
+
+    # An overwrite reuses the name, and thumbs are keyed on it.
+    kind.thumb_forget(directory.name, prepared.name)
+    quoted_folder = quote(directory.name, safe="")
+    quoted_name = quote(prepared.name, safe="")
+    return GalleryFileWrittenOut(
+        folder=directory.name,
+        name=prepared.name,
+        size=len(prepared.data),
+        path=f"user/images/{directory.name}/{prepared.name}",
+        # Must match what `list_folder_files` builds -- the `/files/` segment
+        # is part of the route, and dropping it yields a URL that 404s.
+        url=f"{_shared.PREFIX}/{kind.segment}/{quoted_folder}/files/{quoted_name}",
+        replaced=replaced,
+    )
 
 
 def register_folder_routes(kind: FolderKind, router: APIRouter) -> None:
@@ -186,41 +233,62 @@ def register_folder_routes(kind: FolderKind, router: APIRouter) -> None:
         folder: str,
         file: UploadFile = File(description="The file to store."),
     ) -> GalleryFileWrittenOut:
-        """Store one file in a folder, creating it if it is not there yet.
+        """Store one image in a folder, creating it if it is not there yet.
 
         Multipart rather than base64-in-JSON: these are multi-megabyte
         binaries, and base64 inflates them by a third for the whole round
         trip. The adapter converts on the client side, where the frontend's
         encoded copy already exists.
+
+        Unlike the bulk route below, a single upload that is refused is a 422:
+        there is nothing partial about one file, and the caller asked for this
+        one specifically.
         """
-        directory = _shared.media_dir(kind.root(), folder, create=True)
-        name = Path(file.filename or "").name
-        if not name:
-            raise HTTPException(status_code=422, detail="the upload has no filename")
-        target = _shared.safe_child(directory, name)
-        payload = file.file.read()
-        if not payload:
-            raise HTTPException(status_code=422, detail=f"{name} is empty")
-
+        directory = _shared.media_dir(kind.root(), folder)
         try:
-            edit.write_atomic(target, payload)
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail=f"cannot write {name}: {exc}") from exc
+            written = _store(kind, directory, file.filename or "", file.file.read())
+        except uploads.RejectedUpload as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return written
 
-        # An overwrite reuses the name, and thumbs are keyed on it.
-        kind.thumb_forget(directory.name, name)
-        quoted_folder = quote(directory.name, safe="")
-        quoted_name = quote(name, safe="")
-        return GalleryFileWrittenOut(
-            folder=directory.name,
-            name=name,
-            size=len(payload),
-            path=f"user/images/{directory.name}/{name}",
-            # Must match what `list_folder_files` builds -- the `/files/`
-            # segment is part of the route, and dropping it yields a URL that
-            # 404s.
-            url=f"{_shared.PREFIX}/{kind.segment}/{quoted_folder}/files/{quoted_name}",
-        )
+    @router.post(
+        f"/{kind.segment}/{{folder}}/zip",
+        response_model=MediaUploadOut,
+        status_code=201,
+        summary=f"Import a zip of files into a {kind.singular}",
+    )
+    def upload_zip(
+        folder: str,
+        file: UploadFile = File(description="A zip whose image entries are unpacked into the folder."),
+    ) -> MediaUploadOut:
+        """Unpack a zip into a folder, flattened to basenames.
+
+        The flattening is ST's (`getImageBuffers` keeps only
+        `path.parse(name).base`), which means both shapes
+        `proxy.media.expressions` exports load here: the flat
+        single-character zip and the `<folder>/<file>` multi-character one.
+        The latter collapses every character into this one folder, exactly as
+        ST's own importer would -- documented in §2 as the reason the two
+        exports are labelled differently in the UI.
+
+        Reports per file rather than failing whole: a 90-sprite pack with two
+        strays should write 88 and name the two.
+        """
+        payload = file.file.read()
+        try:
+            entries = uploads.zip_entries(payload)
+        except uploads.RejectedUpload as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        directory = _shared.media_dir(kind.root(), folder)
+        written: list[GalleryFileWrittenOut] = []
+        skipped: list[MediaUploadSkippedOut] = []
+        for name, data in entries:
+            try:
+                written.append(_store(kind, directory, name, data))
+            except uploads.RejectedUpload as exc:
+                skipped.append(MediaUploadSkippedOut(name=name, reason=str(exc)))
+        return MediaUploadOut(folder=directory.name, written=written, skipped=skipped)
 
     @router.delete(f"/{kind.segment}/{{folder}}/files/{{filename}}", status_code=204, summary=f"Bin a {kind.singular} file")
     def delete_file(folder: str, filename: str) -> Response:
@@ -265,7 +333,7 @@ def _resolve_expressions_folder(record: catalog.CardSummary) -> Path | None:
 def _register_bulk_expressions_export(router: APIRouter) -> None:
     """`GET /expressions/export.zip` -- several characters' expressions in one
     zip, each under its own on-disk folder name (see
-    `proxy.media.expressions_export.zip_many`).
+    `proxy.media.expressions.zip_many`).
 
     Registered before the generic `/{folder}` routes below it (see
     `register_folder_routes`) are added to this same router, so
@@ -294,7 +362,7 @@ def _register_bulk_expressions_export(router: APIRouter) -> None:
                 folders.append((directory.name, directory))
         if not folders:
             raise HTTPException(status_code=404, detail="none of the requested characters have an expressions folder")
-        data = expressions_export.zip_many(folders)
+        data = expressions.zip_many(folders)
         headers = {"Content-Disposition": _shared.content_disposition("expressions.zip")}
         return Response(content=data, media_type="application/zip", headers=headers)
 
@@ -315,6 +383,7 @@ EXPRESSION = FolderKind(
     thumb=lambda source, folder, filename, size: _shared.thumbnail_store.expression(source, folder, filename, size),
     thumb_forget=lambda folder, filename: _shared.thumbnail_store.forget_expression(folder, filename),
     thumb_prune=lambda folder, live: _shared.thumbnail_store.prune_expression(folder, live),
+    reject=expressions.rejection_reason,
 )
 
 router = APIRouter()

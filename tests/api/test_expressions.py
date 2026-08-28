@@ -13,11 +13,21 @@ folder name, and the two expressions-only routes -- the detail view's
 
 from __future__ import annotations
 
+import io
+import zipfile
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from proxy.config import settings
+
+
+def sprite_bytes(fmt: str = "PNG") -> bytes:
+    buffer = io.BytesIO()
+    mode = "RGB" if fmt == "JPEG" else "RGBA"
+    Image.new(mode, (24, 24), (200, 30, 30)).save(buffer, fmt)
+    return buffer.getvalue()
 
 
 @pytest.fixture
@@ -51,7 +61,7 @@ def test_upload_and_delete_round_trip_without_touching_the_gallery_cache(
     monkeypatch.setattr(settings, "trash_dir", tmp_path / "trash")
     resp = client.post(
         "/api/v1/expressions/Abbie_kzbYR2QbpncC/files",
-        files={"file": ("admiration-_00001_.webp", b"\xff\xd8\xff" + b"1" * 50, "image/webp")},
+        files={"file": ("admiration-_00001_.webp", sprite_bytes("WEBP"), "image/webp")},
     )
     assert resp.status_code == 201
     assert (expressions_dir / "admiration-_00001_.webp").is_file()
@@ -169,3 +179,100 @@ def test_many_character_zip_404s_when_nothing_has_expressions(client):
 
 def test_many_character_zip_requires_at_least_one_id(client):
     assert client.get("/api/v1/expressions/export.zip").status_code == 422
+
+
+# --- ingest (docs/FORKS_AND_EXTRAS_PLAN.md §9) -------------------------------
+
+
+def zip_of(entries: dict[str, bytes]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as zf:
+        for name, data in entries.items():
+            zf.writestr(name, data)
+    return buffer.getvalue()
+
+
+def test_a_sprite_is_stored_as_webp_under_its_original_stem(client, expressions_dir):
+    """The stem is the label (ST parses it out of the filename), so only the
+    extension may change on the way in."""
+    resp = client.post(
+        "/api/v1/expressions/Abbie_kzbYR2QbpncC/files",
+        files={"file": ("Grief-_00007_.png", sprite_bytes(), "image/png")},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["name"] == "Grief-_00007_.webp"
+    assert (expressions_dir / "Grief-_00007_.webp").read_bytes()[8:12] == b"WEBP"
+
+
+def test_a_sprite_whose_label_is_not_one_of_the_28_is_refused(client, expressions_dir):
+    resp = client.post(
+        "/api/v1/expressions/Abbie_kzbYR2QbpncC/files",
+        files={"file": ("smugness.png", sprite_bytes(), "image/png")},
+    )
+    assert resp.status_code == 422
+    assert "smugness" in resp.json()["detail"]
+    assert not (expressions_dir / "smugness.webp").exists()
+
+
+def test_the_same_label_rule_does_not_apply_to_galleries(client, populated_archive):
+    resp = client.post(
+        "/api/v1/galleries/Abbie_kzbYR2QbpncC/files",
+        files={"file": ("smugness.png", sprite_bytes(), "image/png")},
+    )
+    assert resp.status_code == 201
+    assert (populated_archive["galleries"] / "Abbie_kzbYR2QbpncC" / "smugness.webp").is_file()
+
+
+def test_a_refused_upload_does_not_bring_a_folder_into_existence(client, populated_archive):
+    resp = client.post(
+        "/api/v1/expressions/Cleo_CCCCCCCCCCCC/files",
+        files={"file": ("smugness.png", sprite_bytes(), "image/png")},
+    )
+    assert resp.status_code == 422
+    assert not (populated_archive["expressions"] / "Cleo_CCCCCCCCCCCC").exists()
+
+
+def test_a_zip_writes_what_it_can_and_names_what_it_skipped(client, expressions_dir):
+    body = zip_of(
+        {
+            "anger-_00001_.png": sprite_bytes(),
+            "sprites/relief.jpg": sprite_bytes("JPEG"),
+            "smugness.png": sprite_bytes(),
+            "notes.txt": b"not an image at all",
+        }
+    )
+    resp = client.post(
+        "/api/v1/expressions/Abbie_kzbYR2QbpncC/zip",
+        files={"file": ("pack.zip", body, "application/zip")},
+    )
+    assert resp.status_code == 201
+    result = resp.json()
+    assert sorted(w["name"] for w in result["written"]) == ["anger-_00001_.webp", "relief.webp"]
+    assert sorted(s["name"] for s in result["skipped"]) == ["notes.txt", "smugness.png"]
+    # Nested entries flatten to their basename, exactly as ST's importer does.
+    assert (expressions_dir / "relief.webp").is_file()
+    assert not (expressions_dir / "sprites").exists()
+
+
+def test_a_zip_round_trips_through_the_single_character_export(client, expressions_dir):
+    """What the export writes, the import takes back -- flat basenames, every
+    label already valid, so the second pass is a pure overwrite."""
+    for existing in expressions_dir.iterdir():
+        existing.write_bytes(sprite_bytes("WEBP"))
+    exported = client.get("/api/v1/characters/Abbie_0d162f5f.png/expressions.zip").content
+    resp = client.post(
+        "/api/v1/expressions/Abbie_kzbYR2QbpncC/zip",
+        files={"file": ("expressions.zip", exported, "application/zip")},
+    )
+    assert resp.status_code == 201
+    result = resp.json()
+    assert result["skipped"] == []
+    assert all(w["replaced"] for w in result["written"])
+
+
+def test_a_zip_that_is_not_a_zip_is_a_422(client):
+    resp = client.post(
+        "/api/v1/expressions/Abbie_kzbYR2QbpncC/zip",
+        files={"file": ("pack.zip", b"PK not really", "application/zip")},
+    )
+    assert resp.status_code == 422

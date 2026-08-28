@@ -554,14 +554,49 @@ export interface paths {
         put?: never;
         /**
          * Add a file to a gallery
-         * @description Store one file in a folder, creating it if it is not there yet.
+         * @description Store one image in a folder, creating it if it is not there yet.
          *
          *     Multipart rather than base64-in-JSON: these are multi-megabyte
          *     binaries, and base64 inflates them by a third for the whole round
          *     trip. The adapter converts on the client side, where the frontend's
          *     encoded copy already exists.
+         *
+         *     Unlike the bulk route below, a single upload that is refused is a 422:
+         *     there is nothing partial about one file, and the caller asked for this
+         *     one specifically.
          */
         post: operations["upload_file_api_v1_galleries__folder__files_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/galleries/{folder}/zip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a zip of files into a gallery
+         * @description Unpack a zip into a folder, flattened to basenames.
+         *
+         *     The flattening is ST's (`getImageBuffers` keeps only
+         *     `path.parse(name).base`), which means both shapes
+         *     `proxy.media.expressions` exports load here: the flat
+         *     single-character zip and the `<folder>/<file>` multi-character one.
+         *     The latter collapses every character into this one folder, exactly as
+         *     ST's own importer would -- documented in §2 as the reason the two
+         *     exports are labelled differently in the UI.
+         *
+         *     Reports per file rather than failing whole: a 90-sprite pack with two
+         *     strays should write 88 and name the two.
+         */
+        post: operations["upload_zip_api_v1_galleries__folder__zip_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -718,14 +753,49 @@ export interface paths {
         put?: never;
         /**
          * Add a file to a expression
-         * @description Store one file in a folder, creating it if it is not there yet.
+         * @description Store one image in a folder, creating it if it is not there yet.
          *
          *     Multipart rather than base64-in-JSON: these are multi-megabyte
          *     binaries, and base64 inflates them by a third for the whole round
          *     trip. The adapter converts on the client side, where the frontend's
          *     encoded copy already exists.
+         *
+         *     Unlike the bulk route below, a single upload that is refused is a 422:
+         *     there is nothing partial about one file, and the caller asked for this
+         *     one specifically.
          */
         post: operations["upload_file_api_v1_expressions__folder__files_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/expressions/{folder}/zip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a zip of files into a expression
+         * @description Unpack a zip into a folder, flattened to basenames.
+         *
+         *     The flattening is ST's (`getImageBuffers` keeps only
+         *     `path.parse(name).base`), which means both shapes
+         *     `proxy.media.expressions` exports load here: the flat
+         *     single-character zip and the `<folder>/<file>` multi-character one.
+         *     The latter collapses every character into this one folder, exactly as
+         *     ST's own importer would -- documented in §2 as the reason the two
+         *     exports are labelled differently in the UI.
+         *
+         *     Reports per file rather than failing whole: a 90-sprite pack with two
+         *     strays should write 88 and name the two.
+         */
+        post: operations["upload_zip_api_v1_expressions__folder__zip_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1538,6 +1608,22 @@ export interface components {
             /**
              * File
              * @description The file to store.
+             */
+            file: string;
+        };
+        /** Body_upload_zip_api_v1_expressions__folder__zip_post */
+        Body_upload_zip_api_v1_expressions__folder__zip_post: {
+            /**
+             * File
+             * @description A zip whose image entries are unpacked into the folder.
+             */
+            file: string;
+        };
+        /** Body_upload_zip_api_v1_galleries__folder__zip_post */
+        Body_upload_zip_api_v1_galleries__folder__zip_post: {
+            /**
+             * File
+             * @description A zip whose image entries are unpacked into the folder.
              */
             file: string;
         };
@@ -2411,6 +2497,10 @@ export interface components {
          * @description One uploaded gallery file. `path` is in SillyTavern's `user/images/...`
          *     shape because that is what the frontend's uploaders read back out of the
          *     reply and store as a local media path.
+         *
+         *     `name` is the name on disk, which is not necessarily the name uploaded:
+         *     every image is re-encoded to WebP on the way in, so the extension is
+         *     swapped (the stem never is -- see `proxy.media.uploads`).
          */
         GalleryFileWrittenOut: {
             /** Folder */
@@ -2423,6 +2513,12 @@ export interface components {
             path: string;
             /** Url */
             url: string;
+            /**
+             * Replaced
+             * @description True when this overwrote a file of the same name rather than adding one.
+             * @default false
+             */
+            replaced: boolean;
         };
         /** GalleryFilesOut */
         GalleryFilesOut: {
@@ -2874,6 +2970,30 @@ export interface components {
             cards: {
                 [key: string]: components["schemas"]["MediaStatusEntryOut"];
             };
+        };
+        /**
+         * MediaUploadOut
+         * @description The result of uploading one or more files to a media folder.
+         */
+        MediaUploadOut: {
+            /** Folder */
+            folder: string;
+            /** Written */
+            written: components["schemas"]["GalleryFileWrittenOut"][];
+            /** Skipped */
+            skipped: components["schemas"]["MediaUploadSkippedOut"][];
+        };
+        /**
+         * MediaUploadSkippedOut
+         * @description One file a bulk upload did not store, and why -- in the uploader's own
+         *     words, so the pane can name it. Skipping is per file rather than per
+         *     request on purpose: a 90-sprite pack with two strays writes 88.
+         */
+        MediaUploadSkippedOut: {
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
         };
         /**
          * ProxyStatusOut
@@ -3947,6 +4067,41 @@ export interface operations {
             };
         };
     };
+    upload_zip_api_v1_galleries__folder__zip_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                folder: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_zip_api_v1_galleries__folder__zip_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaUploadOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     prune_thumbs_api_v1_galleries__folder__thumbs_prune_post: {
         parameters: {
             query?: never;
@@ -4179,6 +4334,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GalleryFileWrittenOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_zip_api_v1_expressions__folder__zip_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                folder: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_zip_api_v1_expressions__folder__zip_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaUploadOut"];
                 };
             };
             /** @description Validation Error */

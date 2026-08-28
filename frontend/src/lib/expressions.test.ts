@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_EXPRESSIONS, expressionLabel, groupExpressions } from './expressions'
+import {
+  DEFAULT_EXPRESSIONS,
+  expressionLabel,
+  groupExpressions,
+} from './expressions'
 import type { GalleryFile } from './card'
 
 function file(name: string): GalleryFile {

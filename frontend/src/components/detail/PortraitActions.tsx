@@ -99,7 +99,10 @@ export function PortraitActions({
       onSuccess: (created) => {
         toast(`Forked as “${created.name}”.`)
         navigate(
-          { pathname: `/characters/${encodeURIComponent(created.id)}`, search: location.search },
+          {
+            pathname: `/characters/${encodeURIComponent(created.id)}`,
+            search: location.search,
+          },
           { state: { openRename: true } },
         )
       },

@@ -9,7 +9,15 @@ import {
 import { FLAG_LABELS, type BrowseState, type Flag } from '@/lib/browse'
 
 /** Flags in the popover, including the three that are not preset chips. */
-const FLAGS: Flag[] = ['fav', 'lore', 'greets', 'new', 'untagged', 'media', 'fork']
+const FLAGS: Flag[] = [
+  'fav',
+  'lore',
+  'greets',
+  'new',
+  'untagged',
+  'media',
+  'fork',
+]
 
 /**
  * ＋ Filter: the six flags, in full wording.

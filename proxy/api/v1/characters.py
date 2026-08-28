@@ -53,7 +53,7 @@ from proxy.api.v1 import _shared
 from proxy.archive import catalog
 from proxy.cards import edit, forks, gallery, intake, pngtools
 from proxy.cards.naming import id_fragment
-from proxy.media import expressions_export
+from proxy.media import expressions
 from proxy.media import manifest as media_manifest
 from proxy.config import settings
 
@@ -955,7 +955,7 @@ def get_character_expressions_zip(card_id: str) -> Response:
     meta = _folder_out(record, settings.expressions_dir)
     if not meta.exists:
         raise HTTPException(status_code=404, detail=f"no expressions folder for {card_id!r}")
-    data = expressions_export.zip_one(settings.expressions_dir / meta.folder)
+    data = expressions.zip_one(settings.expressions_dir / meta.folder)
     headers = {"Content-Disposition": _shared.content_disposition(f"{record.name} expressions.zip")}
     return Response(content=data, media_type="application/zip", headers=headers)
 

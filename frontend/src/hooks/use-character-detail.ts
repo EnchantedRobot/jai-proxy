@@ -65,7 +65,10 @@ export function useGalleryFiles(folder: string | undefined, exists: boolean) {
  * on disk, so the query stays off and the pane shows the empty state without
  * ever asking the server for a folder it already knows is not there.
  */
-export function useExpressionFiles(folder: string | undefined, exists: boolean) {
+export function useExpressionFiles(
+  folder: string | undefined,
+  exists: boolean,
+) {
   return useQuery({
     queryKey: ['expressions', folder],
     enabled: !!folder && exists,
@@ -130,14 +133,19 @@ export function useSharesTag(tag: string | undefined, excludeId: string) {
  * `fork.of` when it is itself a fork, or its own `fragment` otherwise, and
  * either way this returns every sibling at once.
  */
-export function useForksOf(rootFragment: string | undefined, excludeId: string) {
+export function useForksOf(
+  rootFragment: string | undefined,
+  excludeId: string,
+) {
   return useQuery({
     queryKey: ['related', 'fork_of', rootFragment],
     enabled: !!rootFragment,
     queryFn: async () => {
       const page = await unwrap(
         apiClient.GET('/api/v1/characters', {
-          params: { query: { fork_of: rootFragment!, limit: 24, sort: '-added' } },
+          params: {
+            query: { fork_of: rootFragment!, limit: 24, sort: '-added' },
+          },
         }),
         'could not read forks of this card',
       )

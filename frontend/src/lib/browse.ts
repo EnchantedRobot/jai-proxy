@@ -12,7 +12,8 @@ export type Card = components['schemas']['CardOut']
  */
 
 /** A chip that is on or off. The tag chips are separate — they have three states. */
-export type Flag = 'fav' | 'lore' | 'greets' | 'new' | 'untagged' | 'media' | 'fork'
+export type Flag =
+  'fav' | 'lore' | 'greets' | 'new' | 'untagged' | 'media' | 'fork'
 
 /** Click a tag once to require it, again to exclude it, again to drop it. */
 export type TagMode = 'inc' | 'exc'
