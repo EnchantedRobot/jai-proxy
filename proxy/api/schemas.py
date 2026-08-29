@@ -448,6 +448,19 @@ class MediaExtStatOut(BaseModel):
     bytes: int
 
 
+class MediaDedupeOut(BaseModel):
+    """Result of `POST /media/dedupe` -- exact-duplicate gallery files trashed.
+    See `proxy/media/dedupe.py` for what counts as a safe duplicate."""
+
+    folders_touched: int
+    files_trashed: int
+    bytes_freed: int
+    unresolved: int = Field(
+        description="Unreferenced files that weren't a byte-for-byte match of any file the manifest currently "
+        "claims -- left alone rather than trashed."
+    )
+
+
 class MediaStatsOut(BaseModel):
     """Every file under the galleries directory, tallied by extension."""
 

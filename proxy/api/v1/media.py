@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 
 from proxy.api.schemas import (
     MediaBytesOut,
+    MediaDedupeOut,
     MediaDownloadIn,
     MediaHaveIn,
     MediaHaveOut,
@@ -32,6 +33,7 @@ from proxy.api.v1 import _shared
 from proxy.cards import gallery, pngtools
 from proxy.config import settings
 from proxy.media import (
+    dedupe as media_dedupe,
     discovery as media_discovery,
     extractors as media_extractors,
     jobs as media_jobs,
@@ -91,6 +93,22 @@ def get_media_status() -> MediaStatusOut:
             )
             for filename, entry in media_status.card_status_map(_shared.index()).items()
         }
+    )
+
+
+@router.post("/media/dedupe", response_model=MediaDedupeOut, summary="Trash exact-duplicate gallery files")
+def dedupe_media() -> MediaDedupeOut:
+    """Byte-identical leftovers from a media re-download: the old file stays on
+    disk under its old name after `.media.json` gets repointed at a new one on
+    a rescan. Safe by construction -- a file is only trashed when its sha256
+    matches a file the manifest currently claims, so a manually added extra is
+    never touched. See `proxy/media/dedupe.py`."""
+    result = media_dedupe.dedupe_galleries(settings.galleries_dir, apply=True)
+    return MediaDedupeOut(
+        folders_touched=result.folders_touched,
+        files_trashed=result.files_trashed,
+        bytes_freed=result.bytes_freed,
+        unresolved=result.unresolved,
     )
 
 

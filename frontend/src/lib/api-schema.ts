@@ -848,6 +848,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/media/dedupe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trash exact-duplicate gallery files
+         * @description Byte-identical leftovers from a media re-download: the old file stays on
+         *     disk under its old name after `.media.json` gets repointed at a new one on
+         *     a rescan. Safe by construction -- a file is only trashed when its sha256
+         *     matches a file the manifest currently claims, so a manually added extra is
+         *     never touched. See `proxy/media/dedupe.py`.
+         */
+        post: operations["dedupe_media_api_v1_media_dedupe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/characters/{card_id}/media": {
         parameters: {
             query?: never;
@@ -2618,6 +2642,24 @@ export interface components {
             status: "saved" | "skipped" | "error";
             /** File */
             file?: string | null;
+        };
+        /**
+         * MediaDedupeOut
+         * @description Result of `POST /media/dedupe` -- exact-duplicate gallery files trashed.
+         *     See `proxy/media/dedupe.py` for what counts as a safe duplicate.
+         */
+        MediaDedupeOut: {
+            /** Folders Touched */
+            folders_touched: number;
+            /** Files Trashed */
+            files_trashed: number;
+            /** Bytes Freed */
+            bytes_freed: number;
+            /**
+             * Unresolved
+             * @description Unreferenced files that weren't a byte-for-byte match of any file the manifest currently claims -- left alone rather than trashed.
+             */
+            unresolved: number;
         };
         /**
          * MediaDownloadIn
@@ -4429,6 +4471,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MediaStatusOut"];
+                };
+            };
+        };
+    };
+    dedupe_media_api_v1_media_dedupe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaDedupeOut"];
                 };
             };
         };
