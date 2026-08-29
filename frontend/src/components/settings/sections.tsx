@@ -8,6 +8,7 @@ import {
   EyeOff,
   Plus,
   RefreshCw,
+  Trash2,
   X,
 } from 'lucide-react'
 import { apiClient, unwrap } from '@/lib/api-client'
@@ -867,6 +868,22 @@ export function MediaSection() {
   const live = job.data
   const running = live?.state === 'queued' || live?.state === 'running'
 
+  const dedupe = useMutation({
+    mutationFn: () =>
+      unwrap(
+        apiClient.POST('/api/v1/media/dedupe'),
+        'could not clean up duplicate gallery files',
+      ),
+    onSuccess: (result) => {
+      toast(
+        result.files_trashed
+          ? `Removed ${result.files_trashed.toLocaleString()} duplicate file${result.files_trashed === 1 ? '' : 's'} across ${result.folders_touched.toLocaleString()} folder${result.folders_touched === 1 ? '' : 's'}, freeing ${formatBytes(result.bytes_freed)}.`
+          : 'No exact-duplicate gallery files found.',
+      )
+    },
+    onError: (err) => toast(err.message, 'bad'),
+  })
+
   const run = (skipComplete: boolean) =>
     start.mutate(
       { skipComplete },
@@ -961,6 +978,21 @@ export function MediaSection() {
           </div>
         )}
       </div>
+
+      <OptionRow
+        label="Remove duplicate gallery files"
+        hint="Trashes exact-byte duplicates left behind by a media re-download. Anything else is left alone."
+      >
+        <button
+          type="button"
+          onClick={() => dedupe.mutate()}
+          disabled={dedupe.isPending}
+          className="flex h-[31px] items-center gap-1.5 rounded-lg border border-line px-3 text-[12.5px] text-muted hover:border-white/20 hover:text-text disabled:opacity-60"
+        >
+          <Trash2 className="size-3.5" />
+          {dedupe.isPending ? 'Cleaning…' : 'Clean up duplicates'}
+        </button>
+      </OptionRow>
 
       <OptionRow
         label="Images only"

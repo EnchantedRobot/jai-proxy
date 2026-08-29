@@ -879,3 +879,38 @@ def test_discover_resolves_a_chub_sourced_cards_own_gallery(client, populated_ar
     assert body["state"] == "done"
     assert seen_ids == ["9999"]
     assert {call["url"] for call in stub_download_item} == {"https://cdn.chub.ai/a.webp"}
+
+
+# --- dedupe -------------------------------------------------------------
+
+
+def test_dedupe_trashes_a_stale_redownload_and_leaves_live_files_alone(
+    client, populated_archive, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(settings, "trash_dir", tmp_path / "trash")
+    gallery = populated_archive["galleries"] / "Abbie_kzbYR2QbpncC"
+    live = gallery / "two.jpg"
+    stale = gallery / "two_stale_copy.jpg"
+    stale.write_bytes(live.read_bytes())
+    stale_size = stale.stat().st_size
+
+    manifest = media_manifest.load_manifest(gallery)
+    media_manifest.record_saved(
+        manifest, "https://cdn.example.com/two.jpg", live.name, hashlib.sha256(live.read_bytes()).hexdigest()
+    )
+    media_manifest.save_manifest(gallery, manifest)
+
+    resp = client.post("/api/v1/media/dedupe")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["files_trashed"] == 1
+    assert body["folders_touched"] == 1
+    assert body["bytes_freed"] == stale_size
+    # one.jpg is also untracked, but not a byte-for-byte match of anything the
+    # manifest claims -- it's left alone rather than trashed, same as a
+    # manually added image would be.
+    assert body["unresolved"] == 1
+    assert not stale.exists()
+    assert live.exists()
+    assert (gallery / "one.jpg").exists()
