@@ -1,7 +1,25 @@
 import { useState } from 'react'
-import { Check, ChevronDown, Copy, Download, Plus } from 'lucide-react'
+import {
+  Check,
+  ChevronDown,
+  Copy,
+  Download,
+  Plus,
+  SquareMousePointer,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { CardTile } from '@/components/CardTile'
 import { CardGrid } from '@/components/CardGrid'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   useCharacterDetail,
   useExpressionFiles,
@@ -11,6 +29,8 @@ import {
   useSharesTag,
   type CardDetail,
 } from '@/hooks/use-character-detail'
+import { useBulkDeleteGalleryFiles } from '@/hooks/use-gallery-mutations'
+import { toast } from '@/lib/toast'
 import {
   dialogueBlocks,
   estimateTokens,
@@ -504,7 +524,42 @@ function LoreEntryRow({ entry }: { entry: LoreEntry }) {
 export function GalleryPane({ card }: { card: CardDetail }) {
   const gallery = useGalleryFiles(card.gallery.folder, card.gallery.exists)
   const [open, setOpen] = useState<number | null>(null)
+  const [selectMode, setSelectMode] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const bulkDelete = useBulkDeleteGalleryFiles(card.gallery.folder)
   const files = gallery.data?.items ?? []
+
+  const toggleSelectMode = () => {
+    setSelectMode((was) => !was)
+    setSelected(new Set())
+  }
+  const toggleSelected = (name: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+
+  const onDelete = () =>
+    bulkDelete.mutate([...selected], {
+      onSuccess: (result) => {
+        setSelectMode(false)
+        setSelected(new Set())
+        const failedCount = Object.keys(result.failed).length
+        if (failedCount)
+          toast(
+            `Removed ${result.deleted.length}, ${failedCount} failed.`,
+            'bad',
+          )
+        else
+          toast(
+            `Removed ${result.deleted.length} file${result.deleted.length === 1 ? '' : 's'}.`,
+          )
+      },
+      onError: (error) => toast(error.message, 'bad'),
+    })
 
   // The two ingest controls sit above the conditional body, in one fixed
   // position: a first upload flips the pane from its empty state to the grid,
@@ -525,12 +580,47 @@ export function GalleryPane({ card }: { card: CardDetail }) {
         <Section
           title={`${files.length} files`}
           count={formatBytes(gallery.data!.bytes)}
+          action={
+            <div className="flex items-center gap-2">
+              {selectMode && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmOpen(true)}
+                  disabled={selected.size === 0}
+                  className="flex h-7 items-center gap-1.5 rounded-lg border border-bad/50 px-3 text-[12.5px] text-bad hover:border-bad hover:bg-bad/10 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Trash2 className="size-3.5" />
+                  Delete{selected.size ? ` (${selected.size})` : ''}
+                </button>
+              )}
+              <button
+                type="button"
+                title={selectMode ? 'Cancel selection' : 'Select files'}
+                onClick={toggleSelectMode}
+                className={cn(
+                  'grid size-7 place-items-center rounded-lg border',
+                  selectMode
+                    ? 'border-sage-line bg-sage/15 text-sage'
+                    : 'border-line text-faint hover:border-sage-line hover:text-sage',
+                )}
+              >
+                {selectMode ? (
+                  <X className="size-3.5" />
+                ) : (
+                  <SquareMousePointer className="size-3.5" />
+                )}
+              </button>
+            </div>
+          }
         >
           <div className="mt-2.5 grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-2.5">
             {files.map((file, index) => (
               <GalleryThumb
                 key={file.name}
                 file={file}
+                selectMode={selectMode}
+                selected={selected.has(file.name)}
+                onToggleSelect={() => toggleSelected(file.name)}
                 onOpen={() => setOpen(index)}
               />
             ))}
@@ -545,23 +635,80 @@ export function GalleryPane({ card }: { card: CardDetail }) {
           )}
         </Section>
       )}
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogTitle>
+            Delete {selected.size} file{selected.size === 1 ? '' : 's'}?
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            Files are moved to the bin, not erased — they can be recovered from{' '}
+            <span className="font-mono">data/.trash/</span> until the bin is
+            emptied. A plain "Localize media" run won't re-fetch them; only a
+            full rescan will.
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogCancel asChild>
+              <button
+                type="button"
+                className="rounded-[10px] border border-line px-3.5 py-2 text-[13px] hover:bg-raised"
+              >
+                Cancel
+              </button>
+            </AlertDialogCancel>
+            <AlertDialogAction asChild>
+              <button
+                type="button"
+                onClick={onDelete}
+                disabled={bulkDelete.isPending}
+                className="rounded-[10px] border border-bad bg-bad/90 px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-bad disabled:opacity-60"
+              >
+                {bulkDelete.isPending ? 'Deleting…' : 'Delete'}
+              </button>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }
 
 function GalleryThumb({
   file,
+  selectMode = false,
+  selected = false,
+  onToggleSelect,
   onOpen,
 }: {
   file: GalleryFile
+  /** Batch-select mode -- the Gallery pane's own, unlike expressions (which
+   *  has no batch delete and just renders this with the mode left off). */
+  selectMode?: boolean
+  selected?: boolean
+  onToggleSelect?: () => void
   onOpen: () => void
 }) {
   return (
     <button
       type="button"
-      onClick={onOpen}
-      className="relative aspect-square overflow-hidden rounded-lg border border-line-soft bg-raised hover:border-sage-line"
+      onClick={selectMode ? onToggleSelect : onOpen}
+      className={cn(
+        'relative aspect-square overflow-hidden rounded-lg border border-line-soft bg-raised hover:border-sage-line',
+        selected && 'ring-2 ring-sage',
+      )}
     >
+      {selectMode && (
+        <span
+          className={cn(
+            'absolute top-1.5 left-1.5 z-1 grid size-5 place-items-center rounded-[6px] border backdrop-blur-[6px]',
+            selected
+              ? 'border-sage bg-sage text-on-sage'
+              : 'border-white/30 bg-ground/72 text-transparent',
+          )}
+        >
+          <Check className="size-3" />
+        </span>
+      )}
       {file.thumb_url ? (
         <img
           src={file.thumb_url}

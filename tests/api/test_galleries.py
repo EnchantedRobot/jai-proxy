@@ -15,6 +15,8 @@ import pytest
 from PIL import Image
 
 from proxy.archive import thumbs
+from proxy.config import settings
+from proxy.media import manifest as media_manifest
 
 
 def real_jpeg(size: tuple[int, int] = (800, 600)) -> bytes:
@@ -180,6 +182,70 @@ def test_a_gallery_image_revalidates_instead_of_resending(client, gallery_dir):
     again = client.get(url, headers={"If-None-Match": first.headers["etag"]})
     assert again.status_code == 304
     assert again.content == b""
+
+
+# --- bulk delete -------------------------------------------------------------
+
+
+def test_bulk_delete_bins_the_named_files(client, gallery_dir, populated_archive, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "trash_dir", tmp_path / "trash")
+    resp = client.post(
+        "/api/v1/galleries/Abbie_kzbYR2QbpncC/files/bulk-delete",
+        json={"names": ["one.jpg", "two.jpg"]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert sorted(body["deleted"]) == ["one.jpg", "two.jpg"]
+    assert body["failed"] == {}
+    assert not (gallery_dir / "one.jpg").exists()
+    assert not (gallery_dir / "two.jpg").exists()
+
+
+def test_bulk_delete_reports_a_missing_file_without_failing_the_rest(client, gallery_dir, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "trash_dir", tmp_path / "trash")
+    resp = client.post(
+        "/api/v1/galleries/Abbie_kzbYR2QbpncC/files/bulk-delete",
+        json={"names": ["one.jpg", "nope.jpg"]},
+    )
+    body = resp.json()
+    assert body["deleted"] == ["one.jpg"]
+    assert "nope.jpg" in body["failed"]
+    assert not (gallery_dir / "one.jpg").exists()
+
+
+def test_bulk_delete_cannot_escape_the_gallery_root(client, gallery_dir, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "trash_dir", tmp_path / "trash")
+    resp = client.post(
+        "/api/v1/galleries/Abbie_kzbYR2QbpncC/files/bulk-delete",
+        json={"names": ["../secret.txt", "one.jpg"]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["deleted"] == ["one.jpg"]
+    assert "../secret.txt" in body["failed"]
+
+
+def test_bulk_delete_leaves_the_manifest_alone(client, gallery_dir, tmp_path, monkeypatch):
+    """The point of the whole route: a card localize run reads `.media.json`
+    to decide a card is already complete without checking the manifest's
+    file entries against disk (`media_status.card_status_map`), so binning a
+    file here must not touch the manifest -- that is what keeps a plain
+    "Localize media" pass from re-fetching it."""
+    monkeypatch.setattr(settings, "trash_dir", tmp_path / "trash")
+    manifest = media_manifest.load_manifest(gallery_dir)
+    media_manifest.record_saved(manifest, "https://example.com/one.jpg", "one.jpg", "deadbeef")
+    media_manifest.append_run(manifest, {"at": "2026-08-30T00:00:00Z", "errors": 0})
+    media_manifest.save_manifest(gallery_dir, manifest)
+    before = media_manifest.load_manifest(gallery_dir)
+
+    client.post(
+        "/api/v1/galleries/Abbie_kzbYR2QbpncC/files/bulk-delete",
+        json={"names": ["one.jpg"]},
+    )
+
+    after = media_manifest.load_manifest(gallery_dir)
+    assert after["files"] == before["files"]
+    assert after["runs"] == before["runs"]
 
 
 # --- sized avatar thumbnails ------------------------------------------------

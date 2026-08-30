@@ -1,4 +1,5 @@
 import { Link } from 'react-router'
+import { useBatchSelection } from '@/hooks/use-batch-selection'
 import { useRecentlyAdded } from '@/hooks/use-characters'
 import { weekAgo } from '@/lib/browse'
 import { CardGrid } from './CardGrid'
@@ -17,6 +18,7 @@ export function RecentShelf({
   onHide: () => void
 }) {
   const recent = useRecentlyAdded(columns)
+  const batch = useBatchSelection()
   if (!recent.data?.items.length) return null
 
   // The shelf always shows the newest cards; the badge says they arrived this
@@ -57,6 +59,9 @@ export function RecentShelf({
             // detail page so prev/next walks the recently-added set, not the
             // default A→Z the empty home querystring would imply.
             search="?sort=-added"
+            batchMode={batch.active}
+            selected={batch.selected.has(card.id)}
+            onToggleSelect={batch.toggleSelected}
           />
         ))}
       </CardGrid>

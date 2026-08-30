@@ -35,3 +35,4 @@ wheels/
 
 # node (userscript/tests/)
 node_modules/
+docs/

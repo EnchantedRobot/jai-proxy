@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { Outlet } from 'react-router'
+import { BatchSelectionProvider } from '@/hooks/use-batch-selection'
 import { useProviderSettings } from '@/hooks/use-settings'
 import { setSavedDatacatToken } from '@/lib/providers/datacat'
 import { BackToTop } from './BackToTop'
+import { BatchActionBar } from './BatchActionBar'
 import { SearchOverlay } from './SearchOverlay'
 import { TopBar } from './TopBar'
 import { Toaster } from './ui/Toaster'
@@ -40,7 +42,7 @@ export function AppShell() {
   }, [])
 
   return (
-    <>
+    <BatchSelectionProvider>
       <TopBar onSearch={() => setSearchOpen(true)} />
       {/* `scrollbar-gutter: stable` reserves the scrollbar's width whether or
           not it is showing. Without it, a route whose content crosses the
@@ -55,7 +57,8 @@ export function AppShell() {
       </div>
       <BackToTop scrollRef={scrollRef} />
       <SearchOverlay open={searchOpen} onOpenChange={setSearchOpen} />
+      <BatchActionBar />
       <Toaster />
-    </>
+    </BatchSelectionProvider>
   )
 }

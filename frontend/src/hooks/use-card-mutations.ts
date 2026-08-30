@@ -130,6 +130,33 @@ export function useDeleteCharacter(id: string) {
 }
 
 /**
+ * Bin many cards in one request — the batch-select grid's bulk delete.
+ * Partial success comes back rather than throwing, since one bad id must not
+ * hide that the rest actually binned (mirrors the server's `bulk_tags` shape).
+ */
+export function useBulkDeleteCharacters() {
+  const client = useQueryClient()
+  return useMutation<
+    { deleted: string[]; failed: Record<string, string> },
+    Error,
+    { ids: string[]; gallery: 'keep' | 'delete' }
+  >({
+    mutationFn: async ({ ids, gallery }) => {
+      const { data, response } = await apiClient.POST(
+        '/api/v1/characters/bulk-delete',
+        { body: { ids, gallery } },
+      )
+      if (!response.ok || data === undefined)
+        throw new Error(
+          `could not delete the cards: ${response.status} ${response.statusText}`.trim(),
+        )
+      return data
+    },
+    onSuccess: () => invalidateArchive(client),
+  })
+}
+
+/**
  * Replace the portrait. Multipart, so it goes through `fetch` directly rather
  * than `openapi-fetch` — the endpoint re-encodes through intake's pipeline, and
  * the returned detail (with a fresh ETag) replaces the cache. The pixels change
