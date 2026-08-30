@@ -6,6 +6,7 @@ import { CardGrid } from '@/components/CardGrid'
 import { CardTile } from '@/components/CardTile'
 import { RecentShelf } from '@/components/RecentShelf'
 import { SortPopover } from '@/components/SortPopover'
+import { useBatchSelection } from '@/hooks/use-batch-selection'
 import { useGridColumns } from '@/hooks/use-grid-columns'
 import { useArchiveStats, useCharacters } from '@/hooks/use-characters'
 import { useSettings, useUpdateUi2 } from '@/hooks/use-settings'
@@ -31,6 +32,7 @@ export function CharactersPage({ favorites = false }: { favorites?: boolean }) {
   const columns = useGridColumns(gridRef)
   const settings = useSettings()
   const updateUi2 = useUpdateUi2()
+  const batch = useBatchSelection()
 
   const urlState = readState(params)
   // Settings §3.7's "default sort" only applies when the URL is silent about
@@ -143,7 +145,14 @@ export function CharactersPage({ favorites = false }: { favorites?: boolean }) {
 
         <CardGrid ref={gridRef} className="pt-[22px] pb-[90px]">
           {cards.map((card) => (
-            <CardTile key={card.id} card={card} search={tileSearch(state)} />
+            <CardTile
+              key={card.id}
+              card={card}
+              search={tileSearch(state)}
+              batchMode={batch.active}
+              selected={batch.selected.has(card.id)}
+              onToggleSelect={batch.toggleSelected}
+            />
           ))}
         </CardGrid>
 

@@ -1,7 +1,13 @@
-import { NavLink, useNavigate } from 'react-router'
-import { Search, Settings } from 'lucide-react'
+import { NavLink, useLocation, useNavigate } from 'react-router'
+import { Search, Settings, SquareMousePointer } from 'lucide-react'
+import { useBatchSelection } from '@/hooks/use-batch-selection'
 import { cn } from '@/lib/utils'
 import { ImportPopover } from './ImportPopover'
+
+/** The routes that show a character grid — the only place batch-select
+ *  toggle makes sense. Kept in sync with `BATCH_ROUTES` in
+ *  `use-batch-selection.tsx`. */
+const BATCH_TOGGLE_ROUTES = new Set(['/', '/favorites'])
 
 const TABS = [
   { to: '/', label: 'Characters' },
@@ -18,6 +24,9 @@ const TABS = [
  */
 export function TopBar({ onSearch }: { onSearch: () => void }) {
   const navigate = useNavigate()
+  const location = useLocation()
+  const batch = useBatchSelection()
+  const showBatchToggle = BATCH_TOGGLE_ROUTES.has(location.pathname)
 
   return (
     <header className="fixed inset-x-0 top-0 z-40 flex h-[60px] items-center gap-3.5 border-b border-line-soft bg-ground/90 px-[18px] backdrop-blur-[14px]">
@@ -57,6 +66,22 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
           ⌘K
         </kbd>
       </button>
+
+      {showBatchToggle && (
+        <button
+          type="button"
+          title="Batch select"
+          onClick={batch.toggleActive}
+          className={cn(
+            'grid size-[35px] place-items-center rounded-full border hover:border-white/17 hover:bg-raised hover:text-text',
+            batch.active
+              ? 'border-sage-line bg-sage/15 text-sage'
+              : 'border-white/7 text-muted-foreground',
+          )}
+        >
+          <SquareMousePointer className="size-4" />
+        </button>
+      )}
 
       <ImportPopover />
 

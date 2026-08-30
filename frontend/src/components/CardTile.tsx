@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router'
-import { GitFork, Star } from 'lucide-react'
+import { Check, GitFork, Star } from 'lucide-react'
 import type { Card } from '@/lib/browse'
 import { cn } from '@/lib/utils'
 
@@ -10,13 +10,20 @@ import { cn } from '@/lib/utils'
  *
  * The whole tile is a link, so middle-click and ⌘-click open a card in a new
  * tab. Deep links are the point of the SPA fallback; a div with an onClick
- * would throw that away for every card in the archive.
+ * would throw that away for every card in the archive. Batch mode is the one
+ * exception — the click is redirected to a selection toggle instead of
+ * navigating, and the lore/greeting badge shifts right to make room for the
+ * selection square in the corner it would otherwise share.
  */
 export function CardTile({
   card,
   isNew,
   search,
   className,
+  batchMode = false,
+  selected = false,
+  onToggleSelect,
+  onClick,
   ...props
 }: Omit<React.ComponentProps<typeof Link>, 'to'> & {
   card: Card
@@ -26,6 +33,10 @@ export function CardTile({
    *  current URL's — surfaces with their own ordering (the recently-added
    *  shelf) pass theirs, which the page's filters would not otherwise capture. */
   search?: string
+  /** Batch-select mode — see `use-batch-selection`. */
+  batchMode?: boolean
+  selected?: boolean
+  onToggleSelect?: (id: string) => void
 }) {
   const location = useLocation()
   const linkSearch = search ?? location.search
@@ -41,14 +52,39 @@ export function CardTile({
         pathname: `/characters/${encodeURIComponent(card.id)}`,
         search: linkSearch,
       }}
-      className={cn('group block', className)}
+      className={cn(
+        'group block',
+        selected && 'rounded-xl ring-2 ring-sage',
+        className,
+      )}
+      onClick={(event) => {
+        if (batchMode) {
+          event.preventDefault()
+          onToggleSelect?.(card.id)
+          return
+        }
+        onClick?.(event)
+      }}
       {...props}
     >
       <div className="relative aspect-[2/3] w-full overflow-hidden rounded-xl border border-line-soft bg-raised group-hover:border-sage-line">
+        {batchMode && (
+          <span
+            className={cn(
+              'absolute top-1.5 left-1.5 z-3 grid size-6 place-items-center rounded-[7px] border backdrop-blur-[6px]',
+              selected
+                ? 'border-sage bg-sage text-on-sage'
+                : 'border-white/30 bg-ground/72 text-transparent',
+            )}
+          >
+            <Check className="size-3.5" />
+          </span>
+        )}
         {badge && (
           <span
             className={cn(
-              'absolute top-[7px] left-[7px] z-2 rounded-[7px] border border-white/12 bg-ground/78 px-[7px] py-0.5 text-[10.5px] backdrop-blur-[6px]',
+              'absolute top-[7px] z-2 rounded-[7px] border border-white/12 bg-ground/78 px-[7px] py-0.5 text-[10.5px] backdrop-blur-[6px]',
+              batchMode ? 'left-[38px]' : 'left-[7px]',
               card.lore_entries ? 'border-sage-line text-sage' : 'text-text',
             )}
           >

@@ -376,6 +376,27 @@ class DeletedOut(BaseModel):
     )
 
 
+class BulkDeleteIn(BaseModel):
+    """Bin many cards in one pass -- the batch-select grid's bulk delete."""
+
+    ids: list[str] = Field(description="Card filenames, as `/characters` reports them.")
+    gallery: Literal["keep", "delete"] = Field(
+        default="keep",
+        description="`delete` bins each card's gallery folder along with it. Default keeps them.",
+    )
+
+
+class BulkDeleteOut(BaseModel):
+    """What a bulk delete did. Same partial-success shape as `BulkTagsOut` --
+    one bad id must not block the cards that bin cleanly."""
+
+    deleted: list[str] = Field(default=[], description="Card filenames that were binned.")
+    failed: dict[str, str] = Field(
+        default={},
+        description="Card id to the reason it could not be binned.",
+    )
+
+
 class GalleryFileWrittenOut(BaseModel):
     """One uploaded gallery file. `path` is in SillyTavern's `user/images/...`
     shape because that is what the frontend's uploaders read back out of the

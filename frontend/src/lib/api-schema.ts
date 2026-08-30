@@ -165,6 +165,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/characters/bulk-delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bin many cards at once
+         * @description The batch-select grid's only bulk action today -- bin a selection in one
+         *     pass instead of N single-card requests from the client.
+         *
+         *     Same shape as `bulk_tags`: each card bins independently and partial success
+         *     is reported, not rolled back, since there is no undo for a bin that half
+         *     landed either.
+         */
+        post: operations["bulk_delete_api_v1_characters_bulk_delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/characters/{card_id}/avatar": {
         parameters: {
             query?: never;
@@ -1709,6 +1734,45 @@ export interface components {
             card?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /**
+         * BulkDeleteIn
+         * @description Bin many cards in one pass -- the batch-select grid's bulk delete.
+         */
+        BulkDeleteIn: {
+            /**
+             * Ids
+             * @description Card filenames, as `/characters` reports them.
+             */
+            ids: string[];
+            /**
+             * Gallery
+             * @description `delete` bins each card's gallery folder along with it. Default keeps them.
+             * @default keep
+             * @enum {string}
+             */
+            gallery: "keep" | "delete";
+        };
+        /**
+         * BulkDeleteOut
+         * @description What a bulk delete did. Same partial-success shape as `BulkTagsOut` --
+         *     one bad id must not block the cards that bin cleanly.
+         */
+        BulkDeleteOut: {
+            /**
+             * Deleted
+             * @description Card filenames that were binned.
+             * @default []
+             */
+            deleted: string[];
+            /**
+             * Failed
+             * @description Card id to the reason it could not be binned.
+             * @default {}
+             */
+            failed: {
+                [key: string]: string;
+            };
         };
         /**
          * BulkTagsIn
@@ -3551,6 +3615,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FavoriteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_delete_api_v1_characters_bulk_delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkDeleteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkDeleteOut"];
                 };
             };
             /** @description Validation Error */

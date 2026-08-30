@@ -1,11 +1,13 @@
 import { render } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
+import { BatchSelectionProvider } from '@/hooks/use-batch-selection'
 
 /**
- * A component under the three providers the app always has: a query client, a
- * router, and nothing else. Retries are off so a test asserting an error path
- * fails in one attempt rather than three.
+ * A component under the providers the app always has: a query client, a
+ * router, and the batch-selection context `CharactersPage`'s grid reads from.
+ * Retries are off so a test asserting an error path fails in one attempt
+ * rather than three.
  */
 export function renderApp(
   ui: React.ReactElement,
@@ -16,7 +18,9 @@ export function renderApp(
   })
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[route]}>{ui}</MemoryRouter>
+      <MemoryRouter initialEntries={[route]}>
+        <BatchSelectionProvider>{ui}</BatchSelectionProvider>
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }

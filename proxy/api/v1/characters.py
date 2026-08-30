@@ -31,6 +31,8 @@ from fastapi import (
 
 from proxy import deps
 from proxy.api.schemas import (
+    BulkDeleteIn,
+    BulkDeleteOut,
     BulkTagsIn,
     BulkTagsOut,
     CardDetailOut,
@@ -766,6 +768,45 @@ def delete_character(
         card=str(binned_card),
         gallery=str(binned_gallery[1]) if binned_gallery else None,
     )
+
+
+@router.post("/characters/bulk-delete", response_model=BulkDeleteOut, summary="Bin many cards at once")
+def bulk_delete(body: BulkDeleteIn) -> BulkDeleteOut:
+    """The batch-select grid's only bulk action today -- bin a selection in one
+    pass instead of N single-card requests from the client.
+
+    Same shape as `bulk_tags`: each card bins independently and partial success
+    is reported, not rolled back, since there is no undo for a bin that half
+    landed either.
+    """
+    idx = _shared.index()
+    deleted: list[str] = []
+    failed: dict[str, str] = {}
+    for card_id in body.ids:
+        record = idx.get(card_id)
+        if record is None:
+            failed[card_id] = "no such card in the archive"
+            continue
+        path = idx.root / record.filename
+        try:
+            binned_gallery = (
+                edit.trash_gallery(record.name, record.gallery_id)
+                if body.gallery == "delete"
+                else None
+            )
+            edit.to_trash(path)
+        except edit.WriteError as exc:
+            failed[record.filename] = str(exc)
+            continue
+
+        _shared.thumbnail_store.forget(record.filename)
+        if binned_gallery is not None:
+            _shared.thumbnail_store.forget_gallery(binned_gallery[0])
+        deleted.append(record.filename)
+
+    if deleted:
+        catalog.index().refresh(force=True)
+    return BulkDeleteOut(deleted=deleted, failed=failed)
 
 
 @router.put("/characters/{card_id}/avatar", response_model=CardDetailOut, summary="Replace a card's image")

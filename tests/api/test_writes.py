@@ -328,6 +328,66 @@ def test_binning_two_cards_of_the_same_name_keeps_both(client, archive_dirs, tmp
     assert Path(first).is_file() and Path(second).is_file()
 
 
+# --- bulk delete -------------------------------------------------------------
+
+
+def test_bulk_delete_bins_selected_cards(client, populated_archive, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "trash_dir", tmp_path / "trash")
+    resp = client.post(
+        "/api/v1/characters/bulk-delete",
+        json={"ids": ["Bella_11112222.png", "Cleo_33334444.png"]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert sorted(body["deleted"]) == ["Bella_11112222.png", "Cleo_33334444.png"]
+    assert body["failed"] == {}
+
+    assert not (populated_archive["characters"] / "Bella_11112222.png").exists()
+    assert not (populated_archive["characters"] / "Cleo_33334444.png").exists()
+    assert client.get("/api/v1/characters/Bella_11112222.png").status_code == 404
+
+
+def test_bulk_delete_keeps_galleries_by_default(client, populated_archive, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "trash_dir", tmp_path / "trash")
+    resp = client.post("/api/v1/characters/bulk-delete", json={"ids": ["Abbie_0d162f5f.png"]})
+    assert resp.json()["deleted"] == ["Abbie_0d162f5f.png"]
+    assert (populated_archive["galleries"] / "Abbie_kzbYR2QbpncC").is_dir()
+
+
+def test_bulk_delete_can_take_galleries_too(client, populated_archive, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "trash_dir", tmp_path / "trash")
+    resp = client.post(
+        "/api/v1/characters/bulk-delete",
+        json={"ids": ["Abbie_0d162f5f.png", "Bella_11112222.png"], "gallery": "delete"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert sorted(body["deleted"]) == ["Abbie_0d162f5f.png", "Bella_11112222.png"]
+    assert not (populated_archive["galleries"] / "Abbie_kzbYR2QbpncC").exists()
+
+
+def test_bulk_delete_reports_partial_failure_without_undoing_the_rest(client, populated_archive, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "trash_dir", tmp_path / "trash")
+    resp = client.post(
+        "/api/v1/characters/bulk-delete",
+        json={"ids": ["Abbie_0d162f5f.png", "Ghost_99999999.png"]},
+    )
+    body = resp.json()
+    assert body["deleted"] == ["Abbie_0d162f5f.png"]
+    assert "Ghost_99999999.png" in body["failed"]
+    assert not (populated_archive["characters"] / "Abbie_0d162f5f.png").exists()
+
+
+def test_bulk_delete_takes_stale_thumbnails_with_it(client, populated_archive, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "trash_dir", tmp_path / "trash")
+    assert client.get("/api/v1/characters/Cleo_33334444.png/thumb").status_code == 200
+    thumb = populated_archive["thumbs"] / "avatar" / "Cleo_33334444.png"
+    assert thumb.is_file()
+
+    client.post("/api/v1/characters/bulk-delete", json={"ids": ["Cleo_33334444.png"]})
+    assert not thumb.exists()
+
+
 # --- replacing the avatar ---------------------------------------------------
 
 
