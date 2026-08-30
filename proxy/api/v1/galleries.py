@@ -23,6 +23,8 @@ from urllib.parse import quote
 from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile
 
 from proxy.api.schemas import (
+    GalleryBulkDeleteIn,
+    GalleryBulkDeleteOut,
     GalleryFileOut,
     GalleryFilesOut,
     GalleryFileWrittenOut,
@@ -304,6 +306,44 @@ def register_folder_routes(kind: FolderKind, router: APIRouter) -> None:
             raise _shared.write_error(exc) from exc
         kind.thumb_forget(directory.name, filename)
         return Response(status_code=204)
+
+    @router.post(
+        f"/{kind.segment}/{{folder}}/files/bulk-delete",
+        response_model=GalleryBulkDeleteOut,
+        summary=f"Bin many {kind.singular} files at once",
+    )
+    def bulk_delete_files(folder: str, body: GalleryBulkDeleteIn) -> GalleryBulkDeleteOut:
+        """The gallery pane's batch-select delete -- bin a selection of files
+        in one pass instead of N single-file requests from the client.
+
+        Deliberately leaves the folder's `.media.json` manifest untouched,
+        same as `delete_file` above: a binned file still has a manifest entry
+        claiming its source URL as downloaded, so a plain localize run (which
+        skips any card its last run completed without checking the manifest
+        entries against disk) does not go re-fetch it. Only a full rescan --
+        `skip_complete=false` -- re-derives the URL list from the card's own
+        text and finds the gap.
+        """
+        directory = _shared.media_dir(kind.root(), folder)
+        deleted: list[str] = []
+        failed: dict[str, str] = {}
+        for name in body.names:
+            try:
+                path = _shared.safe_child(directory, name)
+            except HTTPException as exc:
+                failed[name] = str(exc.detail)
+                continue
+            if not path.is_file():
+                failed[name] = f"no file {name!r} in {kind.singular} {folder!r}"
+                continue
+            try:
+                edit.to_trash(path)
+            except edit.WriteError as exc:
+                failed[name] = str(exc)
+                continue
+            kind.thumb_forget(directory.name, name)
+            deleted.append(name)
+        return GalleryBulkDeleteOut(deleted=deleted, failed=failed)
 
     @router.post(
         f"/{kind.segment}/{{folder}}/thumbs/prune", response_model=ThumbsPrunedOut, summary=f"Drop orphaned {kind.singular} thumbs"

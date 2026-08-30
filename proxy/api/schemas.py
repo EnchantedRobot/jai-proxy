@@ -138,6 +138,24 @@ class GalleryFilesOut(BaseModel):
     items: list[GalleryFileOut]
 
 
+class GalleryBulkDeleteIn(BaseModel):
+    """Bin many files out of one gallery (or expressions) folder in one pass --
+    the gallery pane's batch-select delete."""
+
+    names: list[str] = Field(description="Filenames within the folder, as the folder listing reports them.")
+
+
+class GalleryBulkDeleteOut(BaseModel):
+    """What a bulk gallery delete did. Same partial-success shape as
+    `BulkDeleteOut` -- one bad name must not block the files that bin cleanly."""
+
+    deleted: list[str] = Field(default=[], description="Filenames that were binned.")
+    failed: dict[str, str] = Field(
+        default={},
+        description="Filename to the reason it could not be binned.",
+    )
+
+
 class GalleryFolderOut(BaseModel):
     """A gallery folder as the orphan sweep sees it: the name on disk, and the
     cards that claim it -- empty when nothing does, which is what makes it an

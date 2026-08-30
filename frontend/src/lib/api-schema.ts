@@ -628,6 +628,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/galleries/{folder}/files/bulk-delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bin many gallery files at once
+         * @description The gallery pane's batch-select delete -- bin a selection of files
+         *     in one pass instead of N single-file requests from the client.
+         *
+         *     Deliberately leaves the folder's `.media.json` manifest untouched,
+         *     same as `delete_file` above: a binned file still has a manifest entry
+         *     claiming its source URL as downloaded, so a plain localize run (which
+         *     skips any card its last run completed without checking the manifest
+         *     entries against disk) does not go re-fetch it. Only a full rescan --
+         *     `skip_complete=false` -- re-derives the URL list from the card's own
+         *     text and finds the gap.
+         */
+        post: operations["bulk_delete_files_api_v1_galleries__folder__files_bulk_delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/galleries/{folder}/thumbs/prune": {
         parameters: {
             query?: never;
@@ -821,6 +850,35 @@ export interface paths {
          *     strays should write 88 and name the two.
          */
         post: operations["upload_zip_api_v1_expressions__folder__zip_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/expressions/{folder}/files/bulk-delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bin many expression files at once
+         * @description The gallery pane's batch-select delete -- bin a selection of files
+         *     in one pass instead of N single-file requests from the client.
+         *
+         *     Deliberately leaves the folder's `.media.json` manifest untouched,
+         *     same as `delete_file` above: a binned file still has a manifest entry
+         *     claiming its source URL as downloaded, so a plain localize run (which
+         *     skips any card its last run completed without checking the manifest
+         *     entries against disk) does not go re-fetch it. Only a full rescan --
+         *     `skip_complete=false` -- re-derives the URL list from the card's own
+         *     text and finds the gap.
+         */
+        post: operations["bulk_delete_files_api_v1_expressions__folder__files_bulk_delete_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2552,6 +2610,39 @@ export interface components {
             name: string;
         };
         /**
+         * GalleryBulkDeleteIn
+         * @description Bin many files out of one gallery (or expressions) folder in one pass --
+         *     the gallery pane's batch-select delete.
+         */
+        GalleryBulkDeleteIn: {
+            /**
+             * Names
+             * @description Filenames within the folder, as the folder listing reports them.
+             */
+            names: string[];
+        };
+        /**
+         * GalleryBulkDeleteOut
+         * @description What a bulk gallery delete did. Same partial-success shape as
+         *     `BulkDeleteOut` -- one bad name must not block the files that bin cleanly.
+         */
+        GalleryBulkDeleteOut: {
+            /**
+             * Deleted
+             * @description Filenames that were binned.
+             * @default []
+             */
+            deleted: string[];
+            /**
+             * Failed
+             * @description Filename to the reason it could not be binned.
+             * @default {}
+             */
+            failed: {
+                [key: string]: string;
+            };
+        };
+        /**
          * GalleryFileOut
          * @description One file in a gallery folder. `kind` is sniffed from the extension rather
          *     than the bytes: a gallery holds images, video and audio side by side, and the
@@ -4241,6 +4332,41 @@ export interface operations {
             };
         };
     };
+    bulk_delete_files_api_v1_galleries__folder__files_bulk_delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                folder: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GalleryBulkDeleteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GalleryBulkDeleteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     prune_thumbs_api_v1_galleries__folder__thumbs_prune_post: {
         parameters: {
             query?: never;
@@ -4508,6 +4634,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MediaUploadOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_delete_files_api_v1_expressions__folder__files_bulk_delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                folder: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GalleryBulkDeleteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GalleryBulkDeleteOut"];
                 };
             };
             /** @description Validation Error */
