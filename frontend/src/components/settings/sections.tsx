@@ -68,6 +68,17 @@ export function LibrarySection() {
         />
       </OptionRow>
       <OptionRow
+        label="Title tiles with listing names"
+        hint="The source page's tagline instead of the character's name. Also toggled by clicking the Characters heading."
+      >
+        <Toggle
+          on={ui2?.showListingNames === true}
+          onChange={(value) =>
+            update.mutate({ key: 'showListingNames', value })
+          }
+        />
+      </OptionRow>
+      <OptionRow
         label='Show "Recently added" shelf'
         hint="A single fixed row above the grid. Also toggled by its own Hide button."
       >

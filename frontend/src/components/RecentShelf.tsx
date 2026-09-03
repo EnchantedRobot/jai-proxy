@@ -13,9 +13,12 @@ import { CardTile } from './CardTile'
 export function RecentShelf({
   columns,
   onHide,
+  showListingNames = false,
 }: {
   columns: number
   onHide: () => void
+  /** The grid's name/tagline mode, so the shelf above it reads the same way. */
+  showListingNames?: boolean
 }) {
   const recent = useRecentlyAdded(columns)
   const batch = useBatchSelection()
@@ -59,6 +62,7 @@ export function RecentShelf({
             // detail page so prev/next walks the recently-added set, not the
             // default A→Z the empty home querystring would imply.
             search="?sort=-added"
+            showListingName={showListingNames}
             batchMode={batch.active}
             selected={batch.selected.has(card.id)}
             onToggleSelect={batch.toggleSelected}

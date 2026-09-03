@@ -197,3 +197,16 @@ export function toQuery(state: BrowseState) {
     ...(state.flags.has('fork') ? { is_fork: true } : {}),
   }
 }
+
+/**
+ * The name a tile shows: the source page's listing title when the grid is in
+ * tagline mode, the character's own name otherwise.
+ *
+ * Most cards carry a `page_name` ("Offer You Can't Refuse | Abbie") that says
+ * far more about the card than the bare name does, but plenty carry none at
+ * all -- Chub and JAI both allow a listing titled with just the character --
+ * so the name is the fallback rather than a blank tile.
+ */
+export function tileName(card: Card, listing: boolean): string {
+  return listing && card.page_name ? card.page_name : card.name
+}

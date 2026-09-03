@@ -70,6 +70,11 @@ export interface Ui2Settings {
   /** Whether the "Recently added" shelf shows above the grid. Also flipped by
    *  the shelf's own Hide button, so the two controls agree. */
   showRecentShelf?: boolean
+  /** Whether the Characters grid titles its tiles with the source page's
+   *  listing name (the tagline) instead of the character's name. Flipped by
+   *  clicking the page heading. A view preference rather than a filter, so it
+   *  is stored rather than carried in the URL. */
+  showListingNames?: boolean
   /** Which providers Discover's toggle offers. Absent = both enabled, the
    *  same default the page had before this setting existed. */
   providers?: { chub?: boolean; datacat?: boolean }

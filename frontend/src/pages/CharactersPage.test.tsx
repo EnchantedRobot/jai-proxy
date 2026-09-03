@@ -157,6 +157,51 @@ describe('CharactersPage', () => {
     )
   })
 
+  it('retitles the tiles with listing names when the heading is clicked', async () => {
+    let stored: Record<string, unknown> = { chubToken: 'keep-me' }
+    server.use(
+      http.get('*/api/v1/characters', () =>
+        HttpResponse.json({
+          total: 2,
+          limit: 100,
+          offset: 0,
+          items: [
+            card({
+              id: 'a.png',
+              name: 'Abbie',
+              page_name: "Offer You Can't Refuse | Abbie",
+            }),
+            // No listing name of its own -- falls back to the character name.
+            card({ id: 'b.png', name: 'Bella' }),
+          ],
+        }),
+      ),
+      stats,
+      facets,
+      http.get('*/api/v1/settings', () => HttpResponse.json(stored)),
+      http.put('*/api/v1/settings', async ({ request }) => {
+        stored = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(stored)
+      }),
+    )
+
+    renderApp(<CharactersPage />)
+
+    expect(await screen.findByText('Abbie')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /Characters/ }))
+
+    // The shelf sits above the grid and shows the same cards, so both
+    // surfaces retitle -- hence findAll rather than findBy.
+    expect(
+      (await screen.findAllByText("Offer You Can't Refuse | Abbie")).length,
+    ).toBeGreaterThan(0)
+    expect(screen.getAllByText('Bella').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Abbie')).not.toBeInTheDocument()
+    // The heading names the mode, and the write kept the rest of the blob.
+    expect(screen.getByRole('button', { name: /Taglines/ })).toBeInTheDocument()
+    expect(stored.chubToken).toBe('keep-me')
+  })
+
   it('fetches the next page when the sentinel scrolls into view', async () => {
     const queries: URL[] = []
     server.use(

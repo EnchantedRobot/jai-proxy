@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router'
+import { ArrowLeftRight } from 'lucide-react'
 import { ChipStrip } from '@/components/ChipStrip'
 import { CreatorPill, SourcePill, TagsPill } from '@/components/FilterPills'
 import { CardGrid } from '@/components/CardGrid'
@@ -10,6 +11,7 @@ import { useBatchSelection } from '@/hooks/use-batch-selection'
 import { useGridColumns } from '@/hooks/use-grid-columns'
 import { useArchiveStats, useCharacters } from '@/hooks/use-characters'
 import { useSettings, useUpdateUi2 } from '@/hooks/use-settings'
+import { cn } from '@/lib/utils'
 import {
   isFiltered,
   readState,
@@ -50,6 +52,10 @@ export function CharactersPage({ favorites = false }: { favorites?: boolean }) {
   // Stage 1 left open). Undefined (nothing saved yet, or still loading) reads
   // as shown -- the pre-Stage-6 default.
   const shelfHidden = settings.data?.ui2?.showRecentShelf === false
+  // Name/tagline mode. Stored rather than kept in the URL: it changes how the
+  // same set of cards reads, not which cards they are, so a shared link should
+  // carry the reader's own preference rather than the sender's.
+  const listingNames = settings.data?.ui2?.showListingNames === true
 
   const setState = (next: BrowseState) => {
     // Replace rather than push: filtering is a running adjustment, and pushing
@@ -97,8 +103,41 @@ export function CharactersPage({ favorites = false }: { favorites?: boolean }) {
     <>
       <div className="sticky top-0 z-20 border-b border-line-soft bg-ground/95 backdrop-blur-[12px]">
         <div className="mx-auto flex max-w-[1560px] items-center gap-3.5 px-5 py-3">
+          {/* The heading is the toggle: click it to retitle every tile with
+              its listing name (the tagline) and back. There is no room on this
+              row for a control of its own, and the word it swaps *is* the
+              state -- "Characters" or "Taglines". Which tab this is stays
+              legible from the top bar and, on /favorites, the pinned chip. */}
           <h1 className="text-[19px] font-semibold tracking-[-0.015em] whitespace-nowrap">
-            {favorites ? 'Favorites' : 'Characters'}
+            <button
+              type="button"
+              onClick={() =>
+                updateUi2.mutate({
+                  key: 'showListingNames',
+                  value: !listingNames,
+                })
+              }
+              title={
+                listingNames
+                  ? 'Showing listing names — click for character names'
+                  : 'Showing character names — click for listing names'
+              }
+              className="group flex items-center gap-1.5 hover:text-sage"
+            >
+              {listingNames
+                ? 'Taglines'
+                : favorites
+                  ? 'Favorites'
+                  : 'Characters'}
+              <ArrowLeftRight
+                className={cn(
+                  'size-3.5 transition-opacity',
+                  listingNames
+                    ? 'text-sage opacity-100'
+                    : 'opacity-0 group-hover:opacity-70',
+                )}
+              />
+            </button>
           </h1>
           <span className="text-[12.5px] whitespace-nowrap text-faint">
             {isPending
@@ -130,6 +169,7 @@ export function CharactersPage({ favorites = false }: { favorites?: boolean }) {
         {showShelf && (
           <RecentShelf
             columns={columns}
+            showListingNames={listingNames}
             onHide={() =>
               updateUi2.mutate({ key: 'showRecentShelf', value: false })
             }
@@ -149,6 +189,7 @@ export function CharactersPage({ favorites = false }: { favorites?: boolean }) {
               key={card.id}
               card={card}
               search={tileSearch(state)}
+              showListingName={listingNames}
               batchMode={batch.active}
               selected={batch.selected.has(card.id)}
               onToggleSelect={batch.toggleSelected}
