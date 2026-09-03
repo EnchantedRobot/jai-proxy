@@ -83,9 +83,12 @@
         "gothic fantasy",
         "high fantasy",
         "low fantasy",
+        "lowfantasy",
         "magic",
         "magical",
         "magical realism",
+        "magicalaccident",
+        "magicisreal",
         "medieval fantasy",
         "medievalfantasy",
         "modern fantasy",
@@ -197,10 +200,16 @@
         "bmovie"
       ],
       "Superhero": [
+        "barbaragordon",
+        "batfamily",
         "batman",
         "black panther",
+        "catwoman",
         "comic",
         "comicbook",
+        "dcccomics",
+        "dccomics",
+        "dickgrayson",
         "ghostspider",
         "gwenstacy",
         "hero",
@@ -221,6 +230,7 @@
       "Supernatural": [
         "curse",
         "cursed",
+        "ghosthunt",
         "occult",
         "paranormal",
         "supernatural thriller",
@@ -283,12 +293,14 @@
         "heavyangstdrama",
         "longing",
         "potentialangst",
+        "regret",
         "smuttyangst"
       ],
       "Hurt/Comfort": [
         "comforther",
         "comfortsex",
         "emotional vulnerability",
+        "hugher",
         "hugherpls",
         "hurt-comfort",
         "hurt_comfort",
@@ -334,16 +346,20 @@
         "real-world",
         "realism",
         "realistic",
-        "vhs"
+        "vhs",
+        "y2kweek"
       ],
       "Historical": [
         "1870s",
         "1950s",
+        "alternate history",
+        "civilwar",
         "coldwar",
         "coldwarera",
         "colonization",
         "historical/ancient",
         "history",
+        "historyunfolded",
         "redarmy",
         "regency era",
         "renaissance",
@@ -384,6 +400,7 @@
         "space opera",
         "space pirate",
         "spaceadventure",
+        "spaceopera",
         "spaceship",
         "starship"
       ],
@@ -592,24 +609,25 @@
         "marshmallow girl",
         "mimic",
         "monster",
+        "monster girl",
         "monster_girl",
         "monstergirl",
+        "monstergirlfailure",
         "monsters",
         "monsteruser",
         "monsterweek",
         "mutant",
         "non_human",
-        "monster girl",
         "nonhuman character",
         "nonhuman protagonist",
-        "sphinx",
-        "virus",
         "parasite",
         "phoenix",
         "plantgirl",
         "sentient",
         "shapechanger",
-        "shapeshifter"
+        "shapeshifter",
+        "sphinx",
+        "virus"
       ],
       "Cat Girl": [
         "*catgirl*",
@@ -686,7 +704,9 @@
         "succubus summons"
       ],
       "Vampire": [
-        "vampires"
+        "vampires",
+        "vampireuser",
+        "vampress"
       ],
       "Angel": [
         "angelgirl",
@@ -701,6 +721,7 @@
         "divine",
         "divinity",
         "goddesbot",
+        "godsweek",
         "godtier"
       ],
       "Robot": [
@@ -721,7 +742,9 @@
       "Alien": [
         "alien girl"
       ],
-      "Mermaid": [],
+      "Mermaid": [
+        "siren"
+      ],
       "Dragon": [
         "chinesedragon",
         "dragon girl",
@@ -783,7 +806,8 @@
         "grim reaper",
         "grimreaper",
         "shinigami",
-        "yokai"
+        "yokai",
+        "yokaifest"
       ],
       "Orc": [
         "goblin",
@@ -921,6 +945,7 @@
         "brattamer",
         "brattaming",
         "bratty",
+        "brattybottom",
         "gremlin",
         "himedere",
         "mesugaki",
@@ -987,6 +1012,7 @@
         "keepyourhandsoff",
         "obsessed",
         "obsessive",
+        "obsessive love",
         "obsessiveandpossesive",
         "obssessive",
         "possesive"
@@ -1124,6 +1150,7 @@
         "deception",
         "fakefriend",
         "gaslighting",
+        "narcissist",
         "two_faced",
         "twosides"
       ],
@@ -1339,6 +1366,7 @@
         "childhood_friend",
         "childhoodbestfriend",
         "childhoodfriend",
+        "childhoodfriendchar",
         "childhoodfriends",
         "chilhoodfriend"
       ],
@@ -1354,6 +1382,7 @@
         "friendssister",
         "platonic",
         "sistersfriend",
+        "sistershotfriend",
         "teammate",
         "wifesfriend"
       ],
@@ -1378,7 +1407,8 @@
         "*benefit*",
         "casual encounters",
         "fuckbuddies",
-        "fwb"
+        "fwb",
+        "onenightstand"
       ],
       "Stranger": [
         "chance meeting",
@@ -1445,6 +1475,8 @@
       "Stepmother": [
         "step mom",
         "step mother",
+        "step-mom",
+        "step-mother",
         "step_parent",
         "stepmom"
       ],
@@ -1544,7 +1576,9 @@
         "daimyo",
         "dictator",
         "empress",
+        "fallenprincess",
         "kingdom",
+        "madking",
         "nobility",
         "noble",
         "noblechar",
@@ -1593,6 +1627,7 @@
         "twitchstreamer",
         "vtuber",
         "vtuberchar",
+        "youtube",
         "youtuber"
       ],
       "Celebrity": [
@@ -1614,7 +1649,8 @@
       ],
       "Fiancee": [
         "bride",
-        "engaged"
+        "engaged",
+        "runawaybride"
       ],
       "Widow": [
         "widowed"
@@ -1654,7 +1690,11 @@
         "agedifference",
         "agegap",
         "older female",
-        "olderthanyou"
+        "older woman",
+        "olderchar",
+        "olderthanyou",
+        "olderuser",
+        "youngerchar"
       ],
       "Fake Dating": [
         "datingbet",
@@ -1683,6 +1723,7 @@
       ],
       "Family": [
         "adoption",
+        "exsisterinlaw",
         "familia",
         "familyconflict",
         "familydrama",
@@ -1737,6 +1778,7 @@
         "hiddenfeelings",
         "innocent flirting",
         "pining",
+        "secrectlove",
         "secret crush",
         "secretadmirer",
         "secretattraction",
@@ -1824,10 +1866,13 @@
       "Transgender": [
         "dysphoria",
         "genderdiscovery",
-        "trans"
+        "mtf",
+        "trans",
+        "transfemale"
       ],
       "Non-Binary": [
-        "demigirlclans"
+        "demigirlclans",
+        "gender neutral"
       ]
     },
     "Cast": {
@@ -1848,6 +1893,8 @@
         "multiple",
         "multiple protagonists",
         "party_member",
+        "random npc",
+        "sandbox npcs",
         "slaveandslave",
         "wifeanddaughter",
         "wifeandhusband",
@@ -1889,6 +1936,7 @@
         "college cheerleader",
         "competitive",
         "figure skater",
+        "figureskater",
         "firstdayatthegym",
         "fitness",
         "football",
@@ -1933,6 +1981,7 @@
         "open world",
         "otome",
         "rpg",
+        "skill transfer",
         "spinner",
         "tabletop",
         "video game",
@@ -1977,6 +2026,7 @@
         "pub",
         "rave",
         "slumberparty",
+        "warpedtour",
         "wildgirl"
       ],
       "Gambling": [
@@ -2153,6 +2203,7 @@
         "kindacheating",
         "optionalcheating",
         "possiblecheating",
+        "postcheating",
         "potentialcheating",
         "sleptwith"
       ],
@@ -2276,11 +2327,14 @@
         "sexual assault",
         "sexual harassment",
         "sexual predator",
+        "sexualabuse",
+        "sexualassault",
         "sleep sex",
         "sleepsex"
       ],
       "Dubcon": [
         "cnc",
+        "cnckink",
         "cncpossible",
         "coercion",
         "coersion",
@@ -2671,6 +2725,7 @@
       "Mage": [
         "cleric",
         "enchantress",
+        "forestwitch",
         "holy magic",
         "magi",
         "magic user",
@@ -2849,7 +2904,9 @@
         "programming"
       ],
       "Mechanic": [],
-      "Merchant": [],
+      "Merchant": [
+        "magic shop"
+      ],
       "Librarian": [
         "bookstore",
         "library"
@@ -2961,6 +3018,7 @@
         "class difference",
         "classdifference",
         "control",
+        "exploitation",
         "power dynamics",
         "power fantasy",
         "power play",
@@ -2982,6 +3040,7 @@
         "newbeginnings",
         "redemptionweek",
         "reformed",
+        "reunited",
         "second chance",
         "secondchance"
       ],
@@ -2990,6 +3049,7 @@
         "double life",
         "false identity",
         "hidden identity",
+        "imposter",
         "masks",
         "mistaken_identity",
         "secret princess",
@@ -3000,6 +3060,7 @@
       "Time Travel": [
         "deathloop",
         "multiverse",
+        "regression",
         "time loop",
         "time traveler",
         "time travelling",
@@ -3186,6 +3247,7 @@
         "mandalorian",
         "old republic",
         "oldrepublic",
+        "order66",
         "padawan",
         "rodian",
         "sith",
@@ -3329,6 +3391,15 @@
       ],
       "BCT University": [
         "bctuniversity"
+      ],
+      "Blue Box": [
+        "bluebox"
+      ],
+      "JoJo's Bizarre Adventure": [
+        "jojo"
+      ],
+      "Spice and Wolf": [
+        "spiceandwolf"
       ]
     },
     "Mental Health / Condition": {
@@ -3353,6 +3424,7 @@
         "abuse",
         "abuse victim",
         "abuseaftermath",
+        "abusedchar",
         "abusive",
         "broken",
         "coping mechanisms",
@@ -3427,7 +3499,8 @@
         "mentalhealth",
         "mentalhealthawareness",
         "mentally ill",
-        "mentally_ill"
+        "mentally_ill",
+        "ruok"
       ],
       "Bipolar": []
     }
@@ -4360,6 +4433,25 @@
     "fineprintjam",
     "ouushiii",
     "teddybear",
-    "weird"
+    "weird",
+    "4th wall",
+    "absolutecinemaweek",
+    "bilingual",
+    "bloodcircle",
+    "botjam",
+    "breaking the fourth wall",
+    "busty",
+    "custom",
+    "deadreckoning",
+    "dominant user",
+    "established",
+    "female pov",
+    "french accent",
+    "intimate ritual",
+    "nonoc",
+    "rideyourwave",
+    "scars",
+    "silvermoon",
+    "system 404"
   ]
 }
