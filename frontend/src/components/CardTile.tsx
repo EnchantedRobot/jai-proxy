@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router'
 import { Check, GitFork, Star } from 'lucide-react'
-import type { Card } from '@/lib/browse'
+import { tileName, type Card } from '@/lib/browse'
 import { cn } from '@/lib/utils'
 
 /**
@@ -22,6 +22,7 @@ export function CardTile({
   className,
   batchMode = false,
   selected = false,
+  showListingName = false,
   onToggleSelect,
   onClick,
   ...props
@@ -36,10 +37,15 @@ export function CardTile({
   /** Batch-select mode — see `use-batch-selection`. */
   batchMode?: boolean
   selected?: boolean
+  /** Title the tile with the source page's listing name (the tagline) rather
+   *  than the character's name — the Characters page's heading toggle. Cards
+   *  with no listing name keep their name. */
+  showListingName?: boolean
   onToggleSelect?: (id: string) => void
 }) {
   const location = useLocation()
   const linkSearch = search ?? location.search
+  const title = tileName(card, showListingName)
   const badge = card.lore_entries
     ? `${card.lore_entries} lore`
     : card.greetings > 1
@@ -125,8 +131,14 @@ export function CardTile({
             light-coloured portrait does not fight the name beneath it. */}
         <span className="pointer-events-none absolute inset-0 shadow-[inset_0_-54px_44px_-30px_#0f1113de]" />
       </div>
-      <h3 className="mt-2 line-clamp-2 text-[13.5px] leading-[1.3] font-medium">
-        {card.name}
+      <h3
+        // Listing names run long and routinely clamp to their two lines, so
+        // the full one is reachable on hover; a bare character name never
+        // needs the tooltip.
+        title={showListingName ? title : undefined}
+        className="mt-2 line-clamp-2 text-[13.5px] leading-[1.3] font-medium"
+      >
+        {title}
       </h3>
       <div className="mt-px truncate text-[11.5px] text-faint">
         {card.creator || 'unknown'}
