@@ -245,12 +245,15 @@ def test_chub_gallery_no_project_id_short_circuits():
         assert extractors.resolve_chub_gallery(client, "") == []
 
 
-def test_chub_gallery_failure_yields_nothing():
+def test_chub_gallery_failure_is_unreachable_not_empty():
+    """None, not `[]`: an unreachable gallery must leave the card unsatisfied
+    so the next run retries, where a genuinely empty one is settled."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
 
     with _client(handler) as client:
-        assert extractors.resolve_chub_gallery(client, "555") == []
+        assert extractors.resolve_chub_gallery(client, "555") is None
 
 
 def test_chub_gallery_attaches_saved_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

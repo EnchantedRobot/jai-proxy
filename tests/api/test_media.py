@@ -15,7 +15,7 @@ import json
 import pytest
 
 from proxy.config import settings
-from proxy.media import manifest as media_manifest, writer as media_writer
+from proxy.media import extractors as media_extractors, manifest as media_manifest, writer as media_writer
 from proxy.api.v1 import _shared as v1_shared, media as v1_media
 
 
@@ -403,13 +403,14 @@ def test_scan_finds_embedded_and_lorebook_urls_separately(client, archive_dirs):
     assert resp.json() == {
         "embedded": ["https://cdn.example.com/desc.png"],
         "lorebook": ["https://cdn.example.com/lore.png"],
+        "sources": [],
     }
 
 
 def test_scan_finds_nothing_in_a_card_with_no_urls(client, populated_archive):
     resp = client.post("/api/v1/characters/Cleo_33334444.png/media/scan")
     assert resp.status_code == 200
-    assert resp.json() == {"embedded": [], "lorebook": []}
+    assert resp.json() == {"embedded": [], "lorebook": [], "sources": []}
 
 
 def test_scan_unknown_card_is_404(client):
@@ -712,10 +713,21 @@ def test_batch_scope_visits_every_card(client, populated_archive, stub_download_
     }
 
 
-def test_batch_skips_cards_whose_last_run_was_clean(client, populated_archive, stub_download_item, stub_discovery):
-    # Abbie's gallery has a manifest with a clean run, so skip_complete (the
-    # default) should pass over it entirely.
-    _write_manifest(populated_archive["galleries"] / "Abbie_kzbYR2QbpncC")
+def _account_for_abbies_media(galleries) -> None:
+    """A manifest that accounts for exactly the URL `stub_discovery` puts on
+    Abbie -- the state a finished run leaves behind."""
+    manifest = media_manifest.empty_manifest()
+    media_manifest.record_saved(
+        manifest, "https://cdn.example.com/Abbie.png", "localized_media_0_Abbie.webp", "abc"
+    )
+    media_manifest.append_run(
+        manifest, {"at": media_manifest.now_iso(), "saved": 1, "skipped": 0, "errors": 0}
+    )
+    media_manifest.save_manifest(galleries / "Abbie_kzbYR2QbpncC", manifest)
+
+
+def test_batch_skips_a_card_whose_sources_are_all_accounted_for(client, populated_archive, stub_download_item, stub_discovery):
+    _account_for_abbies_media(populated_archive["galleries"])
 
     body = _poll_job(client, _submit_batch(client))
 
@@ -725,8 +737,52 @@ def test_batch_skips_cards_whose_last_run_was_clean(client, populated_archive, s
     assert all("Abbie" not in call["url"] for call in stub_download_item)
 
 
-def test_batch_skip_complete_false_visits_the_clean_card_anyway(client, populated_archive, stub_download_item, stub_discovery):
+def test_batch_visits_a_clean_card_whose_source_is_unaccounted_for(client, populated_archive, stub_download_item, stub_discovery):
+    """The regression this replaced a `complete` check to catch. A run with no
+    errors used to mean "done forever", so a card whose gallery link nothing
+    could resolve at the time -- a Civitai post, before `media/civitai.py` --
+    stayed finished no matter what was added later. Skipping now keys on the
+    card's sources, not on how its last run went."""
     _write_manifest(populated_archive["galleries"] / "Abbie_kzbYR2QbpncC")
+
+    body = _poll_job(client, _submit_batch(client))
+
+    assert body["cards_skipped"] == 0
+    assert any("Abbie" in call["url"] for call in stub_download_item)
+
+
+def test_batch_re_arms_a_source_that_has_since_gained_a_handler(client, populated_archive, stub_download_item, stub_discovery, monkeypatch):
+    """The whole point of recording `unhandled`: the card carries a URL a
+    previous build could not fetch, this build can, and nobody has to press
+    "Rescan everything" for it to be noticed."""
+    monkeypatch.setattr(
+        v1_media.media_discovery,
+        "collect_card_text_chunks",
+        lambda data: (["gallery: https://catbox.moe/c/abc123"], []),
+    )
+    monkeypatch.setattr(v1_media.media_discovery, "find_character_media_urls", lambda data: ([], []))
+    monkeypatch.setattr(
+        media_extractors, "resolve_gallery_url", lambda client_, url: []
+    )
+
+    galleries = populated_archive["galleries"]
+    manifest = media_manifest.empty_manifest()
+    media_manifest.record_source(manifest, "https://catbox.moe/c/abc123", None, media_manifest.SOURCE_UNHANDLED)
+    media_manifest.append_run(
+        manifest, {"at": media_manifest.now_iso(), "saved": 0, "skipped": 0, "errors": 0}
+    )
+    media_manifest.save_manifest(galleries / "Abbie_kzbYR2QbpncC", manifest)
+
+    body = _poll_job(client, _submit_batch(client))
+
+    assert body["cards_skipped"] == 0
+    # ...and the run that re-armed it records the handler, so the next one skips.
+    reloaded = media_manifest.load_manifest(galleries / "Abbie_kzbYR2QbpncC")
+    assert reloaded["sources"]["https://catbox.moe/c/abc123"]["h"] == "catbox"
+
+
+def test_batch_skip_complete_false_visits_the_accounted_for_card_anyway(client, populated_archive, stub_download_item, stub_discovery):
+    _account_for_abbies_media(populated_archive["galleries"])
 
     body = _poll_job(client, _submit_batch(client, skip_complete=False))
 
@@ -831,8 +887,8 @@ def test_discover_resolves_external_album_pages_into_the_job(client, populated_a
     )
     monkeypatch.setattr(
         media_extractors,
-        "resolve_gallery_urls",
-        lambda client_, urls: [
+        "resolve_gallery_url",
+        lambda client_, url: [
             media_extractors.GalleryImage("https://files.catbox.moe/a.png", "a.png"),
             media_extractors.GalleryImage("https://files.catbox.moe/b.png", "b.png"),
         ],

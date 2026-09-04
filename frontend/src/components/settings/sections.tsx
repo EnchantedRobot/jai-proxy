@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   Check,
@@ -327,30 +327,40 @@ export function ProvidersSection() {
 }
 
 /**
- * Chub's URQL token.
+ * A root-level credential in `data/settings.json`: masked input, show/hide,
+ * and a Save that writes `null` when cleared rather than an empty string.
  *
- * Restored at Stage 6B — it vanished in the rewrite, taking the Following feed
- * with it, and this section spent a stage claiming Chub needed "No API key".
- * The name is chub.ai's, not ours: their site stores the session token in
- * localStorage under `URQL_TOKEN` because it uses urql as its GraphQL client.
- * Nothing here speaks GraphQL — the value is a plain bearer token.
+ * Extracted when Civitai needed a second one of these. `children` is for the
+ * extra control a particular credential wants under the field — Chub's
+ * "keep on reset" checkbox — so the shared shape stays shared without the
+ * component learning about any specific provider.
  */
-function ChubTokenRow() {
-  const { chubToken, chubRememberToken } = useProviderSettings()
+function SecretRow({
+  label,
+  stored,
+  settingsKey,
+  savedMessage,
+  clearedMessage,
+  hint,
+  children,
+}: {
+  label: string
+  stored: string | null
+  settingsKey: string
+  savedMessage: string
+  clearedMessage: string
+  hint: ReactNode
+  children?: ReactNode
+}) {
   const updateRoot = useUpdateRoot()
   const [draft, setDraft] = useState<string | null>(null)
   const [shown, setShown] = useState(false)
-  const value = draft ?? chubToken ?? ''
+  const value = draft ?? stored ?? ''
 
   return (
     <div className="py-[13px]">
-      <div className="text-[13.5px]">Chub URQL token</div>
-      <p className="mt-0.5 text-[11.5px] text-faint">
-        Sign in at chub.ai, then copy the{' '}
-        <span className="font-mono">URQL_TOKEN</span> value from the site’s
-        local storage. Needed only for the Following feed; browsing and adding
-        cards work without it.
-      </p>
+      <div className="text-[13.5px]">{label}</div>
+      <p className="mt-0.5 text-[11.5px] text-faint">{hint}</p>
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         <input
           type={shown ? 'text' : 'password'}
@@ -375,15 +385,13 @@ function ChubTokenRow() {
         </button>
         <button
           type="button"
-          disabled={updateRoot.isPending || value === (chubToken ?? '')}
+          disabled={updateRoot.isPending || value === (stored ?? '')}
           onClick={() =>
             updateRoot.mutate(
-              { chubToken: value.trim() || null },
+              { [settingsKey]: value.trim() || null },
               {
                 onSuccess: () => {
-                  toast(
-                    value.trim() ? 'Chub token saved.' : 'Chub token cleared.',
-                  )
+                  toast(value.trim() ? savedMessage : clearedMessage)
                   setDraft(null)
                 },
                 onError: (err) => toast(err.message, 'bad'),
@@ -396,6 +404,40 @@ function ChubTokenRow() {
           Save
         </button>
       </div>
+      {children}
+    </div>
+  )
+}
+
+/**
+ * Chub's URQL token.
+ *
+ * Restored at Stage 6B — it vanished in the rewrite, taking the Following feed
+ * with it, and this section spent a stage claiming Chub needed "No API key".
+ * The name is chub.ai's, not ours: their site stores the session token in
+ * localStorage under `URQL_TOKEN` because it uses urql as its GraphQL client.
+ * Nothing here speaks GraphQL — the value is a plain bearer token.
+ */
+function ChubTokenRow() {
+  const { chubToken, chubRememberToken } = useProviderSettings()
+  const updateRoot = useUpdateRoot()
+
+  return (
+    <SecretRow
+      label="Chub URQL token"
+      stored={chubToken}
+      settingsKey="chubToken"
+      savedMessage="Chub token saved."
+      clearedMessage="Chub token cleared."
+      hint={
+        <>
+          Sign in at chub.ai, then copy the{' '}
+          <span className="font-mono">URQL_TOKEN</span> value from the site’s
+          local storage. Needed only for the Following feed; browsing and adding
+          cards work without it.
+        </>
+      }
+    >
       <label className="mt-2.5 flex items-center gap-2 text-[11.5px] text-faint">
         <input
           type="checkbox"
@@ -407,7 +449,38 @@ function ChubTokenRow() {
         />
         Keep this token if settings are reset
       </label>
-    </div>
+    </SecretRow>
+  )
+}
+
+/**
+ * Civitai's API key.
+ *
+ * Lives under Media rather than Providers because Civitai is not a card
+ * source — it is one of the gallery extractors
+ * (`proxy/media/civitai.py`), reached only when a card links a post.
+ * Public posts need no key at all; a key is what reaches content Civitai
+ * hides behind a login.
+ */
+function CivitaiKeyRow() {
+  const { civitaiApiKey } = useProviderSettings()
+
+  return (
+    <SecretRow
+      label="Civitai API key"
+      stored={civitaiApiKey}
+      settingsKey="civitaiApiKey"
+      savedMessage="Civitai API key saved."
+      clearedMessage="Civitai API key cleared."
+      hint={
+        <>
+          Optional. Cards linking a{' '}
+          <span className="font-mono">civitai.com/posts/…</span> gallery
+          download fine without one; a key is only needed for images Civitai
+          hides from logged-out visitors. Create one under Account → API Keys.
+        </>
+      }
+    />
   )
 }
 
@@ -916,6 +989,7 @@ export function MediaSection() {
       title="Media"
       lede="Images referenced by creator notes, greetings and lorebook entries, downloaded into each card's gallery."
     >
+      <CivitaiKeyRow />
       <div className="py-[13px]">
         <div className="text-[13.5px]">
           Localize media for the whole archive

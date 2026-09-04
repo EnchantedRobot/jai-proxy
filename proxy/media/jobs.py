@@ -53,9 +53,11 @@ JobState = Literal["queued", "running", "done", "error", "cancelled"]
 JobScope = Literal["card", "all"]
 
 # Resolve one card id to the work for it, or None to skip it. Returns
-# `(folder_name, gallery_dir, items)`. Called on a worker thread, one card at a
-# time, at the moment that card comes up -- never up front for the whole batch.
-BatchPlanner = Callable[[str], "tuple[str, Path, list[dict[str, Any]]] | None"]
+# `(folder_name, gallery_dir, items, sources)` -- `sources` being the source
+# ledger records `_run` writes alongside the run (`manifest.record_source`).
+# Called on a worker thread, one card at a time, at the moment that card comes
+# up -- never up front for the whole batch.
+BatchPlanner = Callable[[str], "tuple[str, Path, list[dict[str, Any]], list[dict[str, Any]]] | None"]
 
 # A batch over 3,868 cards can emit far more events than any poller reads, and
 # `_job_status_out(after=0)` materializes every one of them into a Pydantic
@@ -158,6 +160,7 @@ class JobStore:
         prefix: str,
         phase: str,
         card_id: str,
+        sources: list[dict[str, Any]] | None = None,
     ) -> MediaJob:
         job = MediaJob(
             id=uuid.uuid4().hex,
@@ -167,7 +170,7 @@ class JobStore:
             total=len(items),
             created_at=media_manifest.now_iso(),
         )
-        return self._enqueue(job, ("card", gallery_dir, folder_name, items))
+        return self._enqueue(job, ("card", gallery_dir, folder_name, items, sources or []))
 
     def submit_batch(
         self,
@@ -176,7 +179,6 @@ class JobStore:
         phase: str,
         *,
         plan: "BatchPlanner",
-        skipped_upfront: int = 0,
     ) -> MediaJob:
         """Stage 6B -- bulk localize, as one job that walks `card_ids` in order.
 
@@ -185,19 +187,20 @@ class JobStore:
         docstring), and spawning per-card jobs would give that up for no gain.
         Concurrency already lives one level down, inside `download_batch`.
 
-        `plan` resolves a card id to `(folder_name, gallery_dir, items)` at the
-        moment that card comes up. It is a callback rather than a precomputed
-        list because resolving a gallery directory *creates* it -- doing that
-        for 3,868 cards up front would litter the archive with empty folders and
-        rewrite every card that has no `gallery_id` yet.
+        `plan` resolves a card id to `(folder_name, gallery_dir, items, sources)`
+        at the moment that card comes up, or None to skip the card. It is a
+        callback rather than a precomputed list for two reasons: resolving a
+        gallery directory *creates* it -- doing that for 3,868 cards up front
+        would litter the archive with empty folders and rewrite every card that
+        has no `gallery_id` yet -- and the skip decision itself needs the card's
+        own text (`manifest.sources_satisfied`), which is the planner's to read.
 
-        `skipped_upfront` is how many cards the caller already ruled out (a
-        clean previous run). They are counted in `cards_total` and
-        `cards_skipped` so the totals describe the *archive*, not the worklist:
-        "3,868 cards, 3,144 skipped" is the useful progress line, and a job
-        reporting 724 of 724 would hide the skipping entirely.
+        Every card is therefore in `card_ids`, and `cards_skipped` fills in as
+        the run walks them. The totals still describe the archive rather than a
+        worklist ("3,868 cards, 3,144 skipped"); they just aren't known in
+        advance any more.
         """
-        total = len(card_ids) + skipped_upfront
+        total = len(card_ids)
         job = MediaJob(
             id=uuid.uuid4().hex,
             card_id=None,
@@ -206,8 +209,6 @@ class JobStore:
             phase=phase,
             total=total,
             cards_total=total,
-            cards_skipped=skipped_upfront,
-            done=skipped_upfront,
             created_at=media_manifest.now_iso(),
         )
         return self._enqueue(job, ("all", card_ids, plan))
@@ -257,8 +258,8 @@ class JobStore:
                     _kind, card_ids, plan = payload
                     await self._run_batch(job, card_ids, plan)
                 else:
-                    _kind, gallery_dir, folder_name, items = payload
-                    await self._run(job, gallery_dir, folder_name, items)
+                    _kind, gallery_dir, folder_name, items, sources = payload
+                    await self._run(job, gallery_dir, folder_name, items, sources=sources)
                 if job.state == "running":
                     job.state = "done"
             except Exception as exc:  # one bad job must not kill the worker
@@ -276,6 +277,7 @@ class JobStore:
         folder_name: str,
         items: list[dict[str, Any]],
         *,
+        sources: list[dict[str, Any]] | None = None,
         ledger: dict | None = None,
     ) -> None:
         """One card's worth of downloading.
@@ -284,6 +286,11 @@ class JobStore:
         single global file (`manifest.py`), so loading and atomically rewriting
         it per card would mean thousands of rewrites of the same few thousand
         entries. Passed in, this method neither loads nor saves it.
+
+        `sources` are the source-ledger records the planner produced for this
+        card. They are written here, with the run, rather than at discovery
+        time: a run that is abandoned or crashes must not leave behind a
+        manifest claiming its galleries were dealt with.
         """
         owns_ledger = ledger is None
         # The job's counters are cumulative across a batch, but the manifest run
@@ -339,6 +346,15 @@ class JobStore:
         if job.cancel_requested and job.scope == "card":
             job.state = "cancelled"
 
+        for record in sources or []:
+            media_manifest.record_source(
+                manifest,
+                record["key"],
+                record["handler"],
+                record["status"],
+                count=record.get("count"),
+                reason=record.get("reason"),
+            )
         media_manifest.append_run(
             manifest,
             {
@@ -397,8 +413,10 @@ class JobStore:
                     # media found). Deliberately *not* an error.
                     job.cards_skipped += 1
                 else:
-                    folder_name, gallery_dir, items = planned
-                    await self._run(job, gallery_dir, folder_name, items, ledger=ledger)
+                    folder_name, gallery_dir, items, sources = planned
+                    await self._run(
+                        job, gallery_dir, folder_name, items, sources=sources, ledger=ledger
+                    )
                     job.cards_done += 1
 
                 job.done = base_done + position

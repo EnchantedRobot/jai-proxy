@@ -21,6 +21,13 @@ Stage 6B is that reconsideration, and the evidence is a scan of all 3,868 cards:
                                    `images2.imgbox.com/...` files, which the
                                    ordinary `embedded` phase already handles.
 
+`civitai` was added later, on the same kind of evidence arriving the other way
+round: cards whose galleries silently never downloaded. It is the case that
+motivated `discovery.enumerate_sources` -- a Civitai post link is neither an
+image URL nor (at the time) a known album page, so *nothing* recorded that it
+had been seen, and no amount of re-running the pipeline would have surfaced it.
+See `proxy/media/civitai.py`.
+
 These are emphatically *not* the media pipeline -- they are one optional phase
 of it. A card's own embedded and lorebook URLs never needed an extractor, which
 is why localizing kept working after §3.4 dropped these.
@@ -50,7 +57,7 @@ from typing import Callable, Iterable
 import httpx
 
 from proxy.config import settings
-from proxy.media import mega as media_mega
+from proxy.media import civitai as media_civitai, mega as media_mega
 from proxy.state import ui_settings
 
 logger = logging.getLogger("jai_proxy.media.extractors")
@@ -224,6 +231,20 @@ def _fetch_mega(client: httpx.Client, url: str) -> list[GalleryImage]:
     return [GalleryImage(image.url, image.filename) for image in media_mega.extract_images(client, url)]
 
 
+# ---- civitai ---------------------------------------------------------------
+
+
+def _fetch_civitai(client: httpx.Client, url: str) -> list[GalleryImage]:
+    """Like mega, an API rather than a page -- see `proxy/media/civitai.py` for
+    why (two hosts merged, and a documented endpoint in place of the reference
+    extractor's HTML scrape). The images it hands back are ordinary CDN URLs,
+    so everything downstream of here is the plain download path."""
+    return [
+        GalleryImage(image.url, image.filename)
+        for image in media_civitai.extract_images(client, url, _settings_key("civitaiApiKey"))
+    ]
+
+
 # ---- chub (first-party gallery, not a page link) -----------------------------
 
 _CHUB_GALLERY_API = "https://gateway.chub.ai/api/gallery/project/{id}?limit=100&count=false"
@@ -236,31 +257,40 @@ _CHUB_HEADERS = {
 }
 
 
-def _chub_token() -> str | None:
-    """The user's Chub bearer token from `data/settings.json`'s root
-    `chubToken` key -- the same flat key the browser writes (Settings ->
-    Providers -> Chub API token), read the same narrow, defensive way
-    `runtime.net` reads `httpProxyUrl`. Most galleries don't need it; a
-    private or NSFW-gated one does."""
+def _settings_key(name: str) -> str | None:
+    """One root-level credential from `data/settings.json`, or None.
+
+    The same flat keys the browser writes (Settings -> Providers), read the
+    same narrow, defensive way `runtime.net` reads `httpProxyUrl`: a wrong
+    type, an unparseable file or an unreadable disk all degrade to "no
+    credential" rather than raising from inside a download loop. Two
+    extractors need one of these (`chubToken`, `civitaiApiKey`), and a
+    credential read with two implementations is one of them out of date.
+    """
     try:
         blob = ui_settings.SettingsStore(settings.settings_file).read()
     except ui_settings.SettingsError:
         return None
-    token = blob.get("chubToken")
-    return token.strip() if isinstance(token, str) and token.strip() else None
+    value = blob.get(name)
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-def resolve_chub_gallery(client: httpx.Client, project_id: str) -> list[GalleryImage]:
+def resolve_chub_gallery(client: httpx.Client, project_id: str) -> list[GalleryImage] | None:
     """A Chub-sourced card's own first-party gallery -- Chub's hosted image
     feature for that character (`gateway.chub.ai/api/gallery/project/{id}`),
     not a link anyone wrote into the card's text. Triggered by
     `extensions.chub.id`, so unlike the other extractors it is called
     directly by `_discovered_items` rather than through
-    `find_gallery_urls`/`resolve_gallery_urls`."""
+    `find_gallery_urls`/`resolve_gallery_urls`.
+
+    None means "could not reach Chub", `[]` means "Chub has no gallery for
+    this project" -- the same distinction `resolve_gallery_url` draws, and for
+    the same reason: only the second is a fact the source ledger may record as
+    settled."""
     if not project_id:
         return []
     headers = dict(_CHUB_HEADERS)
-    token = _chub_token()
+    token = _settings_key("chubToken")
     if token:
         headers["Authorization"] = f"Bearer {token}"
     try:
@@ -269,7 +299,7 @@ def resolve_chub_gallery(client: httpx.Client, project_id: str) -> list[GalleryI
         data = response.json()
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("chub gallery fetch failed for project %s: %s", project_id, exc)
-        return []
+        return None
 
     nodes = data.get("nodes") if isinstance(data, dict) else None
     if not isinstance(nodes, list):
@@ -291,6 +321,8 @@ EXTRACTORS: tuple[Extractor, ...] = (
     Extractor("imgbb", re.compile(r"//(?:www\.)?ibb\.co(?:\.com)?/album/[a-zA-Z0-9]+"), parse=_parse_imgbb),
     Extractor("mega", re.compile(r"mega\.(?:nz|co\.nz)/folder/[A-Za-z0-9_-]+#[A-Za-z0-9_-]+"), fetch=_fetch_mega),
     Extractor("mega", re.compile(r"mega\.(?:nz|co\.nz)/#F![A-Za-z0-9_-]+![A-Za-z0-9_-]+"), fetch=_fetch_mega),
+    Extractor("civitai", media_civitai.URL_PATTERNS[0], fetch=_fetch_civitai),
+    Extractor("civitai", media_civitai.URL_PATTERNS[1], fetch=_fetch_civitai),
 )
 
 
@@ -301,8 +333,14 @@ def extractor_for(url: str) -> Extractor | None:
     return None
 
 
-def find_gallery_urls(text: str) -> list[str]:
-    """Album page URLs in a block of card text, deduplicated, order preserved."""
+def find_urls(text: str) -> list[str]:
+    """Every http(s) URL in a block of card text, deduplicated, order preserved.
+
+    Public because `discovery.enumerate_sources` needs the *unfiltered* list --
+    a URL nothing here can handle still has to be seen and recorded, which is
+    the difference between "this card has no more media" and "this card has
+    media we couldn't fetch".
+    """
     if not text:
         return []
     found: list[str] = []
@@ -310,11 +348,16 @@ def find_gallery_urls(text: str) -> list[str]:
     for match in _URL_IN_TEXT.finditer(text):
         # Markdown and prose leave punctuation glued to the end of a URL.
         url = match.group(0).rstrip(".,;:!?)}]")
-        if url in seen or extractor_for(url) is None:
+        if url in seen:
             continue
         seen.add(url)
         found.append(url)
     return found
+
+
+def find_gallery_urls(text: str) -> list[str]:
+    """Album page URLs in a block of card text, deduplicated, order preserved."""
+    return [url for url in find_urls(text) if extractor_for(url) is not None]
 
 
 def resolve_gallery_urls(client: httpx.Client, urls: Iterable[str]) -> list[GalleryImage]:
@@ -332,14 +375,28 @@ def resolve_gallery_urls(client: httpx.Client, urls: Iterable[str]) -> list[Gall
     """
     out: list[GalleryImage] = []
     for url in urls:
-        extractor = extractor_for(url)
-        if extractor is None:
-            continue
-        try:
-            if extractor.fetch is not None:
-                out.extend(extractor.fetch(client, url))
-            else:
-                out.extend(extractor.parse(_get_text(client, url)))
-        except (httpx.HTTPError, ValueError) as exc:
-            logger.warning("gallery extractor %s failed on %s: %s", extractor.id, url, exc)
+        images = resolve_gallery_url(client, url)
+        if images:
+            out.extend(images)
     return _dedupe(out)
+
+
+def resolve_gallery_url(client: httpx.Client, url: str) -> list[GalleryImage] | None:
+    """One album page's images, or None if the extractor could not reach it.
+
+    The distinction the plural form throws away, and the one the source ledger
+    needs: an album that resolves to nothing is a fact worth recording (the
+    post was reached and is empty), whereas an album that raised is a
+    transient nothing that must leave the card un-satisfied so the next run
+    tries again.
+    """
+    extractor = extractor_for(url)
+    if extractor is None:
+        return None
+    try:
+        if extractor.fetch is not None:
+            return _dedupe(extractor.fetch(client, url))
+        return _dedupe(extractor.parse(_get_text(client, url)))
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("gallery extractor %s failed on %s: %s", extractor.id, url, exc)
+        return None
