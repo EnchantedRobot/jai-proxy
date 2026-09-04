@@ -1010,6 +1010,12 @@ export interface paths {
          *     that replaces the browser scanning a card's own fields. A dry run: it
          *     finds URLs, it does not fetch them, so the UI can show a count before the
          *     user commits to a job.
+         *
+         *     Gallery sources are *listed*, not resolved, which keeps that promise: the
+         *     scan stays instant and offline. Without them a card whose gallery is a
+         *     Civitai post or a MEGA folder answered with two empty lists, and the pane
+         *     said "no remote media URLs found" over a card with forty images behind a
+         *     link -- and offered no Download button to prove otherwise.
          */
         post: operations["scan_character_media_api_v1_characters__card_id__media_scan_post"];
         delete?: never;
@@ -3117,12 +3123,44 @@ export interface components {
          *     committing to a download. `embedded` and `lorebook` are already deduped
          *     against each other -- a URL in both surfaces is reported only in
          *     `embedded`.
+         *
+         *     `sources` is why a card whose only media is a Civitai post no longer
+         *     reports itself empty: its images are real but live behind a link, so the
+         *     two URL lists are both empty and the count alone would say "nothing here"
+         *     while the download would fetch forty images.
          */
         MediaScanOut: {
             /** Embedded */
             embedded: string[];
             /** Lorebook */
             lorebook: string[];
+            /** Sources */
+            sources?: components["schemas"]["MediaScanSourceOut"][];
+        };
+        /**
+         * MediaScanSourceOut
+         * @description One gallery source on a card: an album page, a MEGA folder, a Civitai
+         *     post, the card's own Chub gallery (`chub:<project id>`) -- or a URL nothing
+         *     here can fetch.
+         *
+         *     Reported rather than resolved. Resolving means an outbound request per
+         *     source, and the scan is a preview the user is about to follow with a job
+         *     that does the same work for real; a preview that can take seconds or fail
+         *     is worse than one that says "and two galleries".
+         */
+        MediaScanSourceOut: {
+            /** Url */
+            url: string;
+            /**
+             * Handler
+             * @description Extractor id, or null when nothing here handles this URL.
+             */
+            handler: string | null;
+            /**
+             * Status
+             * @description "ready" or "unhandled".
+             */
+            status: string;
         };
         /**
          * MediaStatsOut

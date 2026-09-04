@@ -671,15 +671,36 @@ class MediaJobSubmitIn(BaseModel):
         return self
 
 
+class MediaScanSourceOut(BaseModel):
+    """One gallery source on a card: an album page, a MEGA folder, a Civitai
+    post, the card's own Chub gallery (`chub:<project id>`) -- or a URL nothing
+    here can fetch.
+
+    Reported rather than resolved. Resolving means an outbound request per
+    source, and the scan is a preview the user is about to follow with a job
+    that does the same work for real; a preview that can take seconds or fail
+    is worse than one that says "and two galleries"."""
+
+    url: str
+    handler: str | None = Field(description="Extractor id, or null when nothing here handles this URL.")
+    status: str = Field(description='"ready" or "unhandled".')
+
+
 class MediaScanOut(BaseModel):
     """`POST /characters/{id}/media/scan` -- a dry run of the same discovery
     `discover=true` jobs use, so the UI can show "43 images found" before
     committing to a download. `embedded` and `lorebook` are already deduped
     against each other -- a URL in both surfaces is reported only in
-    `embedded`."""
+    `embedded`.
+
+    `sources` is why a card whose only media is a Civitai post no longer
+    reports itself empty: its images are real but live behind a link, so the
+    two URL lists are both empty and the count alone would say "nothing here"
+    while the download would fetch forty images."""
 
     embedded: list[str]
     lorebook: list[str]
+    sources: list[MediaScanSourceOut] = Field(default_factory=list)
 
 
 class MediaJobOut(BaseModel):

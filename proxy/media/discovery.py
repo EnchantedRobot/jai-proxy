@@ -20,6 +20,7 @@ and is reused here rather than duplicated.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -151,3 +152,105 @@ def find_character_media_urls(data: dict[str, Any]) -> tuple[list[str], list[str
                 lorebook.append(url)
 
     return embedded, lorebook
+
+
+# --------------------------------------------------------------------------
+# Source enumeration -- every media source a card carries, classified, offline
+# --------------------------------------------------------------------------
+#
+# The three walks above answer "which image URLs does this card have". That is
+# strictly less than "what media does this card have", and the gap is what let
+# Civitai-linked cards look finished for months: their gallery link is neither
+# an image URL nor -- until `media/civitai.py` -- a known album page, so no
+# caller ever produced it and nothing ever recorded that it existed.
+#
+# `enumerate_sources` closes that by classifying *every* http(s) URL a card
+# carries against what this build can actually do with it, plus the one source
+# that isn't a link (a Chub-sourced card's own first-party gallery). It is pure
+# regex over strings -- no HTTP, no disk -- which is what makes it usable as the
+# planner's skip check across the whole archive.
+
+READY = "ready"
+UNHANDLED = "unhandled"
+IGNORED = "ignored"
+
+_IGNORED_REASON = "audio/video not archived"
+
+
+@dataclass(frozen=True)
+class SourceRef:
+    """One media source on a card, and what we can do about it *now*.
+
+    `key` is the URL, or `chub:<project id>` for the Chub gallery. `handler` is
+    `embedded`/`lorebook` for a direct image, an extractor id for a gallery, or
+    None when nothing here can fetch it -- and that None, recorded, is what
+    makes a card re-arm when a handler for it later exists (see
+    `manifest.sources_satisfied`).
+    """
+
+    key: str
+    handler: str | None
+    status: str
+    reason: str | None = None
+
+
+def enumerate_sources(data: dict[str, Any]) -> list[SourceRef]:
+    """Every media source on one card, first-seen order, deduped by key.
+
+    Ordering matters for classification, not for output: a URL is an image
+    first (the embedded/lorebook phases), an album page second, and unhandled
+    only if it is neither. `extract_media_urls` and `find_gallery_urls` stay
+    the authorities for those first two, so nothing here re-derives what
+    surface a URL belongs to.
+    """
+    # Imported here rather than at module scope: `extractors` imports `mega`,
+    # which imports `guard`, and `extractors` also reads settings -- none of
+    # which this module's other callers need pulled in.
+    from proxy.media import extractors
+
+    main_chunks, lorebook_chunks = collect_card_text_chunks(data)
+    embedded, lorebook = find_character_media_urls(data)
+
+    handlers: dict[str, str] = {}
+    for url in embedded:
+        handlers[url] = "embedded"
+    for url in lorebook:
+        handlers[url] = "lorebook"
+    for url in extractors.find_gallery_urls("\n".join([*main_chunks, *lorebook_chunks])):
+        handlers.setdefault(url, extractors.extractor_for(url).id)
+
+    refs: list[SourceRef] = []
+    seen: set[str] = set()
+
+    def add(ref: SourceRef) -> None:
+        if ref.key not in seen:
+            seen.add(ref.key)
+            refs.append(ref)
+
+    for chunk in [*main_chunks, *lorebook_chunks]:
+        for url in extractors.find_urls(chunk):
+            handler = handlers.get(url)
+            if handler is not None:
+                add(SourceRef(url, handler, READY))
+            elif UNSUPPORTED_EXT_RE.search(urlsplit(url).path):
+                # Seen and deliberately skipped -- the images-only policy, not
+                # a failure. Recorded so that a future policy change re-arms
+                # exactly these cards.
+                add(SourceRef(url, None, IGNORED, _IGNORED_REASON))
+            else:
+                add(SourceRef(url, None, UNHANDLED))
+
+    # A URL the image regexes found but the bare-URL scan cannot see again --
+    # a CSS `url()` value, or an `<img src>` inside an attribute the plain
+    # pattern stops short of. Never dropped just because the second pass reads
+    # the text differently from the first.
+    for url, handler in handlers.items():
+        add(SourceRef(url, handler, READY))
+
+    from proxy.sources import chub as chub_source
+
+    project_id = chub_source.card_id(data)
+    if project_id:
+        add(SourceRef(f"chub:{project_id}", "chub", READY))
+
+    return refs

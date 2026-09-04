@@ -31,6 +31,10 @@ export interface ProviderSettings {
   chubNsfw: boolean
   datacatToken: string | null
   datacatNsfw: boolean
+  /** Civitai's API key. Not a card provider -- this is read by the Civitai
+   *  gallery extractor (`proxy/media/civitai.py`) and only matters for images
+   *  Civitai hides from logged-out visitors. */
+  civitaiApiKey: string | null
   /** Creators followed on DataCat. Purely local -- DataCat has no account to
    *  sync with -- so this list *is* the feature, not a cache of one. */
   datacatFollowedCreators: FollowedCreator[]
@@ -50,6 +54,7 @@ const PROVIDER_DEFAULTS: ProviderSettings = {
   chubNsfw: true,
   datacatToken: null,
   datacatNsfw: true,
+  civitaiApiKey: null,
   datacatFollowedCreators: [],
   providerExcludeTags: {},
 }
@@ -185,7 +190,7 @@ export function useUpdateProxyUrl() {
 export function useProviderSettings(): ProviderSettings & { loaded: boolean } {
   const { data } = useSettings()
   const blob = (data ?? {}) as SettingsBlob
-  // `null` is a real stored value for the two tokens ("explicitly cleared"),
+  // `null` is a real stored value for the credentials ("explicitly cleared"),
   // so only `undefined` falls back to the default.
   const pick = <K extends keyof ProviderSettings>(
     key: K,
@@ -200,6 +205,7 @@ export function useProviderSettings(): ProviderSettings & { loaded: boolean } {
     chubNsfw: pick('chubNsfw') ?? true,
     datacatToken: pick('datacatToken') ?? null,
     datacatNsfw: pick('datacatNsfw') ?? true,
+    civitaiApiKey: pick('civitaiApiKey') ?? null,
     datacatFollowedCreators: pick('datacatFollowedCreators') ?? [],
     providerExcludeTags: pick('providerExcludeTags') ?? {},
     loaded: data !== undefined,

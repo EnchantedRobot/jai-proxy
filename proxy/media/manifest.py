@@ -8,7 +8,10 @@ folders resolve by gallery id (`gallery.resolve_folder`), so the manifest
 does too. A dotfile, so it is already excluded from every listing and scan
 (`v1.py:list_gallery_files`, `gallery.py:_scan`). It records which source URL
 became which local file (`files`), which URLs are permanently gone for *this*
-gallery specifically (`dead`), and a short history of runs.
+gallery specifically (`dead`), a short history of runs, and -- see "The source
+ledger" below -- the disposition of every media *source* the card carries
+(`sources`), which is what lets a run decide it has nothing to do without
+touching the network.
 
 **The global dead-URL ledger** (`data/state/dead_urls.json`) is the
 cross-character win: the same broken catbox link appears on dozens of cards,
@@ -31,7 +34,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from proxy.cards import edit
 from proxy.config import settings
@@ -79,6 +82,11 @@ def load_manifest(gallery_dir: Path) -> dict[str, Any]:
         data["dead"] = {}
     if not isinstance(data["runs"], list):
         data["runs"] = []
+    # `sources` is deliberately *not* defaulted here: its absence is meaningful
+    # (a manifest written before the ledger existed) and `sources_satisfied`
+    # needs to tell that apart from an empty one. See below.
+    if "sources" in data and not isinstance(data["sources"], dict):
+        del data["sources"]
     return data
 
 
@@ -111,6 +119,121 @@ def record_saved(
 
 def record_dead(manifest: dict[str, Any], url: str, reason: str, *, attempts: int = 1) -> None:
     manifest["dead"][url] = {"reason": reason, "attempts": attempts, "at": _now_iso()}
+
+
+# --------------------------------------------------------------------------
+# The source ledger -- what was seen, and what we could do about it
+# --------------------------------------------------------------------------
+#
+# `files` and `dead` answer "which image URLs became which local file, and
+# which are gone". Neither can express three things that turn out to decide
+# whether a card is finished:
+#
+#   - a gallery *root* we resolved. `files` holds a MEGA folder's decrypted
+#     children (`mega://handle/key`), never `https://mega.nz/folder/X#Y`; the
+#     same for a Civitai post, a catbox album, a Chub project.
+#   - a URL we saw and had no downloader for. This is the whole reason cards
+#     with Civitai links sat un-downloaded for months without ever looking
+#     broken: nothing recorded that the URL existed.
+#   - a URL we saw and deliberately skipped (an mp3, under the images-only
+#     policy). Not an error, not a file -- a decision.
+#
+# So `sources` records the disposition of every source a card carries, keyed
+# by URL (or `chub:<project id>` for the one source that isn't a link anyone
+# wrote). `h` is the handler id *at the time of the run*, `st` the outcome.
+# Recording the handler is what makes the ledger self-healing: when a URL
+# recorded `unhandled` gains a handler, that card -- and only that card --
+# re-arms on the next Localize all. No version stamp, no archive-wide rescan,
+# and the same mechanism covers every extractor added after this one.
+
+SOURCE_DONE = "done"
+SOURCE_UNHANDLED = "unhandled"
+SOURCE_IGNORED = "ignored"
+SOURCE_FAILED = "failed"
+
+
+def record_source(
+    manifest: dict[str, Any],
+    key: str,
+    handler: str | None,
+    status: str,
+    *,
+    count: int | None = None,
+    reason: str | None = None,
+) -> None:
+    """Note what became of one source. `count` is how many images a gallery
+    root resolved to -- informational, and the only way to see afterwards that
+    a post which resolved to nothing was actually reached."""
+    sources = manifest.setdefault("sources", {})
+    entry: dict[str, Any] = {"h": handler, "st": status, "at": _now_iso()}
+    if count is not None:
+        entry["n"] = count
+    if reason:
+        entry["r"] = str(reason)[:200]
+    sources[key] = entry
+
+
+def effective_sources(manifest: dict[str, Any], refs: "Iterable[Any]") -> dict[str, Any]:
+    """The ledger as the skip check should see it: what `files`/`dead` already
+    prove, overlaid with what runs have explicitly recorded.
+
+    A direct image URL needs no ledger entry of its own -- `files` says it was
+    saved, `dead` says it is gone, and every skip path in
+    `writer.download_item` writes one or the other. Deriving those keeps the
+    manifest from carrying the same fact twice, and means a manifest written
+    long before this ledger existed already answers for the great majority of
+    its sources.
+
+    What cannot be derived is exactly what `record_source` stores: gallery
+    roots (`files` holds their children, never them), URLs with no handler, and
+    URLs skipped by the images-only policy before any fetch. So a pre-ledger
+    card re-runs iff it has a gallery source -- once -- and everything else
+    migrates for free.
+    """
+    files = manifest["files"]
+    dead = manifest["dead"]
+    view: dict[str, Any] = {}
+    for ref in refs:
+        if ref.handler not in ("embedded", "lorebook"):
+            continue
+        if ref.key in files:
+            view[ref.key] = {"h": ref.handler, "st": SOURCE_DONE}
+        elif ref.key in dead:
+            view[ref.key] = {"h": ref.handler, "st": SOURCE_FAILED}
+
+    stored = manifest.get("sources")
+    if isinstance(stored, dict):
+        view.update(stored)
+    return view
+
+
+def sources_satisfied(manifest: dict[str, Any], refs: "Iterable[Any]") -> bool:
+    """Whether every source this card carries has already been dealt with, by
+    code no older than what is running now.
+
+    A card re-runs when any ref is unrecorded (a URL new to the card, a gallery
+    root on a pre-ledger manifest, or a fetch that failed transiently and so
+    recorded nothing), when a ref recorded `unhandled` now has a handler, or
+    when the handler that dealt with it has been replaced by a different one.
+    Everything else -- downloaded, permanently gone, deliberately ignored --
+    counts as satisfied.
+
+    The middle clause is the one that matters: it is what makes adding
+    `media/civitai.py` re-arm precisely the cards carrying Civitai links, on
+    the next ordinary Localize all, with no rescan of the archive and nothing
+    for anyone to remember to press.
+    """
+    refs = list(refs)
+    view = effective_sources(manifest, refs)
+    for ref in refs:
+        entry = view.get(ref.key)
+        if not isinstance(entry, dict):
+            return False
+        if entry.get("st") == SOURCE_UNHANDLED and ref.handler is not None:
+            return False
+        if entry.get("h") != ref.handler:
+            return False
+    return True
 
 
 def append_run(manifest: dict[str, Any], run: dict[str, Any]) -> None:

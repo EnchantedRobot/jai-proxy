@@ -85,3 +85,40 @@ def test_gallery_dir_if_present_returns_none_rather_than_creating(populated_arch
     # case, and the one where a "resolve" that creates would do damage.
     assert media_status.gallery_dir_if_present(cleo) is None
     assert not (populated_archive["galleries"] / "Cleo_CCCCCCCCCCCC").exists()
+
+
+def test_a_source_that_has_since_gained_a_handler_is_not_complete(populated_archive):
+    """The manifest-only half of `manifest.sources_satisfied`. A clean run is
+    still a clean run, but a card recording a URL nothing could fetch at the
+    time -- and that this build *can* -- must stop reporting itself finished,
+    or the browse chip and `/media/status` keep hiding exactly the cards the
+    new extractor was added for.
+
+    Manifest-only on purpose: the full check needs the card's own text, and
+    this sweep runs over every card in the archive.
+    """
+    gallery_dir = populated_archive["galleries"] / "Abbie_kzbYR2QbpncC"
+    _manifest(gallery_dir)
+    manifest = media_manifest.load_manifest(gallery_dir)
+    media_manifest.record_source(
+        manifest, "https://civitai.com/posts/1981754", None, media_manifest.SOURCE_UNHANDLED
+    )
+    media_manifest.save_manifest(gallery_dir, manifest)
+
+    entry = media_status.card_status_map(_index())["Abbie_0d162f5f.png"]
+
+    assert entry.complete is False
+
+
+def test_a_source_nothing_still_handles_leaves_the_card_complete(populated_archive):
+    gallery_dir = populated_archive["galleries"] / "Abbie_kzbYR2QbpncC"
+    _manifest(gallery_dir)
+    manifest = media_manifest.load_manifest(gallery_dir)
+    media_manifest.record_source(
+        manifest, "https://rentry.co/lore", None, media_manifest.SOURCE_UNHANDLED
+    )
+    media_manifest.save_manifest(gallery_dir, manifest)
+
+    entry = media_status.card_status_map(_index())["Abbie_0d162f5f.png"]
+
+    assert entry.complete is True

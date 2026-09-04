@@ -6,6 +6,7 @@ import {
   useScanCharacterMedia,
   useSubmitDiscoveredMedia,
 } from '@/hooks/use-media-discovery'
+import { describeScan } from '@/lib/media-scan'
 import { toast } from '@/lib/toast'
 
 /**
@@ -77,7 +78,15 @@ export function MediaDiscovery({ cardId }: { cardId: string }) {
   // --- a scan already ran ---
   if (scan.data) {
     const total = scan.data.embedded.length + scan.data.lorebook.length
-    if (total === 0)
+    // A gallery link is media the scan can see but deliberately does not
+    // resolve — it would cost an outbound request per source for a preview the
+    // user is about to follow with a job that does the same work for real. So
+    // it is counted, not opened. Before this, a card whose whole gallery was a
+    // single Civitai post reported two empty lists and got told it had nothing.
+    const galleries = (scan.data.sources ?? []).filter(
+      (s) => s.status === 'ready',
+    )
+    if (total === 0 && galleries.length === 0)
       return (
         <div className="mb-4 flex items-center gap-3 rounded-xl border border-line-soft bg-surface px-[13px] py-[11px] text-[13px] text-faint">
           No remote media URLs found in this card's text.
@@ -94,11 +103,7 @@ export function MediaDiscovery({ cardId }: { cardId: string }) {
       <div className="mb-4 flex items-center gap-3 rounded-xl border border-sage-line bg-sage-dim px-[13px] py-[11px] text-[13px]">
         <ImageDown className="size-4 flex-none text-sage" />
         <span>
-          {total} image{total === 1 ? '' : 's'} found
-          {scan.data.lorebook.length
-            ? ` (${scan.data.lorebook.length} in the lorebook)`
-            : ''}
-          .
+          {describeScan(total, scan.data.lorebook.length, galleries.length)}
         </span>
         <button
           type="button"

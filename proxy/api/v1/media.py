@@ -26,6 +26,7 @@ from proxy.api.schemas import (
     MediaJobSubmitIn,
     MediaManifestOut,
     MediaScanOut,
+    MediaScanSourceOut,
     MediaStatusEntryOut,
     MediaStatusOut,
 )
@@ -144,11 +145,22 @@ def scan_character_media(card_id: str) -> MediaScanOut:
     """Salvage item 1 (UI_REWRITE_PLAN.md §1.3, §3.4) -- the server-side walk
     that replaces the browser scanning a card's own fields. A dry run: it
     finds URLs, it does not fetch them, so the UI can show a count before the
-    user commits to a job."""
+    user commits to a job.
+
+    Gallery sources are *listed*, not resolved, which keeps that promise: the
+    scan stays instant and offline. Without them a card whose gallery is a
+    Civitai post or a MEGA folder answered with two empty lists, and the pane
+    said "no remote media URLs found" over a card with forty images behind a
+    link -- and offered no Download button to prove otherwise."""
     idx = _shared.index()
     data = _card_data(idx, card_id)
     embedded, lorebook = media_discovery.find_character_media_urls(data)
-    return MediaScanOut(embedded=embedded, lorebook=lorebook)
+    sources = [
+        MediaScanSourceOut(url=ref.key, handler=ref.handler, status=ref.status)
+        for ref in media_discovery.enumerate_sources(data)
+        if ref.handler not in ("embedded", "lorebook") and ref.status != media_discovery.IGNORED
+    ]
+    return MediaScanOut(embedded=embedded, lorebook=lorebook, sources=sources)
 
 
 @router.post("/characters/{card_id}/media", summary="Download a card's remote media")
@@ -258,20 +270,36 @@ def submit_media_job(body: MediaJobSubmitIn) -> MediaJobOut:
         # Same walk the batch uses, album pages included, so a single-card
         # "Download" and a whole-archive run can never disagree about what a
         # card's media is.
-        items = _discovered_items(_card_data(idx, body.card_id))
+        items, sources = _discovered_items(_card_data(idx, body.card_id))
     else:
         items = [{"url": i.url, "filename": i.filename} for i in body.items]
+        # A caller-supplied URL list says nothing about the card's sources, so
+        # it must not write the ledger -- claiming a gallery was dealt with on
+        # the strength of a list someone else assembled is how the ledger would
+        # start lying.
+        sources = []
     folder_name, gallery_dir = _shared.gallery_dir_for_card(idx, record)
-    job = _shared.job_store.submit(gallery_dir, folder_name, items, body.prefix, body.phase, card_id=body.card_id)
+    job = _shared.job_store.submit(
+        gallery_dir, folder_name, items, body.prefix, body.phase, card_id=body.card_id, sources=sources
+    )
     return MediaJobOut(job_id=job.id, state=job.state, total=job.total)
 
 
-def _discovered_items(data: dict) -> list[dict]:
-    """Everything a server-side scan can find for one card: the card's own
-    embedded and lorebook URLs, plus any gallery source resolved through
-    `media/extractors.py` -- external album pages linked in the card's text
-    (Stage 6B C3, the `extGallery` phase) and, for a Chub-sourced card, Chub's
-    own first-party gallery for it (Stage 6B, the `chub` extractor).
+# The prefix each gallery handler's images are saved under. Everything an
+# extractor resolves shares `extgallery`; Chub's own gallery has always had its
+# own class, and its existing files on disk are named for it.
+_GALLERY_PREFIX = {"chub": "chubgallery"}
+
+
+def _discovered_items(data: dict) -> tuple[list[dict], list[dict]]:
+    """`(items, source_records)` -- everything a server-side scan can find for
+    one card, and what became of each *source* it found.
+
+    The items are the card's own embedded and lorebook URLs plus any gallery
+    source resolved through `media/extractors.py`: external album pages linked
+    in the card's text (Stage 6B C3, the `extGallery` phase) and, for a
+    Chub-sourced card, Chub's own first-party gallery for it (Stage 6B, the
+    `chub` extractor).
 
     Gallery resolution costs at least one HTTP request, so it only runs for
     the minority of cards that actually have a source to resolve. Callers are
@@ -290,67 +318,107 @@ def _discovered_items(data: dict) -> list[dict]:
     still find the archive's existing gallery files instead of silently
     re-fetching and AES-decrypting all of them just to throw the bytes away
     at the content-hash step.
+
+    The second half of the return is the source ledger's raw material: one
+    record per source `manifest.effective_sources` can't derive from
+    `files`/`dead` -- gallery roots with what they resolved to, URLs nothing
+    here handles, and URLs the images-only policy refuses before any fetch.
+    The caller writes them (`media_manifest.record_source`) once the run that
+    used them is over, so a run that never happened records nothing.
     """
-    embedded, lorebook = media_discovery.find_character_media_urls(data)
-    items = [{"url": url, "filename": None, "prefix": "localized_media"} for url in embedded]
-    items += [{"url": url, "filename": None, "prefix": "lorebook_media"} for url in lorebook]
+    refs = media_discovery.enumerate_sources(data)
+    items: list[dict] = []
+    records: list[dict] = []
 
-    # `collect_card_text_chunks` answers (embedded, lorebook) chunk lists; an
-    # album link (or a mega folder link) can sit in either surface.
-    prose_chunks, lore_chunks = media_discovery.collect_card_text_chunks(data)
-    album_pages = media_extractors.find_gallery_urls("\n".join([*prose_chunks, *lore_chunks]))
-    chub_project_id = chub_source.card_id(data)
+    for ref in refs:
+        if ref.handler == "embedded":
+            items.append({"url": ref.key, "filename": None, "prefix": "localized_media"})
+        elif ref.handler == "lorebook":
+            items.append({"url": ref.key, "filename": None, "prefix": "lorebook_media"})
+        elif ref.status == media_discovery.IGNORED:
+            records.append(
+                {"key": ref.key, "handler": None, "status": media_manifest.SOURCE_IGNORED, "reason": ref.reason}
+            )
+        elif ref.handler is None:
+            records.append({"key": ref.key, "handler": None, "status": media_manifest.SOURCE_UNHANDLED})
 
-    if album_pages or chub_project_id:
+    gallery_refs = [r for r in refs if r.handler is not None and r.handler not in ("embedded", "lorebook")]
+    if gallery_refs:
         with net.sync_client(timeout=30.0, headers={"User-Agent": "Mozilla/5.0"}) as client:
-            if album_pages:
-                for image in media_extractors.resolve_gallery_urls(client, album_pages):
-                    items.append({"url": image.url, "filename": image.filename, "prefix": "extgallery"})
-            if chub_project_id:
-                for image in media_extractors.resolve_chub_gallery(client, chub_project_id):
-                    items.append({"url": image.url, "filename": image.filename, "prefix": "chubgallery"})
+            for ref in gallery_refs:
+                if ref.handler == "chub":
+                    images = media_extractors.resolve_chub_gallery(client, chub_source.card_id(data))
+                else:
+                    images = media_extractors.resolve_gallery_url(client, ref.key)
+                if images is None:
+                    # Unreachable, not empty -- record nothing, so the card
+                    # stays unsatisfied and the next run tries again.
+                    continue
+                prefix = _GALLERY_PREFIX.get(ref.handler, "extgallery")
+                for image in images:
+                    items.append({"url": image.url, "filename": image.filename, "prefix": prefix})
+                records.append(
+                    {
+                        "key": ref.key,
+                        "handler": ref.handler,
+                        "status": media_manifest.SOURCE_DONE,
+                        "count": len(images),
+                    }
+                )
 
     # A card can reference the same image in prose, in an album, and in its
     # own provider gallery all at once.
     seen: set[str] = set()
-    return [i for i in items if not (i["url"] in seen or seen.add(i["url"]))]
+    items = [i for i in items if not (i["url"] in seen or seen.add(i["url"]))]
+    return items, records
 
 
 def _submit_batch_job(idx, body: MediaJobSubmitIn) -> MediaJobOut:
     """Stage 6B bulk localize -- the archive-wide half of `POST /media/jobs`.
 
-    The card list is decided *here*, in the request thread, from one sweep of
-    `card_status_map`. The per-card work is not: resolving a gallery directory
-    mints a `gallery_id` and creates the folder, so doing it for every card up
-    front would leave ~3,868 empty directories behind and rewrite every card
-    that has no id yet. That work is deferred to the planner below, which the
-    worker calls one card at a time and only when there is something to fetch.
+    Every card goes to the planner; the skip decision is made there rather
+    than here. It used to be made here, from `card_status_map`'s `complete` --
+    "the last run had no errors" -- which is a statement about a *run*, not
+    about the card. A card whose run finished cleanly against a URL list that
+    never contained its Civitai gallery was, by that definition, complete
+    forever. The planner instead asks whether every source the card carries has
+    been dealt with by code no older than what is running now
+    (`manifest.sources_satisfied`), so adding an extractor re-arms exactly the
+    cards it can now handle and nothing else.
+
+    That check costs a card read and some regex, no network -- and the planner
+    is already reading the card, on a worker thread, one at a time. What is
+    still deliberately deferred to it is the expensive half: resolving a
+    gallery directory mints a `gallery_id` and creates the folder, so doing it
+    for every card up front would leave ~3,868 empty directories behind and
+    rewrite every card that has no id yet.
     """
-    status = media_status.card_status_map(idx) if body.skip_complete else {}
-    card_ids: list[str] = []
-    skipped_upfront = 0
-    for record in idx.cards():
-        entry = status.get(record.filename)
-        if body.skip_complete and entry and entry.complete:
-            skipped_upfront += 1
-        else:
-            card_ids.append(record.filename)
+    card_ids = [record.filename for record in idx.cards()]
 
     def plan(card_id: str):
         live = _shared.index()
         record = _shared.require(live, card_id)
         data = _card_data(live, card_id)
-        items = _discovered_items(data)
-        if not items:
-            # No media on this card -- return before `gallery_dir_for_card`,
-            # which would otherwise create an empty folder for it.
+
+        if body.skip_complete:
+            gallery_dir = media_status.gallery_dir_if_present(record)
+            if gallery_dir is not None:
+                manifest = media_manifest.load_manifest(gallery_dir)
+                if media_manifest.sources_satisfied(manifest, media_discovery.enumerate_sources(data)):
+                    return None
+
+        items, sources = _discovered_items(data)
+        if not items and not sources:
+            # No media on this card at all -- return before
+            # `gallery_dir_for_card`, which would otherwise create an empty
+            # folder for it. A card with sources but no items (every gallery
+            # unreachable, or only unhandled URLs) still gets a folder, because
+            # recording that is the point.
             return None
         folder_name, gallery_dir = _shared.gallery_dir_for_card(live, record)
-        return folder_name, gallery_dir, items
+        return folder_name, gallery_dir, items, sources
 
-    job = _shared.job_store.submit_batch(
-        card_ids, body.prefix, body.phase, plan=plan, skipped_upfront=skipped_upfront
-    )
+    job = _shared.job_store.submit_batch(card_ids, body.prefix, body.phase, plan=plan)
     return MediaJobOut(job_id=job.id, state=job.state, total=job.total)
 
 
